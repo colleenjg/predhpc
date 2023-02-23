@@ -1,2 +1,2 @@
-# pred-hpc
+# predhpc
 Hippocampus prediction network

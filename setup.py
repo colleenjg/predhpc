@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
 setup(
-    name='pred-hpc',
+    name='predhpc',
     packages=find_packages(),
 )
