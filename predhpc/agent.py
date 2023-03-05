@@ -138,15 +138,49 @@ class ResetAgent(Agent.Agent):
         traj_leng_to_date = self.get_trajectory_lengths_to_date()
         util.plot_trajectory_lengths(dt=self.dt, trajectory_lengths=traj_leng_to_date, in_min=in_min)
 
+   
+    def get_reset_times(self):
+        """Get the reset times. 
+
+        Returns:
+            list: Reset times.
+
+        Raises:
+            ValueError: If agent does not have reset steps.
+        """
+
+        if hasattr(self, "reset_steps"):
+            if len(self.reset_steps) == 0:
+                reset_times = np.array([])
+            else:
+                reset_times = np.cumsum(self.reset_steps) * self.dt
+        else:
+            raise ValueError("Agent does not have reset steps.")
+        
+        return reset_times
+   
+
+    def check_end(self):
+        """Check if the agent has reached the end of its trajectory.
+
+        Returns:
+            bool: Whether the agent has reached the end of its trajectory.
+        """
+
+        if self.trajectory_length is not None:
+            if self.curr_trajectory_length >= self.trajectory_length:
+                return True
+        return False
+
+   
     def update(self, **kwargs):
         """Update the agent, optionally with a new position and velocity.
         
         See Agent.update() in ratinabox/agent.py for kwargs.
         """
 
-        if self.trajectory_length is not None:
-            if self.curr_trajectory_length >= self.trajectory_length:
-                self.reset()
+        if self.check_end():
+            self.reset()
         
         super().update(**kwargs)
 
