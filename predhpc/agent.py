@@ -10,7 +10,7 @@ from ratinabox import Agent
 from predhpc import util
 
 
-class ResetAgent(Agent.Agent):
+class ResetAgent(Agent):
     ### Extend the agent so that is has an optimal maximum trajectory length after which is resets to a random location
 
 

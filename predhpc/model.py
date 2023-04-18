@@ -14,7 +14,7 @@ class TorchNeuronModel(torch.nn.Module):
         
         super().__init__()
         
-        self.seq_neuron_layers = seq_neuron_layers # should feed into each other exactly
+        self.seq_neuron_layers = seq_neuron_layers # should feed into each other sequentially
         
         self.seq_layers = []
         for n, neuron_layer in enumerate(self.seq_neuron_layers):
@@ -155,7 +155,6 @@ class PredHPC(torch.nn.Module):
         pred = F.relu(self.CA1_dend_decoder(self.CA1))
 
         return pred
-
 
 
 def save_model(model, filepath="model.pth.tar", epoch_n=0, optimizer=None):
@@ -306,7 +305,6 @@ def predict(model, X):
     return pred.to("cpu").detach().numpy()
 
 
-
 def get_pred_step_idx(n, pred_step=1, prop_val=0.2, ordered=True, min_ex=10):
     """Returns indices for training and validation sets.
     """
@@ -354,7 +352,6 @@ def get_idx(n, prop_val=0.2, ordered=True):
     train_mask = ~val_mask
 
     return train_mask, val_mask
-
 
 
 def get_dls(X, y=None, pred_step=0, batch_size=32, prop_val=0.2, ordered=True):

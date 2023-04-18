@@ -1,0 +1,10 @@
+matplotlib
+numpy
+pandas
+ratinabox
+scikit-learn
+seaborn
+tqdm
+
+torch
+torchsummary
