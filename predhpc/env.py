@@ -3,6 +3,8 @@ import copy
 from ratinabox import Environment
 from ratinabox import utils as rat_utils
 
+from predhpc import util
+
 DEFAULT_PARAMS = {
     "dimensionality": "2D",  # 1D or 2D environment
     "boundary_conditions": "solid",  # solid vs periodic
@@ -12,11 +14,13 @@ DEFAULT_PARAMS = {
 }
 
 class NewEnv(Environment):
-    def __init__(self, params=dict()):
+    def __init__(self, params=dict(), check_attributes=True):
     
         use_params = copy.deepcopy(DEFAULT_PARAMS)
         use_params.update(params)
 
         super().__init__(use_params)
+        if check_attributes:
+            util.check_attributes(self, params.keys())
 
     
