@@ -1,6 +1,7 @@
 
 import warnings
 
+import copy
 from matplotlib import pyplot as plt
 from matplotlib import colors as mcolors
 import numpy as np
@@ -12,10 +13,29 @@ from predhpc import util
 
 
 class ResetAgent(Agent):
-    ### Extend the agent so that is has an optimal maximum trajectory length after which is resets to a random location
+    """Extend the agent so that is has an optimal maximum trajectory length after which is resets to a random location
+    
+    default_params = {
+        "trajectory_length": None, # int or iterable of ints
+        "n_traj": None, # number of trajectory lengths to sample
+        "exp": None, # exponential factors for trajectory_length (inv. scale, rate, minimum). Defaults to None.
+        "rand": None, # max value for randomizing trajectory_length
+        "reset_pos": (None, None), # position to reset (from, to)
+    }
+    """
 
+    default_params = {
+        "trajectory_length": None, # int or iterable of ints
+        "n_traj": None, # number of trajectory lengths to sample
+        "exp": None, # exponential factors for trajectory_length (inv. scale, rate, minimum). Defaults to None.
+        "rand": None, # max value for randomizing trajectory_length
+        "start_pos": None, # position to start trajectories from
+        "reset_pos": None, # position to reset trajectories from
+        "reset_tolerance_prop": 0.5, # proportion of dt to use as reset tolerance
+        "fixed_direction": False, # keep same direction (1D environment only)
+    }
 
-    def __init__(self, Environment, params={}, check_attributes=True):
+    def __init__(self, Environment, params={}):
         """Initialise the agent.
 
         Args:
@@ -24,33 +44,12 @@ class ResetAgent(Agent):
 
         Raises:
             ValueError: If passing iterable for trajectory_length, must have length > 0.
-
-        default_params = {
-            "trajectory_length": None, # int or iterable of ints
-            "n_traj": None, # number of trajectory lengths to sample
-            "exp": None, # exponential factors for trajectory_length (inv. scale, rate, minimum). Defaults to None.
-            "rand": None, # max value for randomizing trajectory_length
-            "reset_pos": (None, None), # position to reset (from, to)
-        }
         """
 
-        default_params = {
-            "trajectory_length": None, # int or iterable of ints
-            "n_traj": None, # number of trajectory lengths to sample
-            "exp": None, # exponential factors for trajectory_length (inv. scale, rate, minimum). Defaults to None.
-            "rand": None, # max value for randomizing trajectory_length
-            "start_pos": None, # position to start trajectories from
-            "reset_pos": None, # position to reset trajectories from
-            "reset_tolerance_prop": 0.5, # proportion of dt to use as reset tolerance
-            "fixed_direction": False, # keep same direction (1D environment only)
-        }
-
-        self.params = default_params
+        self.params = copy.deepcopy(__class__.default_params)     
         self.params.update(params)
 
         super().__init__(Environment, self.params)
-        if check_attributes:
-            util.check_attributes(self, params.keys())
 
         if self.save_history is False:
             raise NotImplementedError(
@@ -219,28 +218,29 @@ class ResetAgent(Agent):
 
         if pos is not None:
             self.pos = pos
-        if velocity is not None:
-            self.velocity = np.array([velocity])
 
         if self.Environment.dimensionality == "2D":
             if pos is None:
                 self.pos = self.Environment.sample_positions(n=1, method="random")[0]
+            direction = np.random.uniform(0, 2 * np.pi)
             if velocity is None:
-                direction = np.random.uniform(0, 2 * np.pi)
-                self.velocity = self.speed_std * np.array(
-                    [np.cos(direction), np.sin(direction)]
-                )
+                velocity = self.speed_std              
+            self.velocity = velocity * np.array(
+                [np.cos(direction), np.sin(direction)]
+            )
             self.rotational_velocity = 0
 
         if self.Environment.dimensionality == "1D":
             if pos is None:
                 self.pos = self.Environment.sample_positions(n=1, method="random")[0]
             if velocity is None:
-                self.velocity = np.array([self.speed_mean])
+                self.velocity = np.array([self.speed_mean]).reshape(1)
+            else:
+                self.velocity = np.array([velocity]).reshape(1)
             if self.Environment.boundary_conditions == "solid":
                 if self.speed_mean != 0:
                     warnings.warn(
-                        "Warning: You have solid 1D boundary conditions and non-zero speed mean. "
+                        "Warning: You have solid 1D boundary conditions and non-zero speed mean."
                     )
     
         self.fix_velocity_record()
@@ -383,6 +383,7 @@ class ResetAgent(Agent):
         ax=None,
         alpha=0.6,
         color="k",
+        ms=50,
     ):
 
         """Plots the trajectory between t_start (seconds) and t_end (defaulting to the last time available)
@@ -433,20 +434,22 @@ class ResetAgent(Agent):
         alpha /= self.Environment.D
         alpha_pts = 0.9 / self.Environment.D
         for i in range(self.Environment.D):
-            ax.plot(time, pos, lw=1, alpha=alpha, marker=".", color=color)
+            ax.scatter(time, pos, alpha=alpha, marker=".", color=color, s=ms/5)
             
             if n_reached:
-                x_start = [t[x] for x in self.reached_reset_pos]
-                y_start = [self.start_pos[i]] * n_reached
-                ax.plot(
-                    x_start, y_start, marker="o", color="blue", lw=0, alpha=alpha_pts
-                    )
+                if self.start_pos is not None:
+                    x_start = [t[x] for x in self.reached_reset_pos]
+                    y_start = [self.start_pos[i]] * n_reached
+                    ax.scatter(
+                        x_start, y_start, marker=".", color="blue", alpha=alpha_pts, s=ms
+                        )
                 
-                x_reset = [t[x - 1] for x in self.reached_reset_pos]
-                y_reset = [self.reset_pos[i]] * n_reached
-                ax.plot(
-                    x_reset, y_reset, marker="x", color="red", lw=0, alpha=alpha_pts
-                    )
+                if self.reset_pos is not None:
+                    x_reset = [t[x - 1] for x in self.reached_reset_pos]
+                    y_reset = [self.reset_pos[i]] * n_reached
+                    ax.scatter(
+                        x_reset, y_reset, marker="x", color="red", alpha=alpha_pts, s=ms/3
+                        )
 
         ax.set_xlabel("Time / min")
         ax.set_ylabel("Position / m")
