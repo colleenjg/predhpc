@@ -51,11 +51,6 @@ class ResetAgent(Agent):
 
         super().__init__(Environment, self.params)
 
-        if self.save_history is False:
-            raise NotImplementedError(
-                "ResetAgent currently requires history to be saved."
-                )
-
         if self.Environment.dimensionality == "2D":
             self.fixed_direction = False
         elif self.fixed_direction:
@@ -71,7 +66,6 @@ class ResetAgent(Agent):
         self.reset_steps = []
         self.set_start_reset_pos()
         self.set_trajectory_lengths()
-
 
 
     def set_start_reset_pos(self):
@@ -102,6 +96,8 @@ class ResetAgent(Agent):
                     raise ValueError("If passing iterable, must have length > 0.")
                 self.trajectory_lengths = self.trajectory_length
                 self.trajectory_length = self.trajectory_lengths[0]
+        
+        self.num_steps_total = 0
 
 
     def set_pos(self, pos):
@@ -166,7 +162,7 @@ class ResetAgent(Agent):
 
         self.save_velocity = self.velocity
 
-        if self.save_to_history is True:
+        if self.save_history is True and len(self.history["vel"]):
             self.history["vel"][-1] = list(self.save_velocity)
             if self.Environment.dimensionality == "2D":
                 self.history["rot_vel"][-1] = self.rotational_velocity
@@ -344,7 +340,7 @@ class ResetAgent(Agent):
 
         if self.reset_pos is not None and self.check_reset_pos():
             # record the time step at which the agent reached the reset position
-            self.reached_reset_pos.append(len(self.history["t"]))
+            self.reached_reset_pos.append(self.num_steps_total)
             return True
 
         if self.trajectory_length is not None:
@@ -372,6 +368,7 @@ class ResetAgent(Agent):
             self.check_fix_velocity(prev_velocity=prev_velocity, dt=dt)
 
         self.curr_trajectory_length += 1
+        self.num_steps_total += 1
 
 
     def plot_trajectory_resets(
