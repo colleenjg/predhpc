@@ -25,6 +25,7 @@ class ResetAgent(Agent):
     """
 
     default_params = {
+        "dt": 0.01, # time step, in seconds
         "trajectory_length": None, # int or iterable of ints
         "n_traj": None, # number of trajectory lengths to sample
         "exp": None, # exponential factors for trajectory_length (inv. scale, rate, minimum). Defaults to None.
@@ -250,14 +251,11 @@ class ResetAgent(Agent):
 
         self.set_pos_vel(pos=self.start_pos, velocity=0)
         
+        self.reset_steps.append(self.curr_trajectory_length)
         if self.trajectory_lengths is not None:
-            self.reset_steps.append(self.curr_trajectory_length)
             i = len(self.reset_steps) % len(self.trajectory_lengths)
             self.trajectory_length = self.trajectory_lengths[i]
-
-        elif self.trajectory_length is not None:
-            self.reset_steps.append(self.curr_trajectory_length)
-        
+       
         self.curr_trajectory_length = 0
 
         return
@@ -280,6 +278,28 @@ class ResetAgent(Agent):
         """
         traj_leng_to_date = self.get_trajectory_lengths_to_date()
         print(f"Trajectory lengths ({len(traj_leng_to_date)}) to date (in steps): {traj_leng_to_date}")
+
+
+    def log_trajectory_stats_to_date(self, time=True):
+        """Log the trajectory length statistics to date.        
+        """
+
+        traj_leng_to_date = self.get_trajectory_lengths_to_date()
+        traj_length_unit = "steps"
+
+        # get trajectory lengths in seconds
+        if time:
+            traj_leng_to_date = [leng * self.dt for leng in traj_leng_to_date]
+            traj_length_unit = "sec"
+            if np.mean(traj_leng_to_date) / 60 > 2:
+                traj_leng_to_date = [leng / 60 for leng in traj_leng_to_date]
+                traj_length_unit = "min"    
+
+        # get trajectory length statistics
+        traj_leng_to_date_mean = np.mean(traj_leng_to_date)
+        traj_leng_to_date_std = np.std(traj_leng_to_date)
+
+        print(f"Trajectory lengths ({len(traj_leng_to_date)}) to date: {traj_leng_to_date_mean:.2f} +/- {traj_leng_to_date_std:.2f} {traj_length_unit} each")
 
 
     def plot_trajectories_to_date(self, in_min=True):
@@ -448,7 +468,7 @@ class ResetAgent(Agent):
                         x_reset, y_reset, marker="x", color="red", alpha=alpha_pts, s=ms/3
                         )
 
-        ax.set_xlabel("Time / min")
+        ax.set_xlabel("Time / sec")
         ax.set_ylabel("Position / m")
             
         bottom = min_y - diff * 0.1
