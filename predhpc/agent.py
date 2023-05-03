@@ -7,9 +7,9 @@ from matplotlib import colors as mcolors
 import numpy as np
 import seaborn as sns
 from ratinabox import Agent
-from ratinabox import utils as rat_utils
+from ratinabox import utils as rutils
 
-from predhpc import util
+from predhpc import util, plot_util
 
 
 class ResetAgent(Agent):
@@ -188,7 +188,7 @@ class ResetAgent(Agent):
         new_velocity = self.velocity
         for _ in range(10):
             if new_velocity < 0: # resample velocity until it is positive
-                new_velocity = prev_velocity + rat_utils.ornstein_uhlenbeck(
+                new_velocity = prev_velocity + rutils.ornstein_uhlenbeck(
                     dt=dt,
                     x=prev_velocity,
                     drift=self.speed_mean,
@@ -237,7 +237,7 @@ class ResetAgent(Agent):
             if self.Environment.boundary_conditions == "solid":
                 if self.speed_mean != 0:
                     warnings.warn(
-                        "Warning: You have solid 1D boundary conditions and non-zero speed mean."
+                        "solid 1D boundary conditions and non-zero speed mean."
                     )
     
         self.fix_velocity_record()
@@ -310,7 +310,7 @@ class ResetAgent(Agent):
         """
 
         traj_leng_to_date = self.get_trajectory_lengths_to_date()
-        util.plot_trajectory_lengths(dt=self.dt, trajectory_lengths=traj_leng_to_date, in_min=in_min)
+        plot_util.plot_trajectory_lengths(dt=self.dt, trajectory_lengths=traj_leng_to_date, in_min=in_min)
 
    
     def get_reset_times(self):
@@ -426,6 +426,8 @@ class ResetAgent(Agent):
         startid = np.argmin(np.abs(t - (t_start)))
         endid = np.argmin(np.abs(t - (t_end)))
         skiprate = max(1, int((1 / framerate) / dt))
+
+        t = t / 60 # minutes
         time = t[startid:endid][::skiprate]
         pos = pos[startid:endid][::skiprate]
 
@@ -451,7 +453,7 @@ class ResetAgent(Agent):
         alpha /= self.Environment.D
         alpha_pts = 0.9 / self.Environment.D
         for i in range(self.Environment.D):
-            ax.scatter(time, pos, alpha=alpha, marker=".", color=color, s=ms/5)
+            ax.scatter(time, pos, alpha=alpha, marker=".", color=color, s=ms/10)
             
             if n_reached:
                 if self.start_pos is not None:
@@ -468,7 +470,7 @@ class ResetAgent(Agent):
                         x_reset, y_reset, marker="x", color="red", alpha=alpha_pts, s=ms/3
                         )
 
-        ax.set_xlabel("Time / sec")
+        ax.set_xlabel("Time / min")
         ax.set_ylabel("Position / m")
             
         bottom = min_y - diff * 0.1

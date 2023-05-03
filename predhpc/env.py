@@ -1,7 +1,7 @@
 import copy
 
 from ratinabox import Environment
-from ratinabox import utils as rat_utils
+from ratinabox import utils as rutils
 
 from predhpc import util
 
