@@ -31,13 +31,15 @@ CA3_PC_PARAMS = {
     "min_fr": 0,
     "max_fr": 10,
     "color": "C5",
-    "widths": AGENT_PARAMS["dt"] * 5,
+    "widths": DT * 5,
 }
 
 CA1_PARAMS = {
     "name": "CA1_BTSP",
     "color": "C2",
     "biases": None,
+    "init_weights_zero": False,
+    "w_init_scale": 0.1, # set fairly small
     "lr": 1e-4,
     "btsp_tau": DT * 8,
     "btsp_fr": 10,
@@ -99,12 +101,12 @@ def plot_time_info(Ag, CA3_PCs, CA1s):
     Ag.plot_trajectory_resets(framerate=1/Ag.dt, fig=fig, ax=ax[0])
     ax[0].set_title("Trajectories")
 
-    CA1s.plot_rate_timeseries(chosen_neurons="all", spikes=True, fig=fig, ax=ax[1], shift=-10, overlap=1)
-    ax[1].set_title("CA1 rate timeseries")
-    
     CA3_PCs.plot_rate_timeseries(chosen_neurons="all", spikes=True, fig=fig, ax=ax[2])
     ax[2].set_title("CA3 rate timeseries")
 
+    CA1s.plot_rate_timeseries(chosen_neurons="all", spikes=True, fig=fig, ax=ax[1], shift=-10, overlap=1)
+    ax[1].set_title("CA1 rate timeseries")
+    
     for ax_ in ax.ravel()[:-1]:
         ax_.set_xlabel("")
 
@@ -171,14 +173,14 @@ def learn_1D_btsp(env_params, agent_params, CA3_PC_params, CA1_params, num_rwd=2
 
     plot_time_info(Ag, CA3_PCs, CA1s)
     
-    return Env, Ag, CA1s, CA3_PCs
+    return Env, Ag, CA3_PCs, CA1s
 
 
 
 
 if __name__ == "__main__":
 
-    Env, Ag, CA1s, CA3_PCs = learn_1D_btsp(
+    Env, Ag, CA3_PCs, CA1s = learn_1D_btsp(
         ENV_PARAMS, AGENT_PARAMS, CA3_PC_PARAMS, CA1_PARAMS
         )
 

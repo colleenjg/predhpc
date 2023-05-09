@@ -6,10 +6,10 @@ from matplotlib import pyplot as plt
 from matplotlib import colors as mcolors
 import numpy as np
 import seaborn as sns
-from ratinabox import Agent
+from ratinabox import Agent, Environment
 from ratinabox import utils as rutils
 
-from predhpc import util, plot_util
+from predhpc import env, util, plot_util
 
 
 class ResetAgent(Agent):
@@ -36,11 +36,11 @@ class ResetAgent(Agent):
         "fixed_direction": False, # keep same direction (1D environment only)
     }
 
-    def __init__(self, Environment, params={}):
+    def __init__(self, Env, params={}):
         """Initialise the agent.
 
         Args:
-            Environment (Environment): The environment in which the agent is placed.
+            Env (Environment): The environment in which the agent is placed.
             params (dict, optional): Parameters for the agent. Defaults to {}.
 
         Raises:
@@ -50,7 +50,7 @@ class ResetAgent(Agent):
         self.params = copy.deepcopy(__class__.default_params)     
         self.params.update(params)
 
-        super().__init__(Environment, self.params)
+        super().__init__(Env, self.params)
 
         if self.Environment.dimensionality == "2D":
             self.fixed_direction = False
@@ -102,7 +102,7 @@ class ResetAgent(Agent):
 
 
     def set_pos(self, pos):
-        """Check that start_pos and end_pos are of the correct length, and 
+        """Check that start_pos and reset_pos are of the correct length, and 
         reshape if needed.
         """
 
@@ -498,6 +498,8 @@ class ResetAgent(Agent):
         plot_traj_ends=True,
         cmap_per=False,
         scale_cmap_per=False,
+        ms_2D=15,
+        size_fact=None,
     ):
 
         """Plots the trajectory between t_start (seconds) and t_end (defaulting to the last time available)
@@ -519,6 +521,7 @@ class ResetAgent(Agent):
             • plot_traj_ends: plot a point at the end of each trajectory
             • cmap_per: if True, the colormap is used to set the color for each time point. Otherwise, each trajectory has its own color.
             • scale_cmap_per: if True, and cmap_per is True, the full range of the colormap is used for each trajectory, regardless of its length
+            • ms_2D: the size of the points in the 2D plot is set to this value.
         
         Returns:
             fig, ax
@@ -564,7 +567,7 @@ class ResetAgent(Agent):
             
             traj_idx = np.concatenate(traj_idx).astype(int)[startid : endid][::skiprate]
         else:
-            cmap_vals = 0.5
+            cmap_vals = np.asarray([0.5])
             traj_idx = np.zeros(len(trajectory))
         
         if colormap is None:
@@ -573,20 +576,27 @@ class ResetAgent(Agent):
         ##############################
 
         if self.Environment.dimensionality == "2D":
-            fig, ax = self.Environment.plot_environment(fig=fig, ax=ax)
-            s = 15 * np.ones_like(time)
-            if decay_point_size == True:
-                s = 15 * np.exp((time - time[-1]) / 10)
-                s[(time[-1] - time) > 15] *= 0
+            if size_fact is not None:
+                extent = self.Environment.extent
+                x_base = extent[1] - extent[0]
+                y_base = extent[3] - extent[2]
+                figsize = (size_fact * x_base, size_fact * y_base)
+                fig, ax = plt.subplots(figsize=figsize)
 
-            if plot_traj_ends == True:
+            fig, ax = self.Environment.plot_environment(fig=fig, ax=ax)
+            s = ms_2D * np.ones_like(time)
+            if decay_point_size == True:
+                s = ms_2D * np.exp((time - time[-1]) / 10)
+                s[(time[-1] - time) > ms_2D] *= 0
+
+            if plot_traj_ends == True and len(self.reset_steps):
                 ends = np.where(np.diff(traj_idx) > 0)[0]
                 ends = np.append(ends, len(trajectory) - 1)
-                s[ends] = 30
+                s[ends] = ms_2D * 2
                 c[ends] = mcolors.to_rgba("darkred") ### set last colormap value to black
 
             if plot_agent == True:
-                s[-1] = 40
+                s[-1] = ms_2D * 2.75
                 c[-1] = mcolors.to_rgba("r") ### set last colormap value to red
 
             ax.scatter(
@@ -739,4 +749,158 @@ class ResetAgent(Agent):
                     fig.patch.set_facecolor(background_color)
 
         return fig, ax
+
+
+
+class TAgent(ResetAgent, util.ParamsMixin):
+    """Extend the reset agent so that it operates in a T maze
     
+    """
+
+    default_params = dict()
+
+    ignored_param_keys = ["reset_pos", "start_pos"]
+    ignored_params = {key: None for key in ignored_param_keys}
+
+    fixed_params = dict()
+
+    def __init__(self, Env, params={}):
+        """Initialise the agent.
+
+        Args:
+            params (dict, optional): Parameters for the agent. Defaults to {}.
+
+        Raises:
+            ValueError: If passing iterable for trajectory_length, must have length > 0.
+        """
+
+        self.check_ignored_params(params)
+
+        self.params = copy.deepcopy(__class__.default_params)     
+        self.params.update(params)
+
+        if not isinstance(Env, env.TEnv):
+            raise TypeError("Env must be a TEnv object.")
+
+        self.set_fixed_params()
+        self.params["reset_pos"] = [Env.left_T_end, Env.right_T_end]
+        self.params["start_pos"] = Env.T_start
+
+        super().__init__(Env, self.params)
+
+        self.set_target()
+        self.left_reset_pos = Env.left_T_end
+        self.right_reset_pos = Env.right_T_end
+
+
+    @property
+    def at_branch(self):
+
+        return self.pos[1] > self.Environment.branch_y
+    
+    def get_direction(self):
+
+        if self.target == "left":
+            target = self.Environment.left_T_end
+        
+        elif self.target == "right":
+            target = self.Environment.right_T_end
+
+        else:
+            raise RuntimeError("Target must be 'left' or 'right'.")
+
+        direction = np.asarray(target) - self.pos
+
+        return direction
+
+
+
+    def update(self, dt=None, speed_fact=3, drift_to_random_strength_ratio=0.7, **kwargs):
+        """Update the agent, optionally with a new position and velocity.
+        
+        See Agent.update() in ratinabox/agent.py for kwargs.
+        """
+
+        if self.check_end():
+            self.reset()
+
+        # calculate drift_velocity
+        if self.at_branch:
+            direction = self.get_direction()
+        else:
+            direction = self.Environment.T_split - self.pos
+        drift_velocity = speed_fact * self.speed_mean * (direction / np.linalg.norm(direction))
+
+        super().update(
+            dt=dt, 
+            drift_velocity=drift_velocity,
+            drift_to_random_strength_ratio=drift_to_random_strength_ratio,
+            **kwargs
+            )
+
+
+    def set_target(self):
+        """Reset the agent to a random location.
+        """
+
+        # randomly choose a target
+        self.target = np.random.choice(["left", "right"])
+
+        if not hasattr(self, "trajectory_targets"):
+            self.trajectory_targets = []    
+        self.trajectory_targets.append(self.target)
+
+        return
+
+
+    def reset(self):
+        """Reset the agent to a random location.
+        """
+
+        super().reset()
+
+        self.set_target()
+
+        return
+
+
+    def set_start_reset_pos(self):
+        self.start_pos = self.set_pos(self.start_pos)
+        self.reset_pos = [
+            self.set_pos(reset_pos) for reset_pos in self.reset_pos
+            ]
+        self.reached_reset_pos = []
+        if self.start_pos is not None:
+            self.set_pos_vel(pos=self.start_pos, velocity=0)
+
+
+    def check_reset_pos(self, pos="both"):
+        """Check if the agent has reached either of the reset positions.
+        
+        Returns: Whether the agent has reached either of the reset positions.
+        """
+
+        # calculate the distance between the current position and the reset position
+        if pos == "both":
+            dist = min(
+                [np.linalg.norm(self.pos - reset_pos) for reset_pos in self.reset_pos]
+            )
+        elif pos == "left":
+            dist = np.linalg.norm(self.pos - self.left_reset_pos)
+        elif pos == "right":
+            dist = np.linalg.norm(self.pos - self.right_reset_pos)
+        else:
+            raise ValueError("pos must be 'both', 'left', or 'right'.")
+
+        # check if the distance is less than the tolerance
+        if dist < self.dt * self.reset_tolerance_prop:
+            return True
+
+        return False
+    
+
+    def check_left_reset_pos(self):
+        return self.check_reset_pos(pos="left")
+
+    def check_right_reset_pos(self):
+        return self.check_reset_pos(pos="right")
