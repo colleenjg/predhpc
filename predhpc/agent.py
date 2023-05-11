@@ -32,7 +32,10 @@ class ResetAgent(Agent):
         "rand": None, # max value for randomizing trajectory_length
         "start_pos": None, # position to start trajectories from
         "reset_pos": None, # position to reset trajectories from
+        "target_pos": None, # position to use as target
+        "target_wait": 100, # number of steps to wait between target reaching
         "reset_tolerance_prop": 0.5, # proportion of dt to use as reset tolerance
+        "target_tolerance_prop": 0.5, # proportion of dt to use as target tolerance
         "fixed_direction": False, # keep same direction (1D environment only)
     }
 
@@ -64,20 +67,33 @@ class ResetAgent(Agent):
                     "Fixed direction not implemented for periodic boundary conditions."
                     )
 
-        self.reset_steps = []
-        self.set_start_reset_pos()
+        self.act_trajectory_lengths = []
+        self.set_all_pos()
         self.set_trajectory_lengths()
 
 
-    def set_start_reset_pos(self):
+    def set_all_pos(self):
+        """Set all positions, checking that they are within the environment
+        extent.
+        """
+
         self.start_pos = self.set_pos(self.start_pos)
         self.reset_pos = self.set_pos(self.reset_pos)
+        self.target_pos = self.set_pos(self.target_pos)
+
         self.reached_reset_pos = []
+        self.reached_target_pos = []
+
         if self.start_pos is not None:
             self.set_pos_vel(pos=self.start_pos, velocity=0)
+        self.target_wait = 0
 
 
     def set_trajectory_lengths(self):
+        """Set the trajectory lengths, either from the passed value, or by
+        sampling from the exponential distribution.
+        """
+
         if self.trajectory_length is not None:
             self.n_traj = None
             self.exp = None
@@ -251,9 +267,9 @@ class ResetAgent(Agent):
 
         self.set_pos_vel(pos=self.start_pos, velocity=0)
         
-        self.reset_steps.append(self.curr_trajectory_length)
+        self.act_trajectory_lengths.append(self.curr_trajectory_length)
         if self.trajectory_lengths is not None:
-            i = len(self.reset_steps) % len(self.trajectory_lengths)
+            i = len(self.act_trajectory_lengths) % len(self.trajectory_lengths)
             self.trajectory_length = self.trajectory_lengths[i]
        
         self.curr_trajectory_length = 0
@@ -267,9 +283,9 @@ class ResetAgent(Agent):
         Returns:
             list: Trajectory lengths to date.
         """
-        traj_leng_to_date = self.reset_steps
+        traj_leng_to_date = self.act_trajectory_lengths
         if self.curr_trajectory_length > 0:
-            traj_leng_to_date = self.reset_steps + [self.curr_trajectory_length]
+            traj_leng_to_date = self.act_trajectory_lengths + [self.curr_trajectory_length]
         return traj_leng_to_date
 
 
@@ -323,16 +339,38 @@ class ResetAgent(Agent):
             ValueError: If agent does not have reset steps.
         """
 
-        if hasattr(self, "reset_steps"):
-            if len(self.reset_steps) == 0:
+        if hasattr(self, "act_trajectory_lengths"):
+            if len(self.act_trajectory_lengths) == 0:
                 reset_times = np.array([])
             else:
-                reset_times = np.cumsum(self.reset_steps) * self.dt
+                reset_times = np.cumsum(self.act_trajectory_lengths) * self.dt
         else:
             raise ValueError("Agent does not have reset steps.")
         
         return reset_times
    
+
+    def check_pos(self, target_pos=None, tolerance_prop=0.5):
+        """Check if the agent has reached the target position.
+
+        Args:
+            target_pos (np.array): Target position.
+            tolerance_prop (float): Tolerance proportion, wrt self.dt.
+        
+        Returns:
+            bool: Whether the agent has reached the target position.
+        """
+
+        if target_pos is not None:
+            # calculate the distance between the current position and the reset position
+            dist = np.linalg.norm(self.pos - target_pos)
+
+            # check if the distance is less than the tolerance
+            if dist < self.dt * tolerance_prop:
+                return True
+    
+        return False
+
 
     def check_reset_pos(self):
         """Check if the agent has reached the reset position.
@@ -340,44 +378,85 @@ class ResetAgent(Agent):
         Returns: Whether the agent has reached the reset position.
         """
 
-        if self.reset_pos is not None:
-            # calculate the distance between the current position and the reset position
-            dist = np.linalg.norm(self.pos - self.reset_pos)
-
-            # check if the distance is less than the tolerance
-            if dist < self.dt * self.reset_tolerance_prop:
-                return True
-
-        return False
+        return self.check_pos(self.reset_pos, self.reset_tolerance_prop)
 
 
-    def check_end(self):
+    def check_target_pos(self):
+        """Check if the agent has reached the target position.
+        
+        Returns: Whether the agent has reached the target position.
+        """
+
+        if self.target_pos is None:
+            return 
+        
+        if self.target_wait > 0:
+            self.target_wait -= 1
+            return False
+
+        else:
+            target_reached = self.check_pos(self.target_pos, self.target_tolerance_prop)
+            if target_reached:
+                self.target_wait = 100
+            return target_reached
+
+
+    def _check_end(self):
         """Check if the agent has reached the end of its trajectory.
 
         Returns:
             bool: Whether the agent has reached the end of its trajectory.
         """
 
+        self.reached_end = False
         if self.reset_pos is not None and self.check_reset_pos():
             # record the time step at which the agent reached the reset position
-            self.reached_reset_pos.append(self.num_steps_total)
-            return True
+            self.reached_end = True
+            if len(self.reached_reset_pos):
+                if self.num_steps_total == self.reached_reset_pos[-1]:
+                    self.reached_end = False
+            
+            if self.reached_end:
+                self.reached_reset_pos.append(self.num_steps_total)
 
         if self.trajectory_length is not None:
             if self.curr_trajectory_length >= self.trajectory_length:
-                return True
+                self.reached_end = True
 
-        return False
+        return self.reached_end
 
 
-    def update(self, dt=None, **kwargs):
+    def _check_target(self):
+        """Check if the agent has reached the target in its trajectory.
+
+        Returns:
+            bool: Whether the agent has reached the target in its trajectory.
+        """
+
+        self.reached_target = False
+        if self.target_pos is not None and self.check_target_pos():
+            # record the time step at which the agent reached the target position
+            self.reached_target = True
+            if len(self.reached_target_pos):
+                if self.num_steps_total == self.reached_target_pos[-1]:
+                    self.reached_target = False
+
+            if self.reached_target:
+                self.reached_target_pos.append(self.num_steps_total)
+
+        return self.reached_target
+
+
+    def update(self, dt=None, skip_checks=False, **kwargs):
         """Update the agent, optionally with a new position and velocity.
         
         See Agent.update() in ratinabox/agent.py for kwargs.
         """
 
-        if self.check_end():
-            self.reset()
+        if not skip_checks:
+            self._check_target()
+            if self._check_end():
+                self.reset()
         
         self.prev_average_measured_speed = self.average_measured_speed
         prev_velocity = self.velocity
@@ -401,6 +480,7 @@ class ResetAgent(Agent):
         alpha=0.6,
         color="k",
         ms=50,
+        plot_targets=True,
     ):
 
         """Plots the trajectory between t_start (seconds) and t_end (defaulting to the last time available)
@@ -424,7 +504,7 @@ class ResetAgent(Agent):
         if t_end == None:
             t_end = t[-1]
         startid = np.argmin(np.abs(t - (t_start)))
-        endid = np.argmin(np.abs(t - (t_end)))
+        endid = np.argmin(np.abs(t - (t_end))) + 1
         skiprate = max(1, int((1 / framerate) / dt))
 
         t = t / 60 # minutes
@@ -450,6 +530,7 @@ class ResetAgent(Agent):
             max_y = max(right, top)
 
         n_reached = len(self.reached_reset_pos)
+        n_targets = len(self.reached_target_pos)
         alpha /= self.Environment.D
         alpha_pts = 0.9 / self.Environment.D
         for i in range(self.Environment.D):
@@ -457,18 +538,25 @@ class ResetAgent(Agent):
             
             if n_reached:
                 if self.start_pos is not None:
-                    x_start = [t[x] for x in self.reached_reset_pos]
+                    x_start = [t[x] for x in self.reached_reset_pos if x >= startid and x < endid]
                     y_start = [self.start_pos[i]] * n_reached
                     ax.scatter(
                         x_start, y_start, marker=".", color="blue", alpha=alpha_pts, s=ms
                         )
                 
                 if self.reset_pos is not None:
-                    x_reset = [t[x - 1] for x in self.reached_reset_pos]
+                    x_reset = [t[x - 1] for x in self.reached_reset_pos if x >= startid and x < endid]
                     y_reset = [self.reset_pos[i]] * n_reached
                     ax.scatter(
                         x_reset, y_reset, marker="x", color="red", alpha=alpha_pts, s=ms/3
                         )
+            
+            if plot_targets and n_targets and self.target_pos is not None:
+                x_targ = [t[x] for x in self.reached_target_pos if x >= startid and x < endid]
+                y_targ = [self.target_pos[i]] * n_targets
+                ax.scatter(
+                    x_targ, y_targ, marker="d", color="gold", alpha=alpha_pts, s=ms/5
+                    )
 
         ax.set_xlabel("Time / min")
         ax.set_ylabel("Position / m")
@@ -532,7 +620,7 @@ class ResetAgent(Agent):
         if t_end == None:
             t_end = t[-1]
         startid = np.argmin(np.abs(t - (t_start)))
-        endid = np.argmin(np.abs(t - (t_end)))
+        endid = np.argmin(np.abs(t - (t_end))) + 1
         skiprate = max(1, int((1 / framerate) / dt))
         if self.Environment.dimensionality == "2D":
             trajectory = pos[startid:endid, :][::skiprate]
@@ -546,9 +634,9 @@ class ResetAgent(Agent):
         elif len(time) == 0:
             raise RuntimeError("Duration too short. No time points to plot.")
 
-        if len(self.reset_steps) > 0:
-            last_length = len(t) - sum(self.reset_steps)
-            trajectory_lengths = self.reset_steps + [last_length]
+        if len(self.act_trajectory_lengths) > 0:
+            last_length = len(t) - sum(self.act_trajectory_lengths)
+            trajectory_lengths = self.act_trajectory_lengths + [last_length]
             traj_idx = [np.full(steps, i) for i, steps in enumerate(trajectory_lengths)]
             if cmap_per:
                 if scale_cmap_per:
@@ -584,12 +672,14 @@ class ResetAgent(Agent):
                 fig, ax = plt.subplots(figsize=figsize)
 
             fig, ax = self.Environment.plot_environment(fig=fig, ax=ax)
+            ax.scatter(*self.target_pos, marker="d", color="gold", s=20, zorder=5, edgecolors="darkgoldenrod", linewidth=0.5)
+
             s = ms_2D * np.ones_like(time)
             if decay_point_size == True:
                 s = ms_2D * np.exp((time - time[-1]) / 10)
                 s[(time[-1] - time) > ms_2D] *= 0
 
-            if plot_traj_ends == True and len(self.reset_steps):
+            if plot_traj_ends == True and len(self.act_trajectory_lengths):
                 ends = np.where(np.diff(traj_idx) > 0)[0]
                 ends = np.append(ends, len(trajectory) - 1)
                 s[ends] = ms_2D * 2
@@ -633,7 +723,6 @@ class ResetAgent(Agent):
         return fig, ax
     
 
-
     def plot_trajectory_edges(
         self,
         t_start=0,
@@ -674,7 +763,7 @@ class ResetAgent(Agent):
         if t_end == None:
             t_end = t[-1]
         startid = np.argmin(np.abs(t - (t_start)))
-        endid = np.argmin(np.abs(t - (t_end)))
+        endid = np.argmin(np.abs(t - (t_end))) + 1
 
         if startid > endid:
             raise ValueError("'startid' must be lower than 'endid'.")
@@ -683,7 +772,7 @@ class ResetAgent(Agent):
             colormap = "crest"
         cmap = sns.color_palette(colormap, as_cmap=True)
 
-        all_ends = np.cumsum(self.reset_steps)
+        all_ends = np.cumsum(self.act_trajectory_lengths)
         start_c, end_c = None, None
         if plot_starts:
             traj_starts = np.insert(all_ends, 0, 0)
@@ -707,6 +796,8 @@ class ResetAgent(Agent):
 
             if self.Environment.dimensionality == "2D":
                 fig, ax = self.Environment.plot_environment(fig=fig, ax=ax)
+                ax.scatter(*self.target_pos, marker="d", color="gold", s=20, zorder=5, edgecolors="black", linewidth=0.5)
+
                 s = 15 * np.ones_like(time)
                 if decay_point_size == True:
                     s = 15 * np.exp((time - time[-1]) / 10)
@@ -757,9 +848,12 @@ class TAgent(ResetAgent, util.ParamsMixin):
     
     """
 
-    default_params = dict()
+    default_params = {
+        "target_arm": "left",
+        "target_prop": 0.75, # proportion down arm at which to set target
+    }
 
-    ignored_param_keys = ["reset_pos", "start_pos"]
+    ignored_param_keys = ["reset_pos", "start_pos", "target_pos"]
     ignored_params = {key: None for key in ignored_param_keys}
 
     fixed_params = dict()
@@ -783,14 +877,10 @@ class TAgent(ResetAgent, util.ParamsMixin):
             raise TypeError("Env must be a TEnv object.")
 
         self.set_fixed_params()
-        self.params["reset_pos"] = [Env.left_T_end, Env.right_T_end]
-        self.params["start_pos"] = Env.T_start
 
         super().__init__(Env, self.params)
 
-        self.set_target()
-        self.left_reset_pos = Env.left_T_end
-        self.right_reset_pos = Env.right_T_end
+        self.set_current_arm()
 
 
     @property
@@ -799,6 +889,8 @@ class TAgent(ResetAgent, util.ParamsMixin):
         return self.pos[1] > self.Environment.branch_y
     
     def get_direction(self):
+        """Get the direction to the target.
+        """
 
         if self.target == "left":
             target = self.Environment.left_T_end
@@ -814,14 +906,14 @@ class TAgent(ResetAgent, util.ParamsMixin):
         return direction
 
 
-
     def update(self, dt=None, speed_fact=3, drift_to_random_strength_ratio=0.7, **kwargs):
         """Update the agent, optionally with a new position and velocity.
         
         See Agent.update() in ratinabox/agent.py for kwargs.
         """
 
-        if self.check_end():
+        self._check_target()
+        if self._check_end():
             self.reset()
 
         # calculate drift_velocity
@@ -833,17 +925,18 @@ class TAgent(ResetAgent, util.ParamsMixin):
 
         super().update(
             dt=dt, 
+            skip_checks=True,
             drift_velocity=drift_velocity,
             drift_to_random_strength_ratio=drift_to_random_strength_ratio,
             **kwargs
             )
 
 
-    def set_target(self):
-        """Reset the agent to a random location.
+    def set_current_arm(self):
+        """Sets which arm the agent will navigate to, this run.
         """
 
-        # randomly choose a target
+        # randomly choose a current target arm
         self.target = np.random.choice(["left", "right"])
 
         if not hasattr(self, "trajectory_targets"):
@@ -859,17 +952,42 @@ class TAgent(ResetAgent, util.ParamsMixin):
 
         super().reset()
 
-        self.set_target()
+        self.set_current_arm()
 
         return
 
 
-    def set_start_reset_pos(self):
-        self.start_pos = self.set_pos(self.start_pos)
+    def set_all_pos(self):
+        """Set all the positions for the agent.
+        """
+        
+        self.start_pos = self.set_pos(self.Environment.T_start)
+
+        # set reset positions
+        self.left_reset_pos = self.Environment.left_T_end
+        self.right_reset_pos = self.Environment.right_T_end
         self.reset_pos = [
-            self.set_pos(reset_pos) for reset_pos in self.reset_pos
+            self.set_pos(reset_pos) 
+            for reset_pos in [self.left_reset_pos, self.right_reset_pos]
             ]
         self.reached_reset_pos = []
+        
+        # set target position
+        if self.target_arm == "left":
+            edge = self.Environment.left_T_end
+        elif self.target_arm == "right":
+            edge = self.Environment.right_T_end
+        else:
+            raise RuntimeError("Target must be 'left' or 'right'.")
+        
+        T_split = self.Environment.T_split
+        self.target_pos = [T_split[i] + (edge[i] - T_split[i]) * self.target_prop for i in [0, 1]]
+        self.target_pos = self.set_pos(self.target_pos)
+        
+        self.reached_target_pos = []
+        self.target_wait = 0
+
+        # set initial position and velocity
         if self.start_pos is not None:
             self.set_pos_vel(pos=self.start_pos, velocity=0)
 
@@ -904,3 +1022,4 @@ class TAgent(ResetAgent, util.ParamsMixin):
 
     def check_right_reset_pos(self):
         return self.check_reset_pos(pos="right")
+

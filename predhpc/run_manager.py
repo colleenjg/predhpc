@@ -21,13 +21,16 @@ AGENT_PARAMS = {
     "speed_std": 0.5, 
     "start_pos": 0 + DT,
     "reset_pos": ENV_PARAMS["scale"] - DT,
+    "target_pos": ENV_PARAMS["scale"] - DT * 8,
     "fixed_direction": True,
+    "target_wait": 100,
 }
 
 CA3_PC_PARAMS = {
     "name": "CA3_PCs",
-    "n": 8,
+    "n": 16,
     "description": "gaussian_threshold",
+    "place_cell_centres": "uniform",
     "min_fr": 0,
     "max_fr": 10,
     "color": "C5",
@@ -46,7 +49,6 @@ CA1_PARAMS = {
 }
 
 
-
 def plot_1D_env_info(Ag, CA3_PCs, CA1s, CA1_weights):
     """Plot environment info for a 1D experiment: 
         environment, place cell locations, rate map, CA1 weights, CA1 rate map
@@ -58,22 +60,28 @@ def plot_1D_env_info(Ag, CA3_PCs, CA1s, CA1_weights):
         CA1_weights (list): List of CA1 weights.
     """
 
-    # 7 plots
-    hei_ratios = [1, 1, 1.5, 2, 1, 1, 1]
+    # 8 plots
+    hei_ratios = [1, 1.2, 1.5, 2, 1, 1, 1, 1]
     gridspec_kw = {"height_ratios": hei_ratios}
     figsize = plot_util.get_figsize(sum(hei_ratios), squat=True)
-    fig, ax = plt.subplots(nrows=7, figsize=figsize, sharex=True, gridspec_kw=gridspec_kw)
+    fig, ax = plt.subplots(nrows=len(hei_ratios), figsize=figsize, sharex=True, gridspec_kw=gridspec_kw)
 
     plot_util.plot_1D_reset_environment(Ag, fig=fig, ax=ax[0])
     
-    CA3_PCs.plot_place_cell_locations(fig, ax=ax[1])
+    CA3_PCs.plot_place_cell_locations(fig=fig, ax=ax[1])
+    plot_util.plot_overlayed_rate_maps(CA3_PCs, fig=fig, ax=ax[1], method="max")
+    ymin, ymax = ax[1].get_ylim()
+    ymin = min(ymin, 0)
+    ax[1].set_ylim((ymin - 0.05 * (ymax - ymin)), ymax)
     ax[1].set_title("CA3 place cell locations")
 
     CA3_PCs.plot_rate_map(chosen_neurons="all", fig=fig, ax=ax[2])
     ax[2].set_title("CA3 rate map")
 
     plot_util.plot_1D_input_place_cell_weights(CA1_weights, CA3_PCs, fig=fig, ax=ax[3])
-    plot_util.plot_1D_rate_map_across_learning(Ag, CA1s, fig=fig, ax=ax[4:])
+    plot_util.plot_1D_rate_map_across_learning(Ag, CA1s, fig=fig, ax=ax[4:7])
+
+    plot_util.plot_1D_reset_environment(Ag, fig=fig, ax=ax[7])
 
     for a, ax_ in enumerate(ax.ravel()[:-1]):
         ax_.set_xlabel("")
@@ -96,7 +104,7 @@ def plot_time_info(Ag, CA3_PCs, CA1s):
     hei_ratios = [1.5, 1, 1]
     gridspec_kw = {"height_ratios": hei_ratios}
     figsize = plot_util.get_figsize(sum(hei_ratios), squat=True)
-    fig, ax = plt.subplots(nrows=3, figsize=figsize, sharex=True, gridspec_kw=gridspec_kw)
+    fig, ax = plt.subplots(nrows=len(hei_ratios), figsize=figsize, sharex=True, gridspec_kw=gridspec_kw)
 
     Ag.plot_trajectory_resets(framerate=1/Ag.dt, fig=fig, ax=ax[0])
     ax[0].set_title("Trajectories")
@@ -111,7 +119,8 @@ def plot_time_info(Ag, CA3_PCs, CA1s):
         ax_.set_xlabel("")
 
 
-def learn_1D_btsp(env_params, agent_params, CA3_PC_params, CA1_params, num_rwd=200, max_steps=5000, wei_freq=100, hebbian=False):
+def learn_1D_btsp(env_params, agent_params, CA3_PC_params, CA1_params, num_rwd=200, 
+                  max_steps=5000, wei_freq=100, hebbian=False):
     """Run a 1D learning experiment with BTSP learning.
 
     Args:
@@ -141,30 +150,34 @@ def learn_1D_btsp(env_params, agent_params, CA3_PC_params, CA1_params, num_rwd=2
     CA1s.set_btsp_learn()
     
     # run learning
-    reached_last = False
+    restarted = False
     CA1_weights = [CA1s.inputs[CA3_PCs.name]["w"].copy()]
     for i in tqdm(range(max_steps)):
         Ag.update()
         CA3_PCs.update()
 
+        # check whether a restart BTSP signal should go out
         btsp_targs = []
-        if reached_last and CA1s.n > 1:
+        if restarted and CA1s.n > 1:
             btsp_targs = [CA1s.n - 1]
 
-        reached_last = False
-        if Ag.check_reset_pos():
+        # check whether a target BTSP signal should go out
+        if Ag.reached_target:
             btsp_targs = [0]
-            reached_last = True        
 
+        # check for restart
+        restarted = Ag.reached_end
+
+        # run update
         CA1s.update(btsp_targs=btsp_targs)
         if not i % wei_freq:
             CA1_weights.append(CA1s.inputs[CA3_PCs.name]["w"].copy())
 
-        if len(Ag.reached_reset_pos) >= num_rwd:
+        if len(Ag.reached_target_pos) >= num_rwd:
             break
     
-    if len(Ag.reached_reset_pos) < num_rwd:
-        print(f"Only reached the reward {len(Ag.reached_reset_pos)} times (target: {num_rwd}).")
+    if len(Ag.reached_target_pos) < num_rwd:
+        print(f"Only reached the reward {len(Ag.reached_target_pos)} times (target: {num_rwd}).")
     
     Ag.log_trajectory_stats_to_date()
     Ag.log_trajectory_stats_to_date(time=False)
