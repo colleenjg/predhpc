@@ -16,6 +16,7 @@ ENV_PARAMS = {
 DT = 0.02
 AGENT_PARAMS = {
     "reset_tolerance_prop": 0.8,
+    "target_tolerance_prop": 3,
     "dt": DT,
     "speed_mean": 1, # sets directionality
     "speed_std": 0.5, 
@@ -114,13 +115,21 @@ def plot_time_info(Ag, CA3_PCs, CA1s):
 
     CA1s.plot_rate_timeseries(chosen_neurons="all", spikes=True, fig=fig, ax=ax[1], shift=-10, overlap=1)
     ax[1].set_title("CA1 rate timeseries")
-    
+    lo, hi = ax[1].get_ylim()
+    for t in CA1s.history["btsp_events"]:
+        y_hei = lo + (hi - lo) * 0.95
+        ax[1].scatter(CA1s.history["t"][t] / 60, y_hei, marker="x", s=8, color="k", alpha=0.7)
+    for t in CA1s.Agent.reached_target_pos:
+        y_hei = lo + (hi - lo) * 0.82
+        ax[1].scatter(CA1s.Agent.history["t"][t] / 60, y_hei, marker="o", s=6, color="k", alpha=0.7)
+
+
     for ax_ in ax.ravel()[:-1]:
         ax_.set_xlabel("")
 
 
-def learn_1D_btsp(env_params, agent_params, CA3_PC_params, CA1_params, num_rwd=200, 
-                  max_steps=5000, wei_freq=100, hebbian=False):
+def learn_1D_btsp(env_params, agent_params, CA3_PC_params, CA1_params, num_rwd=10, 
+                  max_steps=5000, wei_freq=100, hebbian=False, target_n=5):
     """Run a 1D learning experiment with BTSP learning.
 
     Args:
@@ -162,7 +171,7 @@ def learn_1D_btsp(env_params, agent_params, CA3_PC_params, CA1_params, num_rwd=2
             btsp_targs = [CA1s.n - 1]
 
         # check whether a target BTSP signal should go out
-        if Ag.reached_target:
+        if Ag.reached_target and len(Ag.reached_target_pos) == target_n:
             btsp_targs = [0]
 
         # check for restart

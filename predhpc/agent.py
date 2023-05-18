@@ -366,7 +366,7 @@ class ResetAgent(Agent):
             dist = np.linalg.norm(self.pos - target_pos)
 
             # check if the distance is less than the tolerance
-            if dist < self.dt * tolerance_prop:
+            if dist < (self.dt * tolerance_prop):
                 return True
     
         return False
@@ -397,7 +397,7 @@ class ResetAgent(Agent):
         else:
             target_reached = self.check_pos(self.target_pos, self.target_tolerance_prop)
             if target_reached:
-                self.target_wait = 100
+                self.target_wait = 30
             return target_reached
 
 
@@ -851,6 +851,7 @@ class TAgent(ResetAgent, util.ParamsMixin):
     default_params = {
         "target_arm": "left",
         "target_prop": 0.75, # proportion down arm at which to set target
+        "left_arm_prop": 0.75, # proportion of trajectories to target to left arm
     }
 
     ignored_param_keys = ["reset_pos", "start_pos", "target_pos"]
@@ -937,7 +938,8 @@ class TAgent(ResetAgent, util.ParamsMixin):
         """
 
         # randomly choose a current target arm
-        self.target = np.random.choice(["left", "right"])
+        arms = ["left", "right"]
+        self.target = arms[np.random.rand() > self.left_arm_prop]
 
         if not hasattr(self, "trajectory_targets"):
             self.trajectory_targets = []    
