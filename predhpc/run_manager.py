@@ -119,10 +119,9 @@ def plot_time_info(Ag, CA3_PCs, CA1s):
     for t in CA1s.history["btsp_events"]:
         y_hei = lo + (hi - lo) * 0.95
         ax[1].scatter(CA1s.history["t"][t] / 60, y_hei, marker="x", s=8, color="k", alpha=0.7)
-    for t in CA1s.Agent.reached_target_pos:
-        y_hei = lo + (hi - lo) * 0.82
-        ax[1].scatter(CA1s.Agent.history["t"][t] / 60, y_hei, marker="o", s=6, color="k", alpha=0.7)
-
+    for poses, ls in [(Ag.reached_reset_pos, "dashed"), (Ag.reached_target_pos, "dotted")]:
+        for t in poses:
+            ax[1].axvline(CA1s.Agent.history["t"][t] / 60, alpha=0.7, zorder=-1, lw=1, ls=ls, color="k")
 
     for ax_ in ax.ravel()[:-1]:
         ax_.set_xlabel("")
@@ -161,18 +160,20 @@ def learn_1D_btsp(env_params, agent_params, CA3_PC_params, CA1_params, num_rwd=1
     # run learning
     restarted = False
     CA1_weights = [CA1s.inputs[CA3_PCs.name]["w"].copy()]
+    break_in_n = -1
     for i in tqdm(range(max_steps)):
         Ag.update()
         CA3_PCs.update()
 
         # check whether a restart BTSP signal should go out
         btsp_targs = []
-        if restarted and CA1s.n > 1:
-            btsp_targs = [CA1s.n - 1]
+        if len(Ag.reached_target_pos) == target_n:
+            if restarted and CA1s.n > 1:
+                btsp_targs = [CA1s.n - 1]
 
-        # check whether a target BTSP signal should go out
-        if Ag.reached_target and len(Ag.reached_target_pos) == target_n:
-            btsp_targs = [0]
+            # check whether a target BTSP signal should go out
+            if Ag.reached_target:
+                btsp_targs = [0]
 
         # check for restart
         restarted = Ag.reached_end
@@ -182,8 +183,13 @@ def learn_1D_btsp(env_params, agent_params, CA3_PC_params, CA1_params, num_rwd=1
         if not i % wei_freq:
             CA1_weights.append(CA1s.inputs[CA3_PCs.name]["w"].copy())
 
-        if len(Ag.reached_target_pos) >= num_rwd:
-            break
+        if break_in_n < 0:
+            if len(Ag.reached_target_pos) >= num_rwd:
+                break_in_n = 20
+        else:
+            if break_in_n == 0:
+                break
+            break_in_n -= 1
     
     if len(Ag.reached_target_pos) < num_rwd:
         print(f"Only reached the reward {len(Ag.reached_target_pos)} times (target: {num_rwd}).")
