@@ -1,63 +1,12 @@
 import copy
-import warnings
-import pprint
 
 from ratinabox import Environment
-from ratinabox import utils as rutils
 
 from predhpc import util
 
 
 
-def get_T_shape_boundaries(width_prop=0.2, scale_x=1, scale_y=1, prop_x=None, 
-                           prop_y=None):
-    """Get boundaries for a T-shape environment.
-    
-    Args:
-        width_prop (float): proportion of the width of the environment that the
-            T-shape arms should take up.
-        scale_x (float): scale of the environment in the x-direction.
-        scale_y (float): scale of the environment in the y-direction.
-        prop_x (float): proportion of the width of the environment that the
-            T-shape should take up in the x-direction. If None, defaults to
-            width_prop.
-        prop_y (float): proportion of the width of the environment that the
-            T-shape should take up in the y-direction. If None, defaults to
-            width_prop.
 
-    Returns:
-        boundaries (list): list of lists of the form [[x1, y1], [x2, y2], ...]
-    """
-
-    prop_x = width_prop if prop_x is None else prop_x
-    prop_y = width_prop if prop_y is None else prop_y
-
-    for prop, dim in [(prop_x, "x"), (prop_y, "y")]:
-        if prop >= 1:
-            raise ValueError(
-                f"{dim} proportion must be strictly smaller than 1, "
-                f"but found {prop}."
-                )
-
-    # add diff and width
-    left_t_x = 0.5 - prop_x / 2
-    top_t_y = 1 - prop_y
-
-    left_boundaries = [
-        [0, 1],
-        [0, top_t_y],
-        [left_t_x, top_t_y],
-        [left_t_x, 0]
-    ]
-
-    right_boundaries = [
-        [1 - x, y] for x, y in left_boundaries
-    ]
-
-    boundaries_unscaled = left_boundaries + right_boundaries[::-1]
-    boundaries = [[x * scale_x, y * scale_y] for x, y in boundaries_unscaled]
-
-    return boundaries
 
 
 class TEnv(Environment, util.ParamsMixin):
@@ -103,7 +52,7 @@ class TEnv(Environment, util.ParamsMixin):
         for key, value in all_fixed_params.items():
             self.params[key] = value
 
-        self.params["boundary"] = get_T_shape_boundaries(
+        self.params["boundary"] = util.get_T_shape_boundaries(
             width_prop=self.params["prop_width"],
             scale_x=self.params["scale_x"],
             scale_y=self.params["scale_y"],

@@ -885,6 +885,12 @@ class TAgent(ResetAgent, util.ParamsMixin):
 
 
     @property
+    def near_branch(self):
+
+        return self.pos[1] > (self.Environment.branch_y * 0.98)
+
+
+    @property
     def at_branch(self):
 
         return self.pos[1] > self.Environment.branch_y
@@ -918,7 +924,7 @@ class TAgent(ResetAgent, util.ParamsMixin):
             self.reset()
 
         # calculate drift_velocity
-        if self.at_branch:
+        if self.near_branch:
             direction = self.get_direction()
         else:
             direction = self.Environment.T_split - self.pos
