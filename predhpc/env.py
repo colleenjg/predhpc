@@ -1,5 +1,6 @@
 import copy
 import itertools
+import warnings
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -8,6 +9,12 @@ from ratinabox import Environment
 from ratinabox import utils as rutils
 
 from predhpc import util
+
+
+class EnvironmentWarning(UserWarning):
+    pass
+
+warnings.simplefilter("once", EnvironmentWarning)
 
 
 class TEnv(Environment, util.ParamsMixin):
@@ -476,9 +483,10 @@ class ExploreBox(Environment, util.ParamsMixin):
             self.num_teleport_pairs += 1
 
 
-    def check_too_close_to_existing_walls(self, new_wall_coords, min_dist=None):
+    def check_walls_ends_too_close(self, new_wall_coords, min_dist=None):
         """
-        Checks whether a new wall is too close to existing walls.
+        Checks whether a new wall's ends is too close to the ends of existing 
+        walls.
 
         Specifically checks whether an end of the new wall intersects at less 
         than 45 degrees near the end of an existing wall, forming an V shape 
@@ -548,6 +556,12 @@ class ExploreBox(Environment, util.ParamsMixin):
             ValueError: if could not sample valid wall start and end coordinates
                 after max_attempts attempts.
         """
+
+        warnings.warn(
+            "add_walls() does not check whether a new wall will create a hole "
+            "in the environment. Be sure to check environment visually.", 
+            category=EnvironmentWarning
+            )
  
         for _ in range(num):
             i = 0
@@ -555,8 +569,8 @@ class ExploreBox(Environment, util.ParamsMixin):
                 start_coords = self.sample_coords()
                 end_coords = self.sample_wall_end(start_coords)
                 if end_coords is not None:                    
-                    # check that new wall is not too close to another
-                    if self.check_too_close_to_existing_walls(
+                    # check that wall ends are not too close to another
+                    if self.check_walls_ends_too_close(
                         [start_coords, end_coords]
                         ):
                         end_coords = None

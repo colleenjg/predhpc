@@ -86,7 +86,7 @@ class ResetAgent(Agent):
 
         if self.start_pos is not None:
             self.set_pos_vel(pos=self.start_pos, velocity=0)
-        self.target_wait = 0
+        self.target_waiting = 0
 
 
     def set_trajectory_lengths(self):
@@ -390,14 +390,14 @@ class ResetAgent(Agent):
         if self.target_pos is None:
             return 
         
-        if self.target_wait > 0:
-            self.target_wait -= 1
+        if self.target_waiting > 0:
+            self.target_waiting -= 1
             return False
 
         else:
             target_reached = self.check_pos(self.target_pos, self.target_tolerance_prop)
             if target_reached:
-                self.target_wait = 30
+                self.target_waiting = self.target_wait
             return target_reached
 
 
@@ -991,7 +991,7 @@ class TAgent(ResetAgent, util.ParamsMixin):
         self.target_pos = self.set_pos(self.target_pos)
         
         self.reached_target_pos = []
-        self.target_wait = 0
+        self.target_waiting = 0
 
         # set initial position and velocity
         if self.start_pos is not None:
@@ -1075,9 +1075,6 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
 
         super().__init__(Env, self.params)
 
-        self.set_all_pos()
-        self.reached_target_pos = []
-
 
     def get_targets_and_probs(self, skip_object=None):
         """Get the targets and the probabilities to use when sampling from them.
@@ -1127,7 +1124,7 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
             self.trajectory_targets = []    
         self.trajectory_targets.append((self.target, self.target_pos, self.target_type))
 
-        self.target_wait = 0
+        self.target_waiting = 0
 
 
     def check_target_in_sight(self):
@@ -1158,7 +1155,7 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
             self.random_walk = 0
 
 
-    def set_all_pos(self):
+    def set_all_pos(self, first=True):
         """Set all the positions for the agent.
         """
         
@@ -1169,8 +1166,14 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
         self.target_pos = None
         self.set_curr_target()
 
-        self.target_wait = 0
+        self.target_waiting = 0
         self.set_random_walk()
+
+        if first:
+            self.reached_target_pos = []
+            self.start_positions = []
+        
+        self.start_positions.append(self.start_pos)
 
 
     def reset(self):
@@ -1179,7 +1182,10 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
 
         super().reset()
 
-        self.set_all_pos()
+        self.set_all_pos(first=False)
+
+        if len(self.reached_target_pos) == 0 or self.num_steps_total != self.reached_target_pos[-1]:
+            self.reached_target_pos.append(-1)
 
         return
 
@@ -1190,13 +1196,14 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
         See Agent.update() in ratinabox/agent.py for kwargs.
         """
 
-        if self._check_target():
-            self.set_curr_target()
-            self.set_random_walk()
+        target_reached = self._check_target()
 
         if self._check_end():
             self.reset()
-        
+        elif target_reached:
+            self.set_curr_target()
+            self.set_random_walk()
+
         if self.random_walk == 0:
             if self.target_pos is None:
                 self.set_curr_target()
@@ -1218,6 +1225,66 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
             **kwargs
             )
 
+    def get_trajectory_nodes(self):
+        """Get the trajectory nodes.
+
+        Returns:
+            nodes (1d array): Nodes that were reached.
+            values (1d array): Values of the nodes that were reached.
+                1: target, 0: start and -1: non target end
+            steps (1d array): Number of steps at which the node was reached.
+            unreached_targets (1d array): Targets that were not reached 
+                (corresponding to -1 values)
+        """
+
+        pos = np.asarray(self.history["pos"])
+        
+        targets = [
+            target[1] for target in self.trajectory_targets
+            if target[1] is not None
+        ]
+        targets = np.asarray(targets)
+        traj_lengs = np.cumsum(self.get_trajectory_lengths_to_date())
+        start_pos = np.asarray([self.start_positions[0]])
+
+        reached_target_pos = np.asarray(self.reached_target_pos)
+        reached_targets_idxs = np.where(reached_target_pos != -1)[0]
+        reached_target_pos = reached_target_pos[reached_targets_idxs]
+
+        reached_targets = np.zeros(len(targets)).astype(bool)
+        reached_targets[reached_targets_idxs] = True
+        unreached_targets =  targets[~reached_targets]
+        targets = targets[reached_targets]
+
+        # get start and end nodes
+        nodes = np.insert(targets, 0, start_pos[0], axis=0)
+        values = np.insert(np.ones(len(nodes)), 0, 0)
+        steps = np.insert(reached_target_pos, 0, 0)
+        for l, leng in enumerate(traj_lengs):
+            if leng in reached_target_pos:
+                continue
+            idx = np.where(leng < reached_target_pos)[0]
+            if len(idx):
+                # add the end node
+                nodes = np.insert(nodes, idx[0], pos[leng-1:leng], axis=0)
+                values = np.insert(values, idx[0], -1)
+                steps = np.insert(steps, idx[0], leng)
+                # add the start node
+                nodes = np.insert(nodes, idx[0] + 1, start_pos[l+1:l+2], axis=0)
+                values = np.insert(values, idx[0], 0)
+                steps = np.insert(steps, idx[0], leng + 1)
+            else:
+                # add the end node
+                nodes = np.append(nodes, pos[-2:], axis=0)
+                values = np.append(values, -1)
+                steps = np.append(steps, leng)
+        
+        if len(unreached_targets) != len(np.where(values == -1)[0]):
+            raise RuntimeError("Wrong number of reset points found.")
+        
+        return nodes, values, steps, unreached_targets
+    
+
     def plot_trajectory(self, target_alpha=0.7, **kwargs):
         
         fig, ax = super().plot_trajectory(
@@ -1227,50 +1294,153 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
 
         return fig, ax
 
-    def plot_trajectory_targets(self, fig=None, ax=None, alpha=0.8, **kwargs):
+    def plot_trajectory_targets(self, fig=None, ax=None, alpha=0.8, plot_env=True, **kwargs):
 
-        if fig is None or ax is None:
+        if fig is None or ax is None or plot_env:
             fig, ax = self.Environment.plot_environment(fig=fig, ax=ax)
+        
+        pos = np.asarray(self.history["pos"])
         
         targets = [
             target[1] for target in self.trajectory_targets
             if target[1] is not None
         ]
 
-        steps_to_reach = np.asarray(self.reached_target_pos)
-
-        if len(targets) > 0:
-            if len(steps_to_reach) == 0:
-                lws = [0]
-            elif len(steps_to_reach) == 1:
-                lws = [1]
+        unique_targets, counts = [], []
+        for target in targets:
+            present = [(target == unique_target).all() for unique_target in unique_targets]
+            if sum(present):
+                counts[present.index(True)] += 1
             else:
-                min_val, max_val = np.min(steps_to_reach), np.max(steps_to_reach)
-                lws = np.around(
-                    (steps_to_reach - min_val) / (max_val - min_val), 1
-                    ) + 1
+                unique_targets.append(target)
+                counts.append(1)
 
-            for t, target in enumerate(targets):
-                if t < len(steps_to_reach):
-                    lw = lws[t]
-                    ls = None
-                else:
-                    lw = 1
-                    ls = "dashed"
-                
-                if t == 0:
-                    start = self.start_pos # not right, if resampled
-                else:
-                    start = targets[t-1]
+        for target, count in zip(unique_targets, counts):
+            # write the number of times the target was visited
+            ax.text(
+                target[0], target[1], str(count),
+                horizontalalignment="left",
+                verticalalignment="bottom",
+                color="white",
+                fontsize=10,
+                zorder=10,
+                fontweight="bold"
+            )
 
+        if len(targets) == 0:
+            return fig, ax
+        
+        nodes, values, steps, unreached_targets = self.get_trajectory_nodes()
+
+        # get linewidths
+        step_diff = np.diff(steps)
+        if len(step_diff) != 0:
+            min_val, max_val = np.min(step_diff), np.max(step_diff)
+            lws = np.around(
+                (step_diff - min_val) / (max_val - min_val), 1
+            ) + 1
+
+        unreached = 0
+        for n, node in enumerate(nodes[:-1]):
+            ax.plot(
+                [node[0], nodes[n+1][0]], 
+                [node[1], nodes[n+1][1]], 
+                color="black", 
+                linewidth=lws[n],
+                alpha=alpha,
+                zorder=1
+                )
+        
+            # add missed targets
+            if values[n] == -1:
                 ax.plot(
-                    [start[0], target[0]], 
-                    [start[1], target[1]], 
+                    [nodes[n+1][0], unreached_targets[unreached][0]], 
+                    [nodes[n+1][1], unreached_targets[unreached][1]], 
                     color="black", 
-                    linestyle=ls, 
-                    linewidth=lw,
+                    ls="dashed",
                     alpha=alpha,
                     zorder=1
                     )
+                unreached += 1    
+
+        return fig, ax
+
+
+    def plot_trajectory_targets_over_time(self, t_start=0, t_end=None, fig=None, ax=None, **kwargs):
+
+        if fig is None or ax is None:
+            fig, ax = plt.subplots(figsize=(8, 3))
+
+        t, pos = np.array(self.history["t"]), np.array(self.history["pos"])
+        if t_end == None:
+            t_end = t[-1]
+        startid = np.argmin(np.abs(t - (t_start)))
+        endid = np.argmin(np.abs(t - (t_end))) + 1
+
+        t = t[startid:endid]
+        pos = pos[startid:endid]
+
+        if startid > endid:
+            raise ValueError("'startid' must be lower than 'endid'.")
+
+        # plot reset points as vertical dashed lines
+        reset_times = self.get_reset_times()
+        for reset_time in reset_times:
+            if reset_time >= t_start and reset_time <= t_end:
+                ax.axvline(
+                    reset_time, 
+                    color="black", 
+                    ls="dashed", 
+                    alpha=0.2,
+                    zorder=-1
+                )
+
+        # plot trajectory
+        ax.plot(t, pos[:, 0], color="lightgray", label="X")
+        ax.plot(t, pos[:, 1], color="darkgray", label="Y")
+
+        ax.set_title("Position over time")
+        ax.set_ylabel("Position")
+        ax.set_xlabel("Time (s)")
+
+        ax.spines["right"].set_color(None)
+        ax.spines["top"].set_color(None)
+        ax.legend(loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
+
+        # add targets
+        targets, target_types = zip(*[
+            (target[1], target[2]) for target in self.trajectory_targets
+            if target[1] is not None
+        ])
+
+        # get the number of steps to the target
+        num_steps = np.asarray(self.reached_target_pos)
+        if len(num_steps) < len(targets):
+            num_steps = np.append(num_steps, -1)
+        if len(num_steps) != len(targets):
+            raise RuntimeError("Cannot match targets to number of steps to reach.")
+        
+        # plot objects
+        type_num_to_plot_params_dict = copy.deepcopy(self.Environment.type_num_to_plot_params_dict)
+        r = 0
+        reset_times = np.append(reset_times, t[-1])
+        for target, target_type, num_step in zip(targets, target_types, num_steps):
+            plot_params = type_num_to_plot_params_dict[target_type]
+            label = None
+            if "name" in plot_params:
+                label = plot_params.pop("name")
+                plot_params["markersize"] = plot_params.pop("s") / 8
+            if num_step == -1:
+                target_time = reset_times[r]
+                alpha = 0.3
+                r += 1
+            else:
+                target_time = t[num_step]
+                alpha = 0.8
+            if target_time < t_start or target_time > t_end:
+                continue
+            ax.plot([target_time] * 2, target, **plot_params, label=label, lw=1.5, alpha=alpha)
+
+        ax.legend(loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
 
         return fig, ax
