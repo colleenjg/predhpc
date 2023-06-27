@@ -6,7 +6,7 @@ from matplotlib import pyplot as plt
 from matplotlib import colors as mcolors
 import numpy as np
 import seaborn as sns
-from ratinabox import Agent, Environment
+from ratinabox import Agent
 from ratinabox import utils as rutils
 
 from predhpc import env, util, plot_util
@@ -173,7 +173,7 @@ class ResetAgent(Agent):
         tau_speed = 10
         self.average_measured_speed = (
             self.prev_average_measured_speed + dt / tau_speed * (
-            np.linalg.norm(self.velocity)
+            np.linalg.norm(self.velocity, ord=2)
         )
         )
 
@@ -363,7 +363,7 @@ class ResetAgent(Agent):
 
         if target_pos is not None:
             # calculate the distance between the current position and the reset position
-            dist = np.linalg.norm(self.pos - target_pos)
+            dist = np.linalg.norm(self.pos - target_pos, ord=2)
 
             # check if the distance is less than the tolerance
             if dist < (self.dt * tolerance_prop):
@@ -584,6 +584,7 @@ class ResetAgent(Agent):
         xlim=None,
         background_color=None,
         plot_traj_ends=True,
+        target_alpha=1.0,
         cmap_per=False,
         scale_cmap_per=False,
         ms_2D=15,
@@ -607,6 +608,7 @@ class ResetAgent(Agent):
             • xlim: In 1D, forces the xlim to be a certain time (minutes) (useful if animating this function)
             • background_color: color of the background if not matplotlib default, only for 1D (probably white)
             • plot_traj_ends: plot a point at the end of each trajectory
+            • target_alpha: transparency with which to plot target position
             • cmap_per: if True, the colormap is used to set the color for each time point. Otherwise, each trajectory has its own color.
             • scale_cmap_per: if True, and cmap_per is True, the full range of the colormap is used for each trajectory, regardless of its length
             • ms_2D: the size of the points in the 2D plot is set to this value.
@@ -634,29 +636,25 @@ class ResetAgent(Agent):
         elif len(time) == 0:
             raise RuntimeError("Duration too short. No time points to plot.")
 
-        if len(self.act_trajectory_lengths) > 0:
-            last_length = len(t) - sum(self.act_trajectory_lengths)
-            trajectory_lengths = self.act_trajectory_lengths + [last_length]
-            traj_idx = [np.full(steps, i) for i, steps in enumerate(trajectory_lengths)]
-            if cmap_per:
-                if scale_cmap_per:
-                    cmap_vals = [np.linspace(0, 1, steps) for steps in trajectory_lengths]
-                else:
-                    cmap_vals = [np.arange(steps) for steps in trajectory_lengths]
+        last_length = len(t) - sum(self.act_trajectory_lengths)
+        trajectory_lengths = self.act_trajectory_lengths + [last_length]
+        traj_idx = [np.full(steps, i) for i, steps in enumerate(trajectory_lengths)]
+        if cmap_per:
+            if scale_cmap_per:
+                cmap_vals = [np.linspace(0, 1, steps) for steps in trajectory_lengths]
             else:
-                cmap_vals = traj_idx[:]
-            cmap_vals = np.concatenate(cmap_vals).astype(float)
-            cmap_vals = cmap_vals[startid : endid][::skiprate]
-            cmap_min, cmap_max = cmap_vals.min(), cmap_vals.max()
-            if cmap_min == cmap_max:
-                cmap_vals[:] = 0.5 # mid point of the colormap
-            else:
-                cmap_vals = (cmap_vals - cmap_min) / (cmap_max - cmap_min)
-            
-            traj_idx = np.concatenate(traj_idx).astype(int)[startid : endid][::skiprate]
+                cmap_vals = [np.arange(steps) for steps in trajectory_lengths]
         else:
-            cmap_vals = np.asarray([0.5])
-            traj_idx = np.zeros(len(trajectory))
+            cmap_vals = traj_idx[:]
+        cmap_vals = np.concatenate(cmap_vals).astype(float)
+        cmap_vals = cmap_vals[startid : endid][::skiprate]
+        cmap_min, cmap_max = cmap_vals.min(), cmap_vals.max()
+        if cmap_min == cmap_max:
+            cmap_vals[:] = 0.5 # mid point of the colormap
+        else:
+            cmap_vals = (cmap_vals - cmap_min) / (cmap_max - cmap_min)
+        
+        traj_idx = np.concatenate(traj_idx).astype(int)[startid : endid][::skiprate]
         
         if colormap is None:
             colormap = "crest"
@@ -672,7 +670,8 @@ class ResetAgent(Agent):
                 fig, ax = plt.subplots(figsize=figsize)
 
             fig, ax = self.Environment.plot_environment(fig=fig, ax=ax)
-            ax.scatter(*self.target_pos, marker="d", color="gold", s=20, zorder=5, edgecolors="darkgoldenrod", linewidth=0.5)
+            if self.target_pos is not None:
+                ax.scatter(*self.target_pos, marker="d", color="gold", s=20, zorder=5, edgecolors="darkgoldenrod", linewidth=0.5, alpha=target_alpha)
 
             s = ms_2D * np.ones_like(time)
             if decay_point_size == True:
@@ -844,8 +843,7 @@ class ResetAgent(Agent):
 
 
 class TAgent(ResetAgent, util.ParamsMixin):
-    """Extend the reset agent so that it operates in a T maze
-    
+    """Extend the reset agent so that it operates in a T maze    
     """
 
     default_params = {
@@ -928,7 +926,7 @@ class TAgent(ResetAgent, util.ParamsMixin):
             direction = self.get_direction()
         else:
             direction = self.Environment.T_split - self.pos
-        drift_velocity = speed_fact * self.speed_mean * (direction / np.linalg.norm(direction))
+        drift_velocity = speed_fact * self.speed_mean * (direction / np.linalg.norm(direction, ord=2))
 
         super().update(
             dt=dt, 
@@ -1009,12 +1007,12 @@ class TAgent(ResetAgent, util.ParamsMixin):
         # calculate the distance between the current position and the reset position
         if pos == "both":
             dist = min(
-                [np.linalg.norm(self.pos - reset_pos) for reset_pos in self.reset_pos]
+                [np.linalg.norm(self.pos - reset_pos, ord=2) for reset_pos in self.reset_pos]
             )
         elif pos == "left":
-            dist = np.linalg.norm(self.pos - self.left_reset_pos)
+            dist = np.linalg.norm(self.pos - self.left_reset_pos, ord=2)
         elif pos == "right":
-            dist = np.linalg.norm(self.pos - self.right_reset_pos)
+            dist = np.linalg.norm(self.pos - self.right_reset_pos, ord=2)
         else:
             raise ValueError("pos must be 'both', 'left', or 'right'.")
 
@@ -1031,3 +1029,248 @@ class TAgent(ResetAgent, util.ParamsMixin):
     def check_right_reset_pos(self):
         return self.check_reset_pos(pos="right")
 
+
+
+class BoxAgent(ResetAgent, util.ParamsMixin):
+    """Extend the reset agent so that it operates in an exploration box    
+    """
+
+    default_params = {
+        "reward_fact": 5,
+        "no_target_fact": 1,
+        "trajectory_length": 2000, # int or iterable of ints
+        "n_traj": 10, # number of trajectory lengths to sample
+        "target_wait": 10, # number of steps to wait between target reaching
+        "target_tolerance_prop": 0.5, # proportion of dt to use as target tolerance
+        "num_random_walk_steps": 100, # number of steps to random walk, if target is not in sight
+    }
+
+    ignored_param_keys = [
+        "reset_pos", "start_pos", "target_pos", "reset_tolerance_prop",
+        "fixed_direction"
+        ]
+    ignored_params = {key: None for key in ignored_param_keys}
+
+    fixed_params = dict()
+
+    def __init__(self, Env, params={}):
+        """Initialise the agent.
+
+        Args:
+            params (dict, optional): Parameters for the agent. Defaults to {}.
+
+        Raises:
+            ValueError: If passing iterable for trajectory_length, must have length > 0.
+        """
+
+        self.check_ignored_params(params)
+
+        self.params = copy.deepcopy(__class__.default_params)     
+        self.params.update(params)
+
+        if not isinstance(Env, env.ExploreBox):
+            raise TypeError("Env must be an ExploreBox object.")
+
+        self.set_fixed_params()
+
+        super().__init__(Env, self.params)
+
+        self.set_all_pos()
+        self.reached_target_pos = []
+
+
+    def get_targets_and_probs(self, skip_object=None):
+        """Get the targets and the probabilities to use when sampling from them.
+        """
+
+        reward_num = self.Environment.type_name_to_num_dict["reward"]
+        novel_num = self.Environment.type_name_to_num_dict["novel"]
+
+        objects = [None] 
+        obj_types = [-1]
+        obj_weights = [self.no_target_fact]
+        obj_names = ["no target"]
+        for obj, obj_type in zip(
+            self.Environment.objects["objects"],
+            self.Environment.objects["object_types"]
+        ):
+            if obj_type not in [reward_num, novel_num]:
+                continue
+            elif (obj == skip_object).all():
+                continue
+            objects.append(obj)
+            obj_types.append(obj_type)            
+            obj_weight = self.reward_fact if obj_type == reward_num else 1
+            obj_weights.append(obj_weight)
+            obj_name = "reward" if obj_type == reward_num else "novel"
+            obj_names.append(obj_name)
+
+        div = sum(obj_weights)
+        obj_weights = [obj_wei / div for obj_wei in obj_weights]
+        
+        return [objects, obj_types, obj_weights, obj_names]
+
+
+    def set_curr_target(self):
+        """Set the current target.
+        """
+
+        objects, obj_types, obj_weights, obj_names = self.get_targets_and_probs(self.target_pos)
+        target_idx = np.random.choice(len(objects), 1, p=np.asarray(obj_weights))[0]
+
+        # sample an object to go toward (check if in FOV, 5 attempts, otherwise no target for x steps)
+        self.target = obj_names[target_idx]
+        self.target_pos = objects[target_idx]
+        self.target_type = obj_types[target_idx]
+
+        if not hasattr(self, "trajectory_targets"):
+            self.trajectory_targets = []    
+        self.trajectory_targets.append((self.target, self.target_pos, self.target_type))
+
+        self.target_wait = 0
+
+
+    def check_target_in_sight(self):
+        """Check if the target is in sight.
+        
+        Returns:
+            bool: Whether the target is in sight.
+        """
+
+        # check if the target is in the field of view
+        dist = self.Environment.get_distances_between___accounting_for_environment(
+            self.pos, self.target_pos, wall_geometry="line_of_sight"
+        )
+
+        if dist == 1000:
+            return False
+        else:
+            return True
+
+
+    def set_random_walk(self):
+        """Set the random walk.
+        """
+
+        if self.target_pos is None or not self.check_target_in_sight():
+            self.random_walk = self.num_random_walk_steps
+        else:
+            self.random_walk = 0
+
+
+    def set_all_pos(self):
+        """Set all the positions for the agent.
+        """
+        
+        # set initial position and velocity
+        self.start_pos = self.Environment.sample_coords()
+        self.set_pos_vel(pos=self.start_pos, velocity=0)
+
+        self.target_pos = None
+        self.set_curr_target()
+
+        self.target_wait = 0
+        self.set_random_walk()
+
+
+    def reset(self):
+        """Reset the agent to a random location.
+        """
+
+        super().reset()
+
+        self.set_all_pos()
+
+        return
+
+
+    def update(self, dt=None, speed_fact=3, drift_to_random_strength_ratio=0.7, **kwargs):
+        """Update the agent, optionally with a new position and velocity.
+        
+        See Agent.update() in ratinabox/agent.py for kwargs.
+        """
+
+        if self._check_target():
+            self.set_curr_target()
+            self.set_random_walk()
+
+        if self._check_end():
+            self.reset()
+        
+        if self.random_walk == 0:
+            if self.target_pos is None:
+                self.set_curr_target()
+            self.set_random_walk()
+
+        # calculate drift_velocity
+        if self.random_walk > 0:
+            drift_velocity = None
+            self.random_walk -= 1
+        else:
+            direction = np.asarray(self.target_pos) - self.pos
+            drift_velocity = speed_fact * self.speed_mean * (direction / np.linalg.norm(direction, ord=2))
+
+        super().update(
+            dt=dt, 
+            skip_checks=True,
+            drift_velocity=drift_velocity,
+            drift_to_random_strength_ratio=drift_to_random_strength_ratio,
+            **kwargs
+            )
+
+    def plot_trajectory(self, target_alpha=0.7, **kwargs):
+        
+        fig, ax = super().plot_trajectory(
+            target_alpha=target_alpha,
+            **kwargs
+        )
+
+        return fig, ax
+
+    def plot_trajectory_targets(self, fig=None, ax=None, alpha=0.8, **kwargs):
+
+        if fig is None or ax is None:
+            fig, ax = self.Environment.plot_environment(fig=fig, ax=ax)
+        
+        targets = [
+            target[1] for target in self.trajectory_targets
+            if target[1] is not None
+        ]
+
+        steps_to_reach = np.asarray(self.reached_target_pos)
+
+        if len(targets) > 0:
+            if len(steps_to_reach) == 0:
+                lws = [0]
+            elif len(steps_to_reach) == 1:
+                lws = [1]
+            else:
+                min_val, max_val = np.min(steps_to_reach), np.max(steps_to_reach)
+                lws = np.around(
+                    (steps_to_reach - min_val) / (max_val - min_val), 1
+                    ) + 1
+
+            for t, target in enumerate(targets):
+                if t < len(steps_to_reach):
+                    lw = lws[t]
+                    ls = None
+                else:
+                    lw = 1
+                    ls = "dashed"
+                
+                if t == 0:
+                    start = self.start_pos # not right, if resampled
+                else:
+                    start = targets[t-1]
+
+                ax.plot(
+                    [start[0], target[0]], 
+                    [start[1], target[1]], 
+                    color="black", 
+                    linestyle=ls, 
+                    linewidth=lw,
+                    alpha=alpha,
+                    zorder=1
+                    )
+
+        return fig, ax
