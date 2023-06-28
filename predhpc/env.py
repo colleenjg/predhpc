@@ -706,7 +706,7 @@ class ExploreBox(Environment, util.ParamsMixin):
                         )
                 i += 1
 
-    def plot_environment(self, fig=None, ax=None, **kwargs):
+    def plot_environment(self, fig=None, ax=None, remove_prev_legend=True, **kwargs):
         """Plot the environment.
 
         Args:
@@ -730,6 +730,10 @@ class ExploreBox(Environment, util.ParamsMixin):
 
         with DontPlotObjects(self):
             fig, ax = super().plot_environment(fig=fig, ax=ax, **kwargs)
+
+        if remove_prev_legend:
+            # Do something here?
+            pass
 
         if self.plot_objects:
             type_num_to_plot_params_dict = copy.deepcopy(self.type_num_to_plot_params_dict)

@@ -589,6 +589,7 @@ class ResetAgent(Agent):
         scale_cmap_per=False,
         ms_2D=15,
         size_fact=None,
+        autosave=False, # currently ignored...
     ):
 
         """Plots the trajectory between t_start (seconds) and t_end (defaulting to the last time available)
@@ -718,6 +719,8 @@ class ResetAgent(Agent):
             if background_color is not None:
                 ax.set_facecolor(background_color)
                 fig.patch.set_facecolor(background_color)
+        
+        rutils.save_figure(fig, "trajectory", save=autosave)
 
         return fig, ax
     
@@ -1231,50 +1234,77 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
         return new_pos
 
 
-    def get_shifted_teleport_center(self, teleport_pair, direction="in"):
+    def get_shifted_teleport_center_vector(self, teleport_pair, direction="in"):
 
         shift = self.dt * self.target_tolerance_prop / 2
 
         teleport_coords = self.Environment.teleport_pairs_dict[teleport_pair][direction][1]
         marker = self.Environment.get_teleport_pair_marker(teleport_pair, direction=direction)
 
-        x_shift, y_shift = 0, 0
+        x, y = 0, 0
         if marker == "<": # towards right
-            x_shift = shift
+            x = 1
         elif marker == ">": # towards left
-            x_shift = -shift
+            x = -1
         elif marker == "^":
-            y_shift = -shift # below
+            y = -1 # below
         elif marker == "v":
-            y_shift = shift # above
+            y = 1 # above
         else:
             raise RuntimeError(f"Unrecognized marker {marker}.")
 
-        shifted_center = teleport_coords + np.asarray([x_shift, y_shift])
+        shifted_center = teleport_coords + np.asarray([x, y]) * shift
 
-        return shifted_center
+        teleport_vector = - np.asarray([x, y])
+
+        return shifted_center, teleport_vector
+
+
+    def check_teleport_vector(self, teleport_vector):
+        """Check if the agent is within the teleport vector.
+
+        Args:
+            teleport_vector (np.ndarray): The teleport vector.
+        
+        Returns:
+            bool: Whether the agent is within the teleport vector.
+        """
+
+        norm_teleport_vector = teleport_vector / np.linalg.norm(teleport_vector)
+        norm_velocity = self.velocity / np.linalg.norm(self.velocity)
+
+        if np.dot(norm_teleport_vector, norm_velocity) > 0.707: # 45 degrees, either side
+            return True
+        else:
+            return False
 
 
     def check_teleport(self):
         """Check if the agent should teleport.
         """
 
+
         for teleport_pair in self.Environment.teleport_pairs_dict.keys():
-            in_teleport_center = self.get_shifted_teleport_center(
+            in_teleport_center, in_vector = self.get_shifted_teleport_center_vector(
                 teleport_pair, direction="in"
                 )
-            teleport = self.check_pos(in_teleport_center, self.target_tolerance_prop)
+            teleport_pos = self.check_pos(in_teleport_center, self.target_tolerance_prop)
+    
+            teleport = False
+            if teleport_pos:
+                teleport = self.check_teleport_vector(in_vector)
+            
             if not teleport:
                 continue
 
             # teleport (sampling near out teleport coords)
-            out_teleport_center = self.get_shifted_teleport_center(
+            out_teleport_center, _ = self.get_shifted_teleport_center_vector(
                 teleport_pair, direction="out"
                 )
             # sample within tolerance prop of out teleport coords
             out_coords = self.sample_within_tolerance(out_teleport_center)
 
-            self.set_pos_vel(pos=out_coords, velocity=0)
+            self.set_pos_vel(pos=out_coords, velocity=self.velocity)
 
             self.teleported.append(self.num_steps_total)
             self.teleport_pair.append(teleport_pair)
