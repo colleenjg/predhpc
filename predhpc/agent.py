@@ -1017,7 +1017,7 @@ class TAgent(ResetAgent, util.ParamsMixin):
             raise ValueError("pos must be 'both', 'left', or 'right'.")
 
         # check if the distance is less than the tolerance
-        if dist < self.dt * self.reset_tolerance_prop:
+        if dist < (self.dt * self.reset_tolerance_prop):
             return True
 
         return False
@@ -1171,6 +1171,8 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
 
         if first:
             self.reached_target_pos = []
+            self.teleported = []
+            self.teleport_pair = []
             self.start_positions = []
         
         self.start_positions.append(self.start_pos)
@@ -1188,7 +1190,98 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
             self.reached_target_pos.append(-1)
 
         return
+    
 
+    def sample_within_tolerance(self, pos, tolerance_prop=None, max_attempts=100):
+        """Sample a position within the tolerance of the given position.
+
+        Args:
+            pos (np.ndarray): The position to sample around.
+            tolerance_prop (float): The proportion of the tolerance to sample within.
+                Defaults to None, in which case the agent's target_tolerance_prop is used.
+        
+        Returns:
+            pos (np.ndarray): The sampled position.
+        """
+
+        if len(pos) != 2:
+            raise ValueError(f"pos must have length 2, but found {len(pos)}.")
+
+        if tolerance_prop is None:
+            tolerance_prop = self.target_tolerance_prop
+
+        tolerance = self.dt * tolerance_prop
+        
+        new_pos = None
+        for _ in range(max_attempts):
+            x_jitter = np.random.uniform(-tolerance, tolerance)
+            y_max = np.sqrt(tolerance ** 2 - x_jitter ** 2)
+            y_jitter = np.random.uniform(-y_max, y_max)
+            new_pos = pos + np.asarray([x_jitter, y_jitter])
+            if self.Environment.check_if_position_is_in_environment(new_pos):
+                break
+
+        if new_pos is None:
+            raise RuntimeError(
+                f"Could not find a new position within tolerance proportion "
+                f"{tolerance_prop} of {pos}. Check that the teleportation out "
+                "coordinates are in a reasonable location."
+                )
+
+        return new_pos
+
+
+    def get_shifted_teleport_center(self, teleport_pair, direction="in"):
+
+        shift = self.dt * self.target_tolerance_prop / 2
+
+        teleport_coords = self.Environment.teleport_pairs_dict[teleport_pair][direction][1]
+        marker = self.Environment.get_teleport_pair_marker(teleport_pair, direction=direction)
+
+        x_shift, y_shift = 0, 0
+        if marker == "<": # towards right
+            x_shift = shift
+        elif marker == ">": # towards left
+            x_shift = -shift
+        elif marker == "^":
+            y_shift = -shift # below
+        elif marker == "v":
+            y_shift = shift # above
+        else:
+            raise RuntimeError(f"Unrecognized marker {marker}.")
+
+        shifted_center = teleport_coords + np.asarray([x_shift, y_shift])
+
+        return shifted_center
+
+
+    def check_teleport(self):
+        """Check if the agent should teleport.
+        """
+
+        for teleport_pair in self.Environment.teleport_pairs_dict.keys():
+            in_teleport_center = self.get_shifted_teleport_center(
+                teleport_pair, direction="in"
+                )
+            teleport = self.check_pos(in_teleport_center, self.target_tolerance_prop)
+            if not teleport:
+                continue
+
+            # teleport (sampling near out teleport coords)
+            out_teleport_center = self.get_shifted_teleport_center(
+                teleport_pair, direction="out"
+                )
+            # sample within tolerance prop of out teleport coords
+            out_coords = self.sample_within_tolerance(out_teleport_center)
+
+            self.set_pos_vel(pos=out_coords, velocity=0)
+
+            self.teleported.append(self.num_steps_total)
+            self.teleport_pair.append(teleport_pair)
+            break
+
+        return teleport
+    
 
     def update(self, dt=None, speed_fact=3, drift_to_random_strength_ratio=0.7, **kwargs):
         """Update the agent, optionally with a new position and velocity.
@@ -1203,6 +1296,8 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
         elif target_reached:
             self.set_curr_target()
             self.set_random_walk()
+
+        self.check_teleport()
 
         if self.random_walk == 0:
             if self.target_pos is None:
@@ -1232,7 +1327,7 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
             nodes (1d array): Nodes that were reached.
             values (1d array): Values of the nodes that were reached.
                 1: target, 0: start and -1: non target end
-            steps (1d array): Number of steps at which the node was reached.
+            steps (1d array): Number of steps at which each node was reached.
             unreached_targets (1d array): Targets that were not reached 
                 (corresponding to -1 values)
         """
@@ -1253,12 +1348,12 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
 
         reached_targets = np.zeros(len(targets)).astype(bool)
         reached_targets[reached_targets_idxs] = True
-        unreached_targets =  targets[~reached_targets]
+        unreached_targets = targets[~reached_targets]
         targets = targets[reached_targets]
 
         # get start and end nodes
         nodes = np.insert(targets, 0, start_pos[0], axis=0)
-        values = np.insert(np.ones(len(nodes)), 0, 0)
+        values = np.insert(np.ones(len(nodes)-1), 0, 0)
         steps = np.insert(reached_target_pos, 0, 0)
         for l, leng in enumerate(traj_lengs):
             if leng in reached_target_pos:
@@ -1273,9 +1368,9 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
                 nodes = np.insert(nodes, idx[0] + 1, start_pos[l+1:l+2], axis=0)
                 values = np.insert(values, idx[0], 0)
                 steps = np.insert(steps, idx[0], leng + 1)
-            else:
+            elif self.trajectory_targets[-1][0] != "no target":
                 # add the end node
-                nodes = np.append(nodes, pos[-2:], axis=0)
+                nodes = np.append(nodes, pos[-2:-1], axis=0)
                 values = np.append(values, -1)
                 steps = np.append(steps, leng)
         
@@ -1394,7 +1489,7 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
                     alpha=0.2,
                     zorder=-1
                 )
-
+        
         # plot trajectory
         ax.plot(t, pos[:, 0], color="lightgray", label="X")
         ax.plot(t, pos[:, 1], color="darkgray", label="Y")
@@ -1407,7 +1502,18 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
         ax.spines["top"].set_color(None)
         ax.legend(loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
 
-        # add targets
+        # plot teleportation points as vertical dashed lines
+        for step, pair in zip(self.teleported, self.teleport_pair):
+            if step < startid or step > endid:
+                continue
+
+            obj_type = self.Environment.teleport_pairs_dict[pair]["in"][0]
+            color = self.Environment.type_num_to_plot_params_dict[obj_type]["color"]
+            ax.axvline(
+                t[step], color=color, ls="dashed", alpha=0.8, zorder=-1
+            )
+
+        # plot target objects
         targets, target_types = zip(*[
             (target[1], target[2]) for target in self.trajectory_targets
             if target[1] is not None
@@ -1419,8 +1525,7 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
             num_steps = np.append(num_steps, -1)
         if len(num_steps) != len(targets):
             raise RuntimeError("Cannot match targets to number of steps to reach.")
-        
-        # plot objects
+
         type_num_to_plot_params_dict = copy.deepcopy(self.Environment.type_num_to_plot_params_dict)
         r = 0
         reset_times = np.append(reset_times, t[-1])
