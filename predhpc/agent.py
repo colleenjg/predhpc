@@ -589,7 +589,8 @@ class ResetAgent(Agent):
         scale_cmap_per=False,
         ms_2D=15,
         size_fact=None,
-        autosave=False, # currently ignored...
+        autosave=False, 
+        **kwargs, # catch-all...
     ):
 
         """Plots the trajectory between t_start (seconds) and t_end (defaulting to the last time available)
@@ -1234,11 +1235,16 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
         return new_pos
 
 
-    def get_shifted_teleport_center_vector(self, teleport_pair, direction="in"):
+    def get_teleport_vector(self, teleport_pair, direction="in"):
+        """Get the teleport vector for the given teleport pair.
 
-        shift = self.dt * self.target_tolerance_prop / 2
+        Args:
+            teleport_pair (str): The teleport pair to get the vector for.
+        
+        Returns:
+            np.ndarray: The teleport vector.
+        """
 
-        teleport_coords = self.Environment.teleport_pairs_dict[teleport_pair][direction][1]
         marker = self.Environment.get_teleport_pair_marker(teleport_pair, direction=direction)
 
         x, y = 0, 0
@@ -1253,15 +1259,13 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
         else:
             raise RuntimeError(f"Unrecognized marker {marker}.")
 
-        shifted_center = teleport_coords + np.asarray([x, y]) * shift
+        teleport_vector = np.asarray([x, y])
 
-        teleport_vector = - np.asarray([x, y])
+        return teleport_vector    
+    
 
-        return shifted_center, teleport_vector
-
-
-    def check_teleport_vector(self, teleport_vector):
-        """Check if the agent is within the teleport vector.
+    def _check_teleport_activate(self, teleport_vector, check_value="position"):
+        """Check if the agent is within range for the teleportation to activate.
 
         Args:
             teleport_vector (np.ndarray): The teleport vector.
@@ -1270,13 +1274,94 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
             bool: Whether the agent is within the teleport vector.
         """
 
+        if isinstance(check_value, str):
+            if check_value == "position":
+                check_value = self.pos # in the right area wrt teleport location
+            elif check_value == "velocity":
+                check_value = -self.velocity # heading towards teleport
+            else:
+                raise ValueError(f"Unrecognized check_value {check_value}.")
+            
         norm_teleport_vector = teleport_vector / np.linalg.norm(teleport_vector)
-        norm_velocity = self.velocity / np.linalg.norm(self.velocity)
+        norm_check = check_value / np.linalg.norm(check_value)
 
-        if np.dot(norm_teleport_vector, norm_velocity) > 0.707: # 45 degrees, either side
+        if np.dot(norm_teleport_vector, norm_check) > 0.707: # 45 degrees, either side
             return True
         else:
             return False
+
+
+    def _check_teleport_in(self, teleport_pair):
+        """Check if the agent is in the right situation for the teleportation to activate.
+
+        Args:
+            teleport_pair (str): The teleport pair to check.
+
+        Returns:
+            bool: Whether the agent should teleport.
+        """
+
+        teleport_coords = self.Environment.teleport_pairs_dict[teleport_pair]["in"][1]        
+        
+        # check if close to teleport in
+        near_teleport = self.check_pos(teleport_coords, self.target_tolerance_prop)
+        if not near_teleport:
+            return False
+        
+        # check if agent is within 45 degrees, either side of the teleport in
+        teleport_vector = self.get_teleport_vector(teleport_pair, direction="in")
+        teleport_range = self._check_teleport_activate(
+            teleport_vector, check_value="position"
+            )
+        
+        if not teleport_range:
+            return False
+        
+        # check if agent is heading towards teleport in
+        heading_teleport = self._check_teleport_activate(
+            teleport_vector, check_value="velocity"
+            )
+        
+        if not heading_teleport:
+            return False
+        
+        return True
+
+
+    def sample_teleport_out(self, teleport_pair, max_attempts=100):
+        """Sample a position within the tolerance of the teleportation out coordinates.
+
+        Args:
+            teleport_pair (str): The teleport pair to sample from.
+            max_attempts (int): The maximum number of attempts to make at sampling.
+        
+        Returns:
+            np.ndarray: The sampled position.
+        """
+
+        teleport_coords = self.Environment.teleport_pairs_dict[teleport_pair]["out"][1]
+        teleport_vector = self.get_teleport_vector(teleport_pair, direction="out")
+
+        i = 0
+        while out_coords is None:
+            sampled_out_coords = self.sample_within_tolerance(teleport_coords)
+            for x in [1, -1]:
+                for y in [1, -1]:
+                    check_coords = sampled_out_coords * np.asarray([x, y])
+                    # position coordinates on the correct side of the teleport
+                    check = self._check_teleport_activate(teleport_vector, check_value=check_coords)
+                    if check:
+                        out_coords = check_coords
+                        break
+            if i > max_attempts:
+                raise RuntimeError(
+                    f"Could not find a suitable out teleportation coordinate for "
+                    f"teleport pair {teleport_pair}."
+                    )
+            i += 1
+        
+        return out_coords
+    
 
 
     def check_teleport(self):
@@ -1285,29 +1370,19 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
 
 
         for teleport_pair in self.Environment.teleport_pairs_dict.keys():
-            in_teleport_center, in_vector = self.get_shifted_teleport_center_vector(
-                teleport_pair, direction="in"
-                )
-            teleport_pos = self.check_pos(in_teleport_center, self.target_tolerance_prop)
-    
-            teleport = False
-            if teleport_pos:
-                teleport = self.check_teleport_vector(in_vector)
+            teleport = self._check_teleport_in(teleport_pair)
             
             if not teleport:
                 continue
 
             # teleport (sampling near out teleport coords)
-            out_teleport_center, _ = self.get_shifted_teleport_center_vector(
-                teleport_pair, direction="out"
-                )
-            # sample within tolerance prop of out teleport coords
-            out_coords = self.sample_within_tolerance(out_teleport_center)
+            out_coords = self.sample_teleport_out(teleport_pair)
 
             self.set_pos_vel(pos=out_coords, velocity=self.velocity)
 
             self.teleported.append(self.num_steps_total)
             self.teleport_pair.append(teleport_pair)
+
             break
 
         return teleport
@@ -1579,3 +1654,31 @@ class BoxAgent(ResetAgent, util.ParamsMixin):
         ax.legend(loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
 
         return fig, ax
+
+
+
+    def animate_trajectory(self, additional_plot_func=None, **kwargs):
+
+        def remove_prev_handle_labels(fig, ax, t_end=None, **kwargs):
+
+            if additional_plot_func is not None:
+                fig, ax = additional_plot_func(fig=fig, ax=ax, t_end=t_end, **kwargs)
+
+            handles, labels = ax.get_legend_handles_labels()
+            if len(labels) == 0:
+                return fig, ax
+
+            num_unique = len(set(labels))
+            ax.legend(
+                handles=handles[-num_unique:], labels=labels[-num_unique:], 
+                loc="center left", bbox_to_anchor=(1.0, 0.5), frameon=False
+                )
+
+            return fig, ax
+
+        anim = super().animate_trajectory(
+            additional_plot_func=remove_prev_handle_labels, **kwargs
+            )
+        
+        return anim
+    

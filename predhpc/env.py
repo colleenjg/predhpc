@@ -151,7 +151,7 @@ class ExploreBox(Environment, util.ParamsMixin):
         "init_random_walls": 5,
         "init_random_teleport_pairs": 2,
         "wall_lengths": [0.1, 0.2],
-        "min_dist": 0.1,
+        "min_dist": 0.1, # between objects (walls is half)
     }
     
     ignored_param_keys = []
@@ -426,7 +426,7 @@ class ExploreBox(Environment, util.ParamsMixin):
 
     def sample_coords(self, min_dist=None, max_attempts=1000):
         """Sample coordinates situated at least min_dist from the closest 
-        object or wall.
+        object (half for walls).
 
         Args:
             min_dist (float, optional): minimum distance to closest object or 
@@ -452,17 +452,14 @@ class ExploreBox(Environment, util.ParamsMixin):
 
             coords = np.array([x, y])
 
-            # check distance to walls
-            closest_dist = min([
-                self.get_dist_from_coords_to_closest_object(coords),
-                self.get_dist_from_coords_to_closest_wall(coords)
-            ])
-            if closest_dist >= min_dist:
-                break
+            # check distance to objects, then walls
+            if self.get_dist_from_coords_to_closest_object(coords) >= min_dist:
+                if self.get_dist_from_coords_to_closest_wall(coords) >= min_dist / 2:
+                    break 
             if i > max_attempts:
                 raise ValueError(
                     "Could not sample valid coordinates situated at least "
-                    f"{min_dist} from the closest objects / walls."
+                    f"{min_dist} from the closest objects (or half for walls)."
                     )
             i += 1
         
@@ -474,8 +471,8 @@ class ExploreBox(Environment, util.ParamsMixin):
 
         Args:
             start_coords (1d array): start of wall.
-            min_dist (float, optional): minimum distance to closest object or
-                wall. Defaults to None.
+            min_dist (float, optional): minimum distance to closest object. 
+                Defaults to None.
         
         Returns:
             end_coords (1d array): sampled end of wall coordinates [x, y]. 
@@ -486,14 +483,14 @@ class ExploreBox(Environment, util.ParamsMixin):
             return None
 
         if min_dist is None:
-            min_dist = self.min_dist
+            min_dist = self.min_dist / 2
 
         # sample wall length
         wall_length = np.random.uniform(*self.wall_lengths)
 
         # sample orientation + direction, then cycle through if needed, before 
         # abandoning each time check that the wall's max distance from another 
-        # wall is reasonable and distance from objects.
+        # objects is reasonable.
         wall_orientations = ["x", "y"]
         wall_directions = [-1, 1]
         wall_ori_direcs = list(itertools.product(wall_orientations, wall_directions))
@@ -706,7 +703,7 @@ class ExploreBox(Environment, util.ParamsMixin):
                         )
                 i += 1
 
-    def plot_environment(self, fig=None, ax=None, remove_prev_legend=True, **kwargs):
+    def plot_environment(self, fig=None, ax=None, add_labels=None, **kwargs):
         """Plot the environment.
 
         Args:
@@ -728,12 +725,17 @@ class ExploreBox(Environment, util.ParamsMixin):
             def __exit__(self, type, value, traceback):
                 self.env.plot_objects = self.plot_objects
 
+        if fig is None and ax is None:
+            env_width = self.extent[1] - self.extent[0]
+            add_y = 0
+            if self.plot_objects:
+                add_x = 3 * env_width # for legend and labels
+            fig, ax = plt.subplots(
+                figsize=(3 * env_width + add_x, 3 * (self.extent[3] - self.extent[2]))
+            )
+
         with DontPlotObjects(self):
             fig, ax = super().plot_environment(fig=fig, ax=ax, **kwargs)
-
-        if remove_prev_legend:
-            # Do something here?
-            pass
 
         if self.plot_objects:
             type_num_to_plot_params_dict = copy.deepcopy(self.type_num_to_plot_params_dict)
