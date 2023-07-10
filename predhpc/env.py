@@ -1,11 +1,15 @@
 import copy
 import itertools
+from typing import Any
 import warnings
 
 import numpy as np
 from matplotlib import pyplot as plt
+from matplotlib import markers
+from matplotlib import figure as mpl_figure
 
 from ratinabox import Environment
+from ratinabox import utils as rutils
 
 from predhpc import util
 
@@ -24,8 +28,8 @@ class TEnv(Environment, util.ParamsManagerMixin):
         "prop_env": 0.2,  # T-shape arms and stem width (prop of env dims)
         "scale_x": 1,  # env width
         "scale_y": 1,  # env height
-        "prop_x": None,  # T-shape stem width (prop of env width)
-        "prop_y": None,  # T-shape arms width (prop of env height)
+        "stem_width_as_prop_of_x": None,  # T-shape stem width (prop of env width)
+        "arm_height_as_prop_of_y": None,  # T-shape arms width (prop of env height)
     }
 
     ignored_param_keys = ["boundary", "scale", "aspect"]
@@ -37,8 +41,8 @@ class TEnv(Environment, util.ParamsManagerMixin):
         "holes": [],  # no holes
     }
 
-    def __init__(self, params=dict()):
-        self.check_ignored_params(params)
+    def __init__(self, params: dict[str, Any] = dict()):
+        self.check_if_ignored_params(params)
 
         self.params = copy.deepcopy(__class__.default_params)
         self.params.update(params)
@@ -47,13 +51,14 @@ class TEnv(Environment, util.ParamsManagerMixin):
 
         super().__init__(self.params)
 
+        prop_env = self.prop_env  # type: ignore[reportGeneralTypeIssues]
         self.stem_width_as_prop_of_x = (
-            self.prop_env
+            prop_env
             if self.stem_width_as_prop_of_x is None
             else self.stem_width_as_prop_of_x
         )
         self.arm_height_as_prop_of_y = (
-            self.prop_env
+            prop_env
             if self.arm_height_as_prop_of_y is None
             else self.arm_height_as_prop_of_y
         )
@@ -65,76 +70,113 @@ class TEnv(Environment, util.ParamsManagerMixin):
             self.params[key] = value
 
         self.params["boundary"] = util.get_T_shape_env_boundaries(
-            prop=self.params["prop_env"],
+            prop_env=self.params["prop_env"],
             scale_x=self.params["scale_x"],
             scale_y=self.params["scale_y"],
-            prop_x=self.params["prop_x"],
-            prop_y=self.params["prop_y"],
+            stem_width_as_prop_of_x=self.params["stem_width_as_prop_of_x"],
+            arm_height_as_prop_of_y=self.params["arm_height_as_prop_of_y"],
         )
 
+    def get_scale_x(self):
+        """Get the x-scale of the environament in the x direction."""
+
+        return self.scale_x  # type: ignore[reportGeneralTypeIssues]
+
+    def get_scale_y(self):
+        """Get the y-scale of the environament in the x direction."""
+
+        return self.scale_y  # type: ignore[reportGeneralTypeIssues]
+
     @property
-    def branch_y(self):
+    def branch_y(self) -> float:
         if not hasattr(self, "_branch_y"):
-            self._branch_y = (1 - self.arm_height_as_prop_of_y) * self.scale_y
+            self._branch_y = (1 - self.arm_height_as_prop_of_y) * self.get_scale_y()
         return self._branch_y
 
     @property
-    def left_T_end(self):
+    def left_T_end(self) -> list[float]:
         if not hasattr(self, "_left_T_end"):
-            x_dim = self.stem_width_as_prop_of_x / 2 * self.scale_x
-            y_dim = (1 - self.arm_height_as_prop_of_y / 2) * self.scale_y
+            x_dim = self.stem_width_as_prop_of_x / 2 * self.get_scale_x()
+            y_dim = (1 - self.arm_height_as_prop_of_y / 2) * self.get_scale_y()
             self._left_T_end = [x_dim, y_dim]
         return self._left_T_end
 
     @property
-    def right_T_end(self):
+    def right_T_end(self) -> list[float]:
         if not hasattr(self, "_right_T_end"):
-            x_dim = (1 - self.stem_width_as_prop_of_x / 2) * self.scale_x
-            y_dim = (1 - self.arm_height_as_prop_of_y / 2) * self.scale_y
+            x_dim = (1 - self.stem_width_as_prop_of_x / 2) * self.get_scale_x()
+            y_dim = (1 - self.arm_height_as_prop_of_y / 2) * self.get_scale_y()
             self._right_T_end = [x_dim, y_dim]
         return self._right_T_end
 
     @property
-    def T_ends(self):
+    def T_ends(self) -> list[list[float]]:
         """Get the coordinates of the ends of the T-shape arms."""
 
         return [self.left_T_end, self.right_T_end]
 
     @property
-    def T_start(self):
+    def T_start(self) -> list[float]:
         """Get the coordinates of the start of the T-shape."""
 
         if not hasattr(self, "_T_start"):
-            x_dim = 0.5 * self.scale_x
-            y_dim = (self.arm_height_as_prop_of_y / 2) * self.scale_y
+            x_dim = 0.5 * self.get_scale_x()
+            y_dim = (self.arm_height_as_prop_of_y / 2) * self.get_scale_y()
             self._T_start = [x_dim, y_dim]
 
         return self._T_start
 
     @property
-    def T_split(self):
+    def T_split(self) -> list[float]:
         """Get the coordinates of the split of the T branches."""
 
         if not hasattr(self, "_T_split"):
-            x_dim = 0.5 * self.scale_x
-            y_dim = (1 - self.arm_height_as_prop_of_y / 2) * self.scale_y
+            x_dim = 0.5 * self.get_scale_x()
+            y_dim = (1 - self.arm_height_as_prop_of_y / 2) * self.get_scale_y()
             self._T_split = [x_dim, y_dim]
 
         return self._T_split
 
-    def plot_environment(self, fig=None, ax=None, **kwargs):
+    def plot_environment(
+        self,
+        fig: mpl_figure.Figure | None = None,
+        ax: plt.Axes | None = None,
+        autosave: bool | None = None,
+        **kwargs,
+    ) -> tuple[mpl_figure.Figure, plt.Axes]:
         """Plot the environment."""
 
-        fig, ax = super().plot_environment(fig=fig, ax=ax, **kwargs)
+        fig, ax_env = super().plot_environment(fig=fig, ax=ax, autosave=False, **kwargs)
+
+        if ax is None:
+            raise RuntimeError("ax should not be None.")
 
         ax.scatter(
-            *self.T_start, marker="o", color="blue", s=20, zorder=5, label="start"
+            *self.T_start,
+            marker=markers.MarkerStyle("o"),
+            color="blue",
+            s=20,
+            zorder=5,
+            label="start",
         )
         ax.scatter(
-            *self.left_T_end, marker="x", color="red", s=20, zorder=5, label="reset"
+            *self.left_T_end,
+            marker=markers.MarkerStyle("x"),
+            color="red",
+            s=20,
+            zorder=5,
+            label="reset",
         )
-        ax.scatter(*self.right_T_end, marker="x", color="red", s=20, zorder=5)
+        ax.scatter(
+            *self.right_T_end,
+            marker=markers.MarkerStyle("x"),
+            color="red",
+            s=20,
+            zorder=5,
+        )
         ax.legend(loc="lower right", frameon=False)
+
+        rutils.save_figure(fig, "Environment", save=autosave)
 
         return fig, ax
 
@@ -151,7 +193,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         "min_dist": 0.1,  # between objects (walls is half)
     }
 
-    ignored_param_keys = []
+    ignored_param_keys = list()
     ignored_params = {key: None for key in ignored_param_keys}
 
     fixed_params = {
@@ -161,10 +203,10 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         "boundary": None,
     }
 
-    def __init__(self, params=dict()):
+    def __init__(self, params: dict[str, Any] = dict()):
         """Initialize the environment."""
 
-        self.check_ignored_params(params)
+        self.check_if_ignored_params(params)
 
         self.params = copy.deepcopy(__class__.default_params)
         self.params.update(params)
@@ -173,17 +215,19 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
 
         super().__init__(self.params)
 
-        if min(self.wall_lengths) <= 0:
+        if min(self.wall_lengths) <= 0:  # type: ignore[reportGeneralTypeIssues]
             raise ValueError("Wall lengths must be positive.")
 
         self.num_teleport_pairs = 0
 
-        self.add_reward_objects(self.init_random_reward_obj)
-        self.add_novel_objects(self.init_random_novel_obj)
-        self.add_teleport_pairs(self.init_random_teleport_pairs)
-        self.add_walls(self.init_random_walls)
+        self.add_reward_objects(self.init_random_reward_obj)  # type: ignore[reportGeneralTypeIssues]
+        self.add_novel_objects(self.init_random_novel_obj)  # type: ignore[reportGeneralTypeIssues]
+        self.add_teleport_pairs(self.init_random_teleport_pairs)  # type: ignore[reportGeneralTypeIssues]
+        self.add_walls(self.init_random_walls)  # type: ignore[reportGeneralTypeIssues]
 
-    def get_new_teleport_pair_obj_type_nums(self, first=None):
+    def get_new_teleport_pair_obj_type_nums(
+        self, first: int | None = None
+    ) -> dict[str, int]:
         """Get object type numbers for a new teleport pair.
 
         Args:
@@ -197,6 +241,8 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
 
         if first is None:
             first = np.max(list(self.obj_type_num_to_name_dict.keys())) + 1
+
+        first = int(first)  # type: ignore[reportGeneralTypeIssues]
 
         obj_type_nums = {
             "in": first,
@@ -219,7 +265,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
                 delattr(self, dict_attr_name)
 
     @property
-    def obj_type_num_to_name_dict(self):
+    def obj_type_num_to_name_dict(self) -> dict[int, str]:
         """Dictionary for getting object type name from number."""
 
         if not hasattr(self, "_obj_type_num_to_name_dict"):
@@ -239,7 +285,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         return self._obj_type_num_to_name_dict
 
     @property
-    def type_name_to_num_dict(self):
+    def type_name_to_num_dict(self) -> dict[str, int]:
         """Dictionary for getting object type number from name."""
 
         obj_type_name_to_num_dict = {
@@ -249,7 +295,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         return obj_type_name_to_num_dict
 
     @property
-    def type_num_to_plot_params_dict(self):
+    def type_num_to_plot_params_dict(self) -> dict[int, dict[str, Any]]:
         """Dictionary for getting object type number from name."""
 
         if not hasattr(self, "_type_num_to_plot_params_dict"):
@@ -259,7 +305,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
                 if val.startswith("teleport") and "_in" in val
             ]
             teleport_vals = np.linspace(0.5, 1, len(teleport_nums))
-            teleport_colors = plt.get_cmap("Oranges")(teleport_vals)
+            teleport_colors = plt.get_cmap("Oranges")(teleport_vals)  # type: ignore[reportGeneralTypeIssues]
 
             type_num_to_plot_params_dict = dict()
             for num, name in self.obj_type_num_to_name_dict.items():
@@ -301,7 +347,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
 
         return self._type_num_to_plot_params_dict
 
-    def get_teleport_pair_orientation(self, teleport_pair_num):
+    def get_teleport_pair_orientation(self, teleport_pair_num: int = 1) -> str:
         """Get the orientation of a teleport pair.
 
         Args:
@@ -318,7 +364,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
 
         return orientation
 
-    def get_number_object_types_split(self):
+    def get_number_object_types_split(self) -> tuple[int, int, int]:
         """Get the number of each object type.
 
         Returns:
@@ -326,7 +372,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         """
 
         num_novel, num_reward, num_teleport = 0, 0, 0
-        for object_type in self.object_types:
+        for object_type in self.object_types:  # type: ignore[reportGeneralTypeIssues]
             object_name = self.obj_type_num_to_name_dict[object_type]
             if object_name == "novel":
                 num_novel += 1
@@ -340,7 +386,9 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
 
         return num_novel, num_reward, num_teleport
 
-    def get_teleport_pair_marker(self, teleport_pair_num, direction="in"):
+    def get_teleport_pair_marker(
+        self, teleport_pair_num: int = 1, direction: str = "in"
+    ) -> str:
         """Get the orientation of a teleport pair.
 
         Args:
@@ -365,7 +413,9 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         for key, value in all_fixed_params.items():
             self.params[key] = value
 
-    def get_dist_from_coords_to_closest_object(self, coords):
+    def get_dist_from_coords_to_closest_object(
+        self, coords: np.ndarray[tuple[int], np.dtype[np.float64]]
+    ) -> float:
         """Get the distance from a set of coordinates to the closest objects.
 
         Args:
@@ -378,16 +428,18 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         if len(self.objects["objects"]) == 0:
             return np.inf
 
-        closest_dist = min(
-            [
-                np.linalg.norm(coords - obj_coords, ord=2)
-                for obj_coords in self.objects["objects"]
-            ]
-        )
+        closest_distances = list()
+        for obj_coords in self.objects["objects"]:
+            closest_distance = np.linalg.norm(coords - np.asarray(obj_coords), ord=2)
+            closest_distances.append(closest_distance)
+
+        closest_dist = np.min(closest_distances)
 
         return closest_dist
 
-    def get_dist_from_coords_to_closest_wall(self, coords):
+    def get_dist_from_coords_to_closest_wall(
+        self, coords: np.ndarray[tuple[int, int], np.dtype[np.float64]]
+    ) -> float:
         """Get the distance from a set of coordinates to the closest wall.
 
         Args:
@@ -401,13 +453,15 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
             return np.inf
 
         # returns points (1) x vectors x coords
-        closest_dist = np.min(
-            util.shortest_distances_from_points_to_lines(coords, self.walls)
+        closest_dist = float(
+            np.min(util.shortest_distances_from_points_to_lines(coords, self.walls))
         )
 
         return closest_dist
 
-    def sample_coords(self, min_dist=None, max_attempts=1000):
+    def sample_coords(
+        self, min_dist: float | None = None, max_attempts: int = 1000
+    ) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
         """Sample coordinates situated at least min_dist from the closest
         object (half for walls).
 
@@ -426,7 +480,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         """
 
         if min_dist is None:
-            min_dist = self.min_dist
+            min_dist = float(self.min_dist)  # type: ignore[reportGeneralTypeIssues]
 
         i = 0
         while True:
@@ -448,7 +502,11 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
 
         return coords
 
-    def sample_wall_end(self, start_coords, min_dist=None):
+    def sample_wall_end(
+        self,
+        start_coords: np.ndarray[tuple[int], np.dtype[np.float64]],
+        min_dist: float | None = None,
+    ) -> np.ndarray[tuple[int], np.dtype[np.float64]] | None:
         """Sample valid coordinates for the end of a wall given the start coordinates.
 
         Args:
@@ -465,10 +523,10 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
             return None
 
         if min_dist is None:
-            min_dist = self.min_dist / 2
+            min_dist = float(self.min_dist / 2)  # type: ignore[reportGeneralTypeIssues]
 
         # sample wall length
-        wall_length = np.random.uniform(*self.wall_lengths)
+        wall_length = np.random.uniform(*self.wall_lengths)  # type: ignore[reportGeneralTypeIssues]
 
         # sample orientation + direction, then cycle through if needed, before
         # abandoning each time check that the wall's max distance from another
@@ -478,6 +536,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         wall_ori_direcs = list(itertools.product(wall_orientations, wall_directions))
         np.random.shuffle(wall_ori_direcs)
 
+        end_coords = None
         for wall_ori, wall_direc in wall_ori_direcs:
             c = 0 if wall_ori == "x" else 1
             end_coords = np.array(start_coords)  # new array
@@ -486,10 +545,9 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
             # check that end_coords are within bounds
             if not self.check_if_position_is_in_environment(end_coords):
                 end_coords = None
-                continue
 
             # check that end_coords are far enough from objects, if there are any
-            if len(self.objects["objects"]) != 0:
+            if end_coords is not None and len(self.objects["objects"]) != 0:
                 closest_dist = np.min(
                     util.shortest_distances_from_points_to_lines(
                         self.objects["objects"], [start_coords, end_coords]
@@ -498,11 +556,20 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
 
                 if closest_dist < min_dist:
                     end_coords = None
-                    continue
+
+            if end_coords is not None:
+                break
 
         return end_coords
 
-    def add_reward_objects(self, num=1):
+    def add_object(
+        self,
+        object: np.ndarray[tuple[int], np.dtype[np.float64]],
+        object_type: str | int = "new",
+    ):
+        super().add_object(object, type=object_type)  # type: ignore[reportGeneralTypeIssues]
+
+    def add_reward_objects(self, num: int = 1):
         """Add reward objects.
 
         Args:
@@ -513,12 +580,12 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
 
         for _ in range(num):
             coords = self.sample_coords()
-            self.add_object(coords, type=reward_type)
+            self.add_object(coords, object_type=reward_type)
 
         if num > 0:
             self.reset_obj_type_dicts()
 
-    def add_novel_objects(self, num=1):
+    def add_novel_objects(self, num: int = 1):
         """Add novel objects.
 
         Args:
@@ -529,12 +596,12 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
 
         for _ in range(num):
             coords = self.sample_coords()
-            self.add_object(coords, type=novel_type)
+            self.add_object(coords, object_type=novel_type)
 
         if num > 0:
             self.reset_obj_type_dicts()
 
-    def add_teleport_pairs(self, num=1):
+    def add_teleport_pairs(self, num: int = 1):
         """Add teleport pairs (directional).
 
         Args:
@@ -545,12 +612,12 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
             obj_type_nums = self.get_new_teleport_pair_obj_type_nums()
             for _, i in obj_type_nums.items():
                 coords = self.sample_coords()
-                self.add_object(coords, type=i)
+                self.add_object(coords, object_type=i)
             self.num_teleport_pairs += 1
             self.reset_obj_type_dicts()  # within loop, so that teleport pair object types are not reused
 
     @property
-    def teleport_pairs_dict(self):
+    def teleport_pairs_dict(self) -> dict[int, dict[str, tuple[int, list[float]]]]:
         """Returns dictionary of teleport pairs (directional)."""
 
         if not hasattr(self, "_teleport_pairs_dict"):
@@ -568,14 +635,15 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
                         )
                     obj_type_out = self.type_name_to_num_dict[out_key]
 
-                    coords = []
+                    coords = list()
                     for obj_type in [obj_type_in, obj_type_out]:
                         object_idxs = np.where(
                             self.objects["object_types"] == obj_type
                         )[0]
                         if len(object_idxs) != 1:
                             raise RuntimeError(
-                                f"Expected teleport in {teleport_pair} to correspond to exactly one object, but found {len(object_idxs)}."
+                                f"Expected teleport in {teleport_pair} to correspond "
+                                f"to exactly one object, but found {len(object_idxs)}."
                             )
                         coords.append(self.objects["objects"][object_idxs[0]])
 
@@ -588,7 +656,12 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
 
         return self._teleport_pairs_dict
 
-    def check_walls_ends_too_close(self, new_wall_coords, min_dist=None):
+    def check_if_walls_ends_too_close(
+        self,
+        new_wall_coords: np.ndarray[tuple[int, int], np.dtype[np.float64]]
+        | list[list[float]],
+        min_dist=None,
+    ) -> bool:
         """
         Checks whether a new wall's ends is too close to the ends of existing
         walls.
@@ -599,13 +672,23 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
 
         Does NOT check whether the new wall overlaps exactly with an existing
         wall, or intersects near the middle of either wall.
+
+        Args:
+            new_wall_coords (list or 2D array): coordinates of new wall,
+                with dims [[x1, y1], [x2, y2]]
+            min_dist (float, optional): minimum distance between walls.
+                Defaults to None.
+
+        Returns:
+            bool: True if the ends of a new wall are too close to an existing wall,
+                else False.
         """
 
         if len(self.walls) == 0:
             return False
 
         if min_dist is None:
-            min_dist = self.min_dist
+            min_dist = float(self.min_dist)  # type: ignore[reportGeneralTypeIssues]
 
         new_wall = np.asarray(new_wall_coords)
 
@@ -620,17 +703,17 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
 
             # if angle is less than 45 degrees, check any ends of the walls are too
             # close together
-            dists, coords = [], []
+            distances, coords = list(), []
             for c1, c2 in itertools.product([0, 1], [0, 1]):
                 coords.append([c1, c2])
-                dists.append(np.linalg.norm(wall[c1] - new_wall[c2], ord=2))
+                distances.append(np.linalg.norm(wall[c1] - new_wall[c2], ord=2))
 
-            order = np.argsort(dists)
+            order = np.argsort(distances)
 
-            if dists[order[0]] < self.min_dist:
+            if distances[order[0]] < min_dist:
                 # farther must be at least as far as if the walls
                 # intersected only at their ends (no intersection)
-                farthest = dists[order[-1]]
+                farthest = distances[order[-1]]
                 c1, c2 = coords[order[-1]]
 
                 end1 = wall[c1] - wall[1 - c1]
@@ -642,7 +725,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
 
         return False
 
-    def add_walls(self, num=1, max_attempts=1000):
+    def add_walls(self, num: int = 1, max_attempts: int = 1000):
         """Add walls.
 
         Checks that walls are not too close to objects and that they do not
@@ -673,7 +756,9 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
                 end_coords = self.sample_wall_end(start_coords)
                 if end_coords is not None:
                     # check that wall ends are not too close to another
-                    if self.check_walls_ends_too_close([start_coords, end_coords]):
+                    if self.check_if_walls_ends_too_close(
+                        np.asarray([start_coords, end_coords])
+                    ):
                         end_coords = None
 
                 if end_coords is not None:
@@ -685,13 +770,21 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
                     )
                 i += 1
 
-    def plot_environment(self, fig=None, ax=None, add_labels=None, **kwargs):
+    def plot_environment(
+        self,
+        fig: mpl_figure.Figure | None = None,
+        ax: plt.Axes | None = None,
+        no_legend: bool = False,
+        autosave: bool | None = None,
+        **kwargs,
+    ) -> tuple[mpl_figure.Figure, plt.Axes]:
         """Plot the environment.
 
         Args:
             fig (matplotlib figure, optional): figure to plot on. Defaults to None.
             ax (matplotlib axis, optional): axis to plot on. Defaults to None.
-
+            no_legend (bool, optional): whether to remove legend. Defaults to False.
+            autosave (bool, optional): whether to save the plot. Defaults to None.
 
         Returns:
             fig (matplotlib figure): figure with environment plotted.
@@ -711,7 +804,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
 
         if fig is None and ax is None:
             env_width = self.extent[1] - self.extent[0]
-            add_y = 0
+            add_x = 0
             if self.plot_objects:
                 add_x = 3 * env_width  # for legend and labels
             fig, ax = plt.subplots(
@@ -719,7 +812,10 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
             )
 
         with DontPlotObjects(self):
-            fig, ax = super().plot_environment(fig=fig, ax=ax, **kwargs)
+            fig, ax = super().plot_environment(fig=fig, ax=ax, autosave=False, **kwargs)
+
+        if ax is None:
+            raise RuntimeError("ax is None.")
 
         if self.plot_objects:
             type_num_to_plot_params_dict = copy.deepcopy(
@@ -736,5 +832,10 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
                 )
 
             ax.legend(loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
+
+        if no_legend and ax.get_legend():
+            ax.get_legend().remove()
+
+        rutils.save_figure(fig, "Environment", save=autosave)
 
         return fig, ax

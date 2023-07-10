@@ -9,7 +9,7 @@ with open("requirements.txt", "r") as f:
 setuptools.setup(
     name="predhpc",
     version="0.0.1",
-    author="Colleen J. Gillon"
+    author="Colleen J. Gillon",
     author_email="c.gillon@imperial.ac.uk",
     description="A package for investigating how predictive activity emerges in the HPC",
     long_description=long_description,

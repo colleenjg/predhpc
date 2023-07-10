@@ -3,9 +3,11 @@
 from typing import Any
 
 from matplotlib import pyplot as plt
+from matplotlib import markers
 import numpy as np
 from tqdm import tqdm
 from ratinabox import Environment, PlaceCells
+from ratinabox import utils as rutils
 
 from predhpc import agent, neurons, plot_util
 
@@ -17,16 +19,16 @@ ENV_PARAMS = {
 
 DT = 0.02
 AGENT_PARAMS = {
-    "reset_tolerance_prop": 0.8,
-    "target_tolerance_prop": 3,
+    "reset_reached_within_tolerance_prop_to_dt": 0.8,
+    "target_reached_within_tolerance_prop_to_dt": 3,
     "dt": DT,
     "speed_mean": 1,  # sets directionality
     "speed_std": 0.5,
-    "start_pos": 0 + DT,
-    "reset_pos": ENV_PARAMS["scale"] - DT,
-    "target_pos": ENV_PARAMS["scale"] - DT * 8,
+    "start_position": 0 + DT,
+    "reset_position": ENV_PARAMS["scale"] - DT,
+    "target_position": ENV_PARAMS["scale"] - DT * 8,
     "fixed_direction": True,
-    "target_wait": 100,
+    "wait_between_targets": 30,
 }
 
 CA3_PC_PARAMS = {
@@ -57,6 +59,7 @@ def plot_1D_env_info(
     CA3_PCs: PlaceCells,
     CA1s: neurons.BTSPLayer,
     CA1_weights: list[np.ndarray[tuple[int, int], np.dtype[np.float64]]],
+    autosave: bool | None = None,
 ):
     """Plot environment info for a 1D experiment:
         environment, place cell locations, rate map, CA1 weights, CA1 rate map
@@ -66,6 +69,7 @@ def plot_1D_env_info(
         CA3_PCs (PlaceCells): CA3 place cells.
         CA1s (neurons.BTSPLayer): CA1 neurons.
         CA1_weights (list): List of CA1 weights (num_epochs x num_cells x num_PCs).
+        autosave (bool, optional): Whether to autosave the figure. Defaults to None.
     """
 
     # 8 plots
@@ -76,24 +80,28 @@ def plot_1D_env_info(
         nrows=len(height_ratios), figsize=figsize, sharex=True, gridspec_kw=gridspec_kw
     )
 
-    plot_util.plot_1D_reset_environment(Ag, fig=fig, ax=ax[0])
+    plot_util.plot_1D_reset_environment(Ag, fig=fig, ax=ax[0], autosave=False)
 
-    CA3_PCs.plot_place_cell_locations(fig=fig, ax=ax[1])
-    plot_util.plot_overlayed_rate_maps(CA3_PCs, fig=fig, ax=ax[1], method="max")
+    CA3_PCs.plot_place_cell_locations(fig=fig, ax=ax[1], autosave=False)
+    plot_util.plot_overlayed_rate_maps(
+        CA3_PCs, fig=fig, ax=ax[1], method="max", autosave=False
+    )
     ymin, ymax = ax[1].get_ylim()
     ymin = min(ymin, 0)
     ax[1].set_ylim((ymin - 0.05 * (ymax - ymin)), ymax)
     ax[1].set_title("CA3 place cell locations")
 
-    CA3_PCs.plot_rate_map(chosen_neurons="all", fig=fig, ax=ax[2])
+    CA3_PCs.plot_rate_map(chosen_neurons="all", fig=fig, ax=ax[2], autosave=False)
     ax[2].set_title("CA3 rate map")
 
     plot_util.plot_1D_input_place_cell_weights(
-        np.asarray(CA1_weights), CA3_PCs, fig=fig, ax=ax[3]
+        np.asarray(CA1_weights), CA3_PCs, fig=fig, ax=ax[3], autosave=False
     )
-    plot_util.plot_1D_rate_map_across_learning(Ag, CA1s, fig=fig, ax=ax[4:7])
+    plot_util.plot_1D_rate_map_across_learning(
+        Ag, CA1s, fig=fig, ax=ax[4:7], autosave=False
+    )
 
-    plot_util.plot_1D_reset_environment(Ag, fig=fig, ax=ax[7])
+    plot_util.plot_1D_reset_environment(Ag, fig=fig, ax=ax[7], autosave=False)
 
     for a, ax_ in enumerate(ax.ravel()[:-1]):
         ax_.set_xlabel("")
@@ -101,9 +109,14 @@ def plot_1D_env_info(
             ax_.spines["bottom"].set_visible(False)
             ax_.xaxis.set_visible(False)
 
+    rutils.save_figure(fig, "1D_env_info", save=autosave)
+
 
 def plot_time_info(
-    Ag: agent.ResetableAgent, CA3_PCs: PlaceCells, CA1s: neurons.BTSPLayer
+    Ag: agent.ResetableAgent,
+    CA3_PCs: PlaceCells,
+    CA1s: neurons.BTSPLayer,
+    autosave: bool | None = None,
 ):
     """Plot time info for a 1D experiment:
         trajectories, CA1 rate timeseries, CA3 rate timeseries
@@ -112,6 +125,7 @@ def plot_time_info(
         Ag (agent.ResetableAgent): Agent.
         CA3_PCs (PlaceCells): CA3 place cells.
         CA1s (neurons.BTSPLayer): CA1 neurons.
+        autosave (bool, optional): Whether to autosave the figure. Defaults to None.
     """
 
     # 3 plots
@@ -122,25 +136,38 @@ def plot_time_info(
         nrows=len(height_ratios), figsize=figsize, sharex=True, gridspec_kw=gridspec_kw
     )
 
-    Ag.plot_trajectory_resets(framerate=1 / Ag.dt, fig=fig, ax=ax[0])
+    Ag.plot_trajectory_resets(framerate=1 / Ag.dt, fig=fig, ax=ax[0], autosave=False)
     ax[0].set_title("Trajectories")
 
-    CA3_PCs.plot_rate_timeseries(chosen_neurons="all", spikes=True, fig=fig, ax=ax[2])
+    CA3_PCs.plot_rate_timeseries(
+        chosen_neurons="all", spikes=True, fig=fig, ax=ax[2], autosave=False
+    )
     ax[2].set_title("CA3 rate timeseries")
 
     CA1s.plot_rate_timeseries(
-        chosen_neurons="all", spikes=True, fig=fig, ax=ax[1], shift=-10, overlap=1
+        chosen_neurons="all",
+        spikes=True,
+        fig=fig,
+        ax=ax[1],
+        shift=-10,
+        overlap=1,
+        autosave=False,
     )
     ax[1].set_title("CA1 rate timeseries")
     lo, hi = ax[1].get_ylim()
     for t in CA1s.history["btsp_events"]:
         y_hei = lo + (hi - lo) * 0.95
         ax[1].scatter(
-            CA1s.history["t"][t] / 60, y_hei, marker="x", s=8, color="k", alpha=0.7
+            CA1s.history["t"][t] / 60,
+            y_hei,
+            marker=markers.MarkerStyle("x"),
+            s=8,
+            color="k",
+            alpha=0.7,
         )
     for positions, ls in [
-        (Ag.reached_reset_pos, "dashed"),
-        (Ag.reached_target_pos, "dotted"),
+        (Ag.reached_reset_position, "dashed"),
+        (Ag.reached_target_position, "dotted"),
     ]:
         for t in positions:
             ax[1].axvline(
@@ -155,6 +182,8 @@ def plot_time_info(
     for ax_ in ax.ravel()[:-1]:
         ax_.set_xlabel("")
 
+        rutils.save_figure(fig, "time_info", save=autosave)
+
 
 def learn_1D_btsp(
     env_params: dict[str, Any],
@@ -165,7 +194,8 @@ def learn_1D_btsp(
     max_num_steps: int = 5000,
     weight_recording_freq: int = 100,
     use_Hebbian: bool = False,
-    num_target_reaches: int = 5,
+    target_reach_num_for_btsp: int = 5,
+    autosave: bool | None = None,
 ) -> tuple[Environment, agent.ResetableAgent, PlaceCells, neurons.BTSPLayer]:
     """Run a 1D learning experiment with BTSP learning.
 
@@ -182,7 +212,9 @@ def learn_1D_btsp(
             Defaults to 100.
         use_Hebbian (bool, optional): Whether to use Hebbian learning.
             Defaults to False.
-        num_target_reaches (int, optional): Number of targets to use. Defaults to 5.
+        target_reach_num_for_btsp (int, optional): Number of target reaches at which to
+            apply BTSP event. Defaults to 5.
+        autosave (bool, optional): Whether to autosave the figure. Defaults to None.
 
     Returns:
         Environment, Agent, CA3 place cells, CA1 neurons
@@ -202,7 +234,7 @@ def learn_1D_btsp(
     # run learning
     restarted = False
     CA3_PCs_name = CA3_PCs.name  # type: ignore[reportGeneralTypeIssues]
-    CA3_PCs_n = CA3_PCs.n  # type: ignore[reportGeneralTypeIssues]
+    CA1s_n = CA1s.n  # type: ignore[reportGeneralTypeIssues]
     CA1_weights = [CA1s.inputs[CA3_PCs_name]["w"].copy()]
     break_in_n = -1
     for i in tqdm(range(max_num_steps)):
@@ -210,10 +242,10 @@ def learn_1D_btsp(
         CA3_PCs.update()
 
         # check whether a restart BTSP signal should go out
-        btsp_targs = []
-        if len(Ag.reached_target_pos) == num_target_reaches:
-            if restarted and CA3_PCs_n > 1:
-                btsp_targs = [CA3_PCs_n - 1]
+        btsp_targs = list()
+        if len(Ag.reached_target_position) == target_reach_num_for_btsp:
+            if restarted and CA1s_n > 1:
+                btsp_targs = [CA1s_n - 1]
 
             # check whether a target BTSP signal should go out
             if Ag.reached_target:
@@ -228,25 +260,25 @@ def learn_1D_btsp(
             CA1_weights.append(CA1s.inputs[CA3_PCs_name]["w"].copy())
 
         if break_in_n < 0:
-            if len(Ag.reached_target_pos) >= num_rewards:
+            if len(Ag.reached_target_position) >= num_rewards:
                 break_in_n = 20
         else:
             if break_in_n == 0:
                 break
             break_in_n -= 1
 
-    if len(Ag.reached_target_pos) < num_rewards:
+    if len(Ag.reached_target_position) < num_rewards:
         print(
-            f"Only reached the reward {len(Ag.reached_target_pos)} times "
+            f"Only reached the reward {len(Ag.reached_target_position)} times "
             f"(target: {num_rewards})."
         )
 
     Ag.log_trajectory_stats_to_date()
-    Ag.log_trajectory_stats_to_date(time=False)
+    Ag.log_trajectory_stats_to_date(log_as_time=False)
 
-    plot_1D_env_info(Ag, CA3_PCs, CA1s, CA1_weights)
+    plot_1D_env_info(Ag, CA3_PCs, CA1s, CA1_weights, autosave=autosave)
 
-    plot_time_info(Ag, CA3_PCs, CA1s)
+    plot_time_info(Ag, CA3_PCs, CA1s, autosave=autosave)
 
     return Env, Ag, CA3_PCs, CA1s
 

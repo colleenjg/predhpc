@@ -7,4 +7,4 @@ seaborn
 tqdm
 
 torch
-torchsummary
+torchinfo
