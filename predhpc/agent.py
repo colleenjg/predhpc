@@ -803,13 +803,13 @@ class ResetableAgent(Agent):
         if cmap_min == cmap_max:
             cmap_vals_np[:] = 0.5  # mid point of the colormap
         else:
-            cmap_vals = (cmap_vals - cmap_min) / (cmap_max - cmap_min)
+            cmap_vals_np = (cmap_vals_np - cmap_min) / (cmap_max - cmap_min)
 
         traj_idx = np.concatenate(traj_idx).astype(int)[startid : endid + 1][::skiprate]
 
         if colormap is None:
             colormap = "crest"
-        c = sns.color_palette(colormap, as_cmap=True)(cmap_vals)  # type: ignore[reportGeneralTypeIssues]
+        c = sns.color_palette(colormap, as_cmap=True)(cmap_vals_np)  # type: ignore[reportGeneralTypeIssues]
         ##############################
 
         if self.Environment.dimensionality == "2D":
