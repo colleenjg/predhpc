@@ -9,13 +9,13 @@ from torch.utils.data import TensorDataset, DataLoader
 from torchinfo import summary as tsummary
 
 if TYPE_CHECKING:
-    from neurons import TorchLayer
+    from predhpc import neurons
 
 
 class TorchNeuronModel(torch.nn.Module):
     def __init__(
         self,
-        seq_neuron_layers: list["TorchLayer"],
+        seq_neuron_layers: list["neurons.TorchLayer"],
         device: str = "cpu",
         lr: float = 1e-4,
         RMSprop: bool = False,
@@ -165,7 +165,7 @@ class PredHPC(torch.nn.Module):
 
 
 def save_model(
-    model,
+    model: torch.nn.Module,
     filepath: str | Path = "model.pth.tar",
     epoch_n: int = 0,
     optimizer: torch.optim.Optimizer | None = None,
@@ -187,7 +187,7 @@ def save_model(
     }
 
     if optimizer is not None:
-        state_dict["optimizer"]: optimizer.state_dict()  # type: ignore[reportGeneralTypeIssues]
+        state_dict["optimizer"] = optimizer.state_dict()
 
     torch.save(state_dict, str(filepath))
 
@@ -229,8 +229,8 @@ def run_train(
 
     Args:
         model (torch.nn.Module): Model.
-        train_dl (torch.utils.data.DataLoader): Training dataloader.
-        val_dl (torch.utils.data.DataLoader): Validation dataloader.
+        train_dl (torch.util.data.DataLoader): Training dataloader.
+        val_dl (torch.util.data.DataLoader): Validation dataloader.
         num_epochs (int, optional): Number of training epochs. Defaults to 100.
         device (str, optional): Device to train on. Defaults to "cpu".
         log_freq (int, optional): Logging frequency. Defaults to 10.
@@ -253,7 +253,9 @@ def run_train(
 
     model.to(device)
 
-    history = {key: [] for key in ["epoch_n", "train_loss", "val_loss"]}
+    history = {
+        key: [] for key in ["epoch_n", "train_loss", "val_loss"]
+    }  # type: dict[str, list[int | np.float64]]
     epoch_n = -1
     for epoch_n in range(start_epoch, num_epochs + 1):
         model.train()
@@ -353,37 +355,39 @@ def get_prediction_step_idxs(
     """
 
     if num_prediction_steps == 0:
-        training_idxs, validation_idxs = get_indices(n, prop_val, ordered=ordered)
-        training_idxs = torch.IntTensor(training_idxs)
-        validation_idxs = torch.IntTensor(validation_idxs)
+        training_idxs_np, validation_idxs_np = get_indices(n, prop_val, ordered=ordered)
+        training_idxs = torch.from_numpy(training_idxs_np)
+        validation_idxs = torch.from_numpy(validation_idxs_np)
         training_idxs_y, validation_idxs_y = training_idxs, validation_idxs
     else:
         gap = num_prediction_steps * 2
-        idxs_x = np.arange(n // gap) * gap
+        base_idxs_x = np.arange(n // gap) * gap
 
-        all_idxs_x = list()
-        for i in range(num_prediction_steps):
-            all_idxs_x.append(idxs_x + i)
+        idxs_x = np.sort(
+            np.concatenate(
+                [np.int64(base_idxs_x + 1) for i in range(num_prediction_steps)]
+            )
+        )
+        idxs_y = idxs_x + num_prediction_steps
+        n = len(idxs_x)
 
-        all_idxs_x = np.sort(np.concatenate(all_idxs_x))
-        all_idxs_y = all_idxs_x + num_prediction_steps
-
-        n = len(all_idxs_x)
-
-        if not ordered:
+        if ordered:
+            all_idxs_x = idxs_x
+            all_idxs_y = idxs_y
+        else:
             shuffle_idx = np.arange(n)
             np.random.shuffle(shuffle_idx)
-            all_idxs_x = all_idxs_x[shuffle_idx]
-            all_idxs_y = all_idxs_y[shuffle_idx]
+            all_idxs_x = idxs_x[shuffle_idx]
+            all_idxs_y = idxs_y[shuffle_idx]
 
         num_val = int(n * prop_val)
         training_sub_idxs = np.arange(n - num_val)
         validation_sub_idxs = np.arange(n - num_val, n)  # final indices
 
-        training_idxs = torch.IntTensor(all_idxs_x[training_sub_idxs])
-        validation_idxs = torch.IntTensor(all_idxs_x[validation_sub_idxs])
-        training_idxs_y = torch.IntTensor(all_idxs_y[training_sub_idxs])
-        validation_idxs_y = torch.IntTensor(all_idxs_y[validation_sub_idxs])
+        training_idxs = torch.from_numpy(all_idxs_x[training_sub_idxs])
+        validation_idxs = torch.from_numpy(all_idxs_x[validation_sub_idxs])
+        training_idxs_y = torch.from_numpy(all_idxs_y[training_sub_idxs])
+        validation_idxs_y = torch.from_numpy(all_idxs_y[validation_sub_idxs])
 
     if len(validation_idxs) < minimum_num_examples:
         raise ValueError(
@@ -420,12 +424,11 @@ def get_indices(
     else:
         val_idx = np.sort(np.random.choice(n, num_val, replace=False))
 
-    validation_idxs = np.zeros(n, dtype=bool)
-    validation_idxs[val_idx] = True
-    training_idxs = ~validation_idxs
+    validation_mask = np.zeros(n, dtype=bool)
+    validation_mask[val_idx] = True
 
-    training_idxs = np.arange(len(training_idxs))[training_idxs]
-    validation_idxs = np.arange(len(validation_idxs))[validation_idxs]
+    training_idxs = np.arange(n)[~validation_mask]
+    validation_idxs = np.arange(n)[validation_mask]
 
     return training_idxs, validation_idxs
 
@@ -455,8 +458,8 @@ def get_dataloaders(
         ValueError: If X and y do not have the same length
 
     Returns:
-        train_dl (torch.utils.data.DataLoader): Training dataloader.
-        val_dl (torch.utils.data.DataLoader): Validation dataloader.
+        train_dl (torch.util.data.DataLoader): Training dataloader.
+        val_dl (torch.util.data.DataLoader): Validation dataloader.
     """
 
     if y is not None:
@@ -464,9 +467,9 @@ def get_dataloaders(
             raise ValueError("`num_prediction_steps` must be 0 if y is not None.")
         if len(X) != len(y):
             raise ValueError("X and y must have the same length.")
-        training_idxs, validation_idxs = get_indices(len(X), prop_val, ordered)
-        training_idxs = torch.Tensor(training_idxs)
-        validation_idxs = torch.Tensor(validation_idxs)
+        training_idxs_np, validation_idxs_np = get_indices(len(X), prop_val, ordered)
+        training_idxs = torch.from_numpy(training_idxs_np)
+        validation_idxs = torch.from_numpy(validation_idxs_np)
         training_idxs_y = training_idxs
         validation_idxs_y = validation_idxs
     else:

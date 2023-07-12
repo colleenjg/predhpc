@@ -2,19 +2,19 @@
 
 from typing import Any
 
-from matplotlib import pyplot as plt
+from matplotlib import pyplot as plt  # type: ignore[import]
 from matplotlib import markers
 import numpy as np
-from tqdm import tqdm
-from ratinabox import Environment, PlaceCells
-from ratinabox import utils as rutils
+from tqdm import tqdm  # type: ignore[import]
+from ratinabox import Environment, PlaceCells  # type: ignore[import]
 
-from predhpc import agent, neurons, plot_util
+from predhpc import agent, neurons, plot_util, util
 
 
+SCALE = 1.0
 ENV_PARAMS = {
     "dimensionality": "1D",
-    "scale": 1,
+    "scale": SCALE,
 }
 
 DT = 0.02
@@ -25,8 +25,8 @@ AGENT_PARAMS = {
     "speed_mean": 1,  # sets directionality
     "speed_std": 0.5,
     "start_position": 0 + DT,
-    "reset_position": ENV_PARAMS["scale"] - DT,
-    "target_position": ENV_PARAMS["scale"] - DT * 8,
+    "reset_position": SCALE - DT,
+    "target_position": SCALE - DT * 8,
     "fixed_direction": True,
     "wait_between_targets": 30,
 }
@@ -109,7 +109,7 @@ def plot_1D_env_info(
             ax_.spines["bottom"].set_visible(False)
             ax_.xaxis.set_visible(False)
 
-    rutils.save_figure(fig, "1D_env_info", save=autosave)
+    util.save_figure(fig, "1D_env_info", save=autosave)
 
 
 def plot_time_info(
@@ -182,7 +182,7 @@ def plot_time_info(
     for ax_ in ax.ravel()[:-1]:
         ax_.set_xlabel("")
 
-        rutils.save_figure(fig, "time_info", save=autosave)
+        util.save_figure(fig, "time_info", save=autosave)
 
 
 def learn_1D_btsp(

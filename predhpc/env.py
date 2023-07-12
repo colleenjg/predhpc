@@ -4,11 +4,11 @@ from typing import Any
 import warnings
 
 import numpy as np
-from matplotlib import pyplot as plt
+from matplotlib import pyplot as plt  # type: ignore[import]
 from matplotlib import markers
 from matplotlib import figure as mpl_figure
 
-from ratinabox import Environment
+from ratinabox import Environment  # type: ignore[import]
 from ratinabox import utils as rutils
 
 from predhpc import util
@@ -44,7 +44,7 @@ class TEnv(Environment, util.ParamsManagerMixin):
     def __init__(self, params: dict[str, Any] = dict()):
         self.check_if_ignored_params(params)
 
-        self.params = copy.deepcopy(__class__.default_params)
+        self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
 
         self.set_fixed_params()
@@ -52,16 +52,11 @@ class TEnv(Environment, util.ParamsManagerMixin):
         super().__init__(self.params)
 
         prop_env = self.prop_env  # type: ignore[reportGeneralTypeIssues]
-        self.stem_width_as_prop_of_x = (
-            prop_env
-            if self.stem_width_as_prop_of_x is None
-            else self.stem_width_as_prop_of_x
-        )
-        self.arm_height_as_prop_of_y = (
-            prop_env
-            if self.arm_height_as_prop_of_y is None
-            else self.arm_height_as_prop_of_y
-        )
+        if self.stem_width_as_prop_of_x is None:  # type: ignore[has-type]
+            self.stem_width_as_prop_of_x = prop_env
+
+        if self.arm_height_as_prop_of_y is None:  # type: ignore[has-type]
+            self.arm_height_as_prop_of_y = prop_env
 
     def set_fixed_params(self):
         """Sets fixed parameters."""
@@ -148,8 +143,8 @@ class TEnv(Environment, util.ParamsManagerMixin):
 
         fig, ax_env = super().plot_environment(fig=fig, ax=ax, autosave=False, **kwargs)
 
-        if ax is None:
-            raise RuntimeError("ax should not be None.")
+        if fig is None or ax is None:
+            raise RuntimeError("fig or ax is None.")
 
         ax.scatter(
             *self.T_start,
@@ -176,7 +171,7 @@ class TEnv(Environment, util.ParamsManagerMixin):
         )
         ax.legend(loc="lower right", frameon=False)
 
-        rutils.save_figure(fig, "Environment", save=autosave)
+        util.save_figure(fig, "Environment", save=autosave)
 
         return fig, ax
 
@@ -193,7 +188,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         "min_dist": 0.1,  # between objects (walls is half)
     }
 
-    ignored_param_keys = list()
+    ignored_param_keys = list()  # type: list[str]
     ignored_params = {key: None for key in ignored_param_keys}
 
     fixed_params = {
@@ -208,7 +203,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
 
         self.check_if_ignored_params(params)
 
-        self.params = copy.deepcopy(__class__.default_params)
+        self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
 
         self.set_fixed_params()
@@ -533,7 +528,9 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         # objects is reasonable.
         wall_orientations = ["x", "y"]
         wall_directions = [-1, 1]
-        wall_ori_direcs = list(itertools.product(wall_orientations, wall_directions))
+        wall_ori_direcs = np.asarray(
+            itertools.product(wall_orientations, wall_directions)
+        )
         np.random.shuffle(wall_ori_direcs)
 
         end_coords = None
@@ -802,7 +799,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
             def __exit__(self, type, value, traceback):
                 self.env.plot_objects = self.plot_objects
 
-        if fig is None and ax is None:
+        if fig is None or ax is None:
             env_width = self.extent[1] - self.extent[0]
             add_x = 0
             if self.plot_objects:
@@ -814,8 +811,8 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         with DontPlotObjects(self):
             fig, ax = super().plot_environment(fig=fig, ax=ax, autosave=False, **kwargs)
 
-        if ax is None:
-            raise RuntimeError("ax is None.")
+        if fig is None or ax is None:
+            raise RuntimeError("fig or ax is None.")
 
         if self.plot_objects:
             type_num_to_plot_params_dict = copy.deepcopy(
@@ -833,9 +830,10 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
 
             ax.legend(loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
 
-        if no_legend and ax.get_legend():
-            ax.get_legend().remove()
+        legend = ax.get_legend()
+        if no_legend and legend is not None:
+            legend.remove()
 
-        rutils.save_figure(fig, "Environment", save=autosave)
+        util.save_figure(fig, "Environment", save=autosave)
 
         return fig, ax

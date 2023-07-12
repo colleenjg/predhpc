@@ -2,13 +2,13 @@ from typing import Any, TYPE_CHECKING, Callable
 import warnings
 
 import copy
-from matplotlib import pyplot as plt
+from matplotlib import pyplot as plt  # type: ignore[import]
 from matplotlib import animation, markers
 from matplotlib import colors as mpl_colors
 from matplotlib import figure as mpl_figure
 import numpy as np
-import seaborn as sns
-from ratinabox import Agent
+import seaborn as sns  # type: ignore[import]
+from ratinabox import Agent  # type: ignore[import]
 from ratinabox import utils as rutils
 
 from predhpc import env, util, plot_util
@@ -63,7 +63,7 @@ class ResetableAgent(Agent):
             ValueError: If passing iterable for trajectory_length, must have length > 0.
         """
 
-        self.params = copy.deepcopy(__class__.default_params)
+        self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
 
         super().__init__(Env, self.params)
@@ -78,7 +78,7 @@ class ResetableAgent(Agent):
                     "Fixed direction not implemented for periodic boundary conditions."
                 )
 
-        self.actual_trajectory_lengths = list()
+        self.actual_trajectory_lengths = list()  # type: list[int]
         self.set_all_positions()
         self.set_trajectory_lengths()
 
@@ -192,11 +192,11 @@ class ResetableAgent(Agent):
         if dt is None:
             dt = float(self.dt)
 
-        velocity = np.asarray(self.velocity).astype(np.float64)
+        velocity = np.asarray(self.velocity).astype(np.float64)  # type: ignore[has-type]
 
         tau_speed = 10
         self.average_measured_speed = (
-            self.prev_average_measured_speed
+            self.prev_average_measured_speed  # type: ignore[has-type]
             + dt / tau_speed * (np.linalg.norm(velocity, ord=2))
         )
 
@@ -205,7 +205,7 @@ class ResetableAgent(Agent):
         if self.save_history is True and len(self.history["vel"]):  # type: ignore[reportGeneralTypeIssues]
             self.history["vel"][-1] = self.save_velocity
             if self.Environment.dimensionality == "2D":
-                rotational_velocity = float(self.rotational_velocity)
+                rotational_velocity = float(self.rotational_velocity)  # type: ignore[has-type]
                 self.history["rot_vel"][-1] = rotational_velocity
 
     def check_and_fix_velocity(
@@ -218,7 +218,7 @@ class ResetableAgent(Agent):
         if not (self.Environment.dimensionality == "1D" and self.fixed_direction):
             return
 
-        if self.velocity >= 0:
+        if self.velocity >= 0:  # type: ignore[has-type]
             return
 
         if self.reset_position is not None and self.pos[0] > self.reset_position[0]:
@@ -227,7 +227,7 @@ class ResetableAgent(Agent):
         if dt is None:
             dt = self.dt
 
-        new_velocity = self.velocity
+        new_velocity = self.velocity  # type: ignore[has-type]
         speed_mean, speed_std = self.speed_mean, self.speed_std  # type: ignore[reportGeneralTypeIssues]
         for _ in range(10):
             if new_velocity < 0:  # resample velocity until it is positive
@@ -250,7 +250,7 @@ class ResetableAgent(Agent):
     def set_position_and_velocity(
         self,
         position: np.ndarray[tuple[int], np.dtype[np.float64]] | None = None,
-        velocity: float | None = None,
+        velocity: float | np.ndarray[tuple[int], np.dtype[np.float64]] | None = None,
         rotational_velocity: float | None = 0.0,
         sample: bool = True,
     ):
@@ -271,8 +271,7 @@ class ResetableAgent(Agent):
                 self.pos = position
             if velocity is None or len(np.asarray(velocity).reshape(-1)) == 1:
                 direction = np.random.uniform(0, 2 * np.pi)
-                velocity = speed_std
-                velocity = velocity * np.array([np.cos(direction), np.sin(direction)])
+                velocity = speed_std * np.array([np.cos(direction), np.sin(direction)])
             self.velocity = np.asarray(velocity).reshape(2)
             self.rotational_velocity = rotational_velocity
 
@@ -412,11 +411,11 @@ class ResetableAgent(Agent):
         """
 
         traj_leng_to_date = self.get_trajectory_lengths_to_date()
-        fig, ax = plot_util.plot_trajectory_lengths(
+        fig, ax, _ = plot_util.plot_trajectory_lengths(
             dt=self.dt, trajectory_lengths=traj_leng_to_date, in_minutes=in_minutes
         )
 
-        rutils.save_figure(fig, "trajectories_to_date", save=autosave)
+        util.save_figure(fig, "trajectories_to_date", save=autosave)
 
         return fig, ax
 
@@ -570,7 +569,7 @@ class ResetableAgent(Agent):
 
     def plot_trajectory_resets(
         self,
-        t_start: float = 0.0,
+        t_start: float | None = None,
         t_end: float | None = None,
         framerate: int | float = 10,
         fig: mpl_figure.Figure | None = None,
@@ -588,7 +587,7 @@ class ResetableAgent(Agent):
         plotting of reset steps, and use of colormaps for trajectories.
 
         Args:
-            t_start: start time in seconds
+            t_start: start time in seconds. (default = self.history["t"][0])
             t_end: end time in seconds (default = self.history["t"][-1])
             framerate: how many scatter points / per second of motion to display
             fig: matplotlib figure object
@@ -605,15 +604,14 @@ class ResetableAgent(Agent):
 
         dt = self.dt
         t, pos = np.array(self.history["t"]), np.array(self.history["pos"])
-        if t_end == None:
-            t_end = t[-1]
-        startid = np.argmin(np.abs(t - (t_start)))
-        endid = np.argmin(np.abs(t - (t_end))) + 1
+        startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
+        t_start, t_end = t[startid], t[endid]
+
         skiprate = max(1, int((1 / framerate) / dt))
 
         t = t / 60  # minutes
-        time = t[startid:endid][::skiprate]
-        pos = pos[startid:endid][::skiprate]
+        time = t[startid : endid + 1][::skiprate]
+        pos = pos[startid : endid + 1][::skiprate]
 
         # get reset step indices
         if startid > endid:
@@ -621,7 +619,7 @@ class ResetableAgent(Agent):
         elif len(time) == 0:
             raise RuntimeError("Duration too short. No time points to plot.")
 
-        if ax is None:
+        if fig is None or ax is None:
             fig, ax = plt.subplots(figsize=(8, 5))
 
         if self.Environment.D == 1:
@@ -707,13 +705,13 @@ class ResetableAgent(Agent):
         ax.spines["right"].set_visible(False)
         ax.spines["top"].set_visible(False)
 
-        rutils.save_figure(fig, "trajectory_resets", save=autosave)
+        util.save_figure(fig, "trajectory_resets", save=autosave)
 
         return fig, ax
 
     def plot_trajectory(
         self,
-        t_start: float = 0.0,
+        t_start: float | None = None,
         t_end: float | None = None,
         framerate: int | float = 10,
         fig: mpl_figure.Figure | None = None,
@@ -738,7 +736,7 @@ class ResetableAgent(Agent):
         From Agent.plot_trajectory() in ratinabox/agent.py. Modified to enable plotting of reset steps, and use of colormaps for trajectories.
 
         Args:
-            t_start: start time in seconds
+            t_start: start time in seconds (default = self.history["t"][0])
             t_end: end time in seconds (default = self.history["t"][-1])
             framerate: how many scatter points / per second of motion to display
             fig, ax: the fig, ax to plot on top of, optional, if not provided used self.Environment.plot_Environment().
@@ -763,18 +761,22 @@ class ResetableAgent(Agent):
 
         dt = self.dt
         t, pos = np.array(self.history["t"]), np.array(self.history["pos"])
-        if t_end is None:
-            t_end = float(t[-1])
-        startid = np.argmin(np.abs(t - (t_start)))
-        endid = np.argmin(np.abs(t - (t_end))) + 1
+        startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
+        t_start, t_end = t[startid], t[endid]
+
+        if t_start is None or t_end is None:
+            raise RuntimeError("t_start or t_end is None.")
+
         skiprate = max(1, int((1 / framerate) / dt))
+        t = t / 60  # minutes
+
         if self.Environment.dimensionality == "2D":
-            trajectory = pos[startid:endid, :][::skiprate]
+            trajectory = pos[startid : endid + 1, :][::skiprate]
         elif self.Environment.dimensionality == "1D":
-            trajectory = pos[startid:endid][::skiprate]
+            trajectory = pos[startid : endid + 1][::skiprate]
         else:
             raise RuntimeError(f"Environment dimensionality must be either 1D or 2D.")
-        time = t[startid:endid][::skiprate]
+        time = t[startid : endid + 1][::skiprate]
 
         # get reset step indices
         if startid > endid:
@@ -789,18 +791,21 @@ class ResetableAgent(Agent):
             if scale_cmap_per:
                 cmap_vals = [np.linspace(0, 1, steps) for steps in trajectory_lengths]
             else:
-                cmap_vals = [np.arange(steps) for steps in trajectory_lengths]
+                cmap_vals = [
+                    np.arange(steps, dtype=np.int64) for steps in trajectory_lengths
+                ]
         else:
             cmap_vals = traj_idx[:]
-        cmap_vals = np.concatenate(cmap_vals).astype(float)
-        cmap_vals = cmap_vals[startid:endid][::skiprate]
-        cmap_min, cmap_max = cmap_vals.min(), cmap_vals.max()
+        cmap_vals_np = np.concatenate(cmap_vals).astype(float)[startid : endid + 1][
+            ::skiprate
+        ]
+        cmap_min, cmap_max = cmap_vals_np.min(), cmap_vals_np.max()
         if cmap_min == cmap_max:
-            cmap_vals[:] = 0.5  # mid point of the colormap
+            cmap_vals_np[:] = 0.5  # mid point of the colormap
         else:
             cmap_vals = (cmap_vals - cmap_min) / (cmap_max - cmap_min)
 
-        traj_idx = np.concatenate(traj_idx).astype(int)[startid:endid][::skiprate]
+        traj_idx = np.concatenate(traj_idx).astype(int)[startid : endid + 1][::skiprate]
 
         if colormap is None:
             colormap = "crest"
@@ -817,8 +822,8 @@ class ResetableAgent(Agent):
 
             fig, ax = self.Environment.plot_environment(fig=fig, ax=ax)
 
-            if ax is None:
-                raise RuntimeError("ax is None.")
+            if fig is None or ax is None:
+                raise RuntimeError("fig or ax is None.")
 
             if self.target_position is not None:
                 ax.scatter(
@@ -879,13 +884,16 @@ class ResetableAgent(Agent):
                 ax.set_facecolor(background_color)
                 fig.patch.set_facecolor(background_color)  # type: ignore[reportGeneralTypeIssues]
 
-        rutils.save_figure(fig, "trajectory", save=autosave)
+        if fig is None or ax is None:
+            raise RuntimeError("fig or ax is None.")
+
+        util.save_figure(fig, "trajectory", save=autosave)
 
         return fig, ax
 
     def plot_trajectory_edges(
         self,
-        t_start: float = 0.0,
+        t_start: float | None = None,
         t_end: float | None = None,
         fig: mpl_figure.Figure | None = None,
         ax: plt.Axes | None = None,
@@ -926,13 +934,13 @@ class ResetableAgent(Agent):
         """
 
         t, pos = np.array(self.history["t"]), np.array(self.history["pos"])
-        if t_end is None:
-            t_end = float(t[-1])
-        startid = np.argmin(np.abs(t - (t_start)))
-        endid = np.argmin(np.abs(t - (t_end))) + 1
+        startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
+        t_start, t_end = t[startid], t[endid]
 
-        if startid > endid:
-            raise ValueError("'startid' must be lower than 'endid'.")
+        if t_start is None or t_end is None:
+            raise RuntimeError("t_start or t_end is None.")
+
+        t = t / 60  # minutes
 
         if colormap is None:
             colormap = "crest"
@@ -968,8 +976,8 @@ class ResetableAgent(Agent):
 
             if self.Environment.dimensionality == "2D":
                 fig, ax = self.Environment.plot_environment(fig=fig, ax=ax)
-                if ax is None:
-                    raise RuntimeError("ax is None.")
+                if fig is None or ax is None:
+                    raise RuntimeError("fig or ax is None.")
                 if self.target_position is not None:
                     ax.scatter(
                         *self.target_position,
@@ -1030,7 +1038,10 @@ class ResetableAgent(Agent):
                     ax.set_facecolor(background_color)
                     fig.patch.set_facecolor(background_color)  # type: ignore[reportGeneralTypeIssues]
 
-        rutils.save_figure(fig, "trajectory_edges", save=autosave)
+        if fig is None or ax is None:
+            raise RuntimeError("fig or ax is None.")
+
+        util.save_figure(fig, "trajectory_edges", save=autosave)
 
         return fig, ax
 
@@ -1039,7 +1050,7 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
     """Extend the reset agent so that it operates in a T maze"""
 
     default_params = {
-        "target_arm": "left",
+        "target_arm": "left",  # type: ignore[dict-item]
         "target_location_prop_to_arm": 0.75,  # proportion down arm at which to set target
         "left_arm_prop": 0.75,  # proportion of trajectories to target to left arm
     }
@@ -1047,7 +1058,7 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
     ignored_param_keys = ["reset_position", "start_position", "target_position"]
     ignored_params = {key: None for key in ignored_param_keys}
 
-    fixed_params = dict()
+    fixed_params = dict()  # type: dict[str, Any]
 
     def __init__(self, Env: env.TEnv, params: dict[str, Any] = dict()):
         """Initialise the agent.
@@ -1061,7 +1072,7 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
 
         self.check_if_ignored_params(params)
 
-        self.params = copy.deepcopy(__class__.default_params)
+        self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
 
         if not isinstance(Env, env.TEnv):
@@ -1097,7 +1108,7 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
 
         return direction
 
-    def update(
+    def update(  # type: ignore[override]
         self,
         dt: float | None = None,
         speed_fact: int | float = 3,
@@ -1203,9 +1214,10 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
 
         # calculate the distance between the current position and the reset position
         if position == "both":
-            distances = list()
-            for reset_position in self.reset_position:  # type: ignore[reportGeneralTypeIssues]
-                distances.append(np.linalg.norm(self.pos - reset_position, ord=2))
+            distances = [
+                np.linalg.norm(self.pos - reset_position, ord=2)  # type: ignore[reportGeneralTypeIssues]
+                for reset_position in self.reset_position
+            ]
             distance = min(distances)
         elif position == "left":
             distance = np.linalg.norm(self.pos - self.left_reset_position, ord=2)
@@ -1249,7 +1261,7 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
     ]
     ignored_params = {key: None for key in ignored_param_keys}
 
-    fixed_params = dict()
+    fixed_params = dict()  # type: dict[str, Any]
 
     def __init__(self, Env: env.ExploreBox, params: dict[str, Any] = dict()):
         """Initialise the agent.
@@ -1263,7 +1275,7 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
 
         self.check_if_ignored_params(params)
 
-        self.params = copy.deepcopy(__class__.default_params)
+        self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
 
         if not isinstance(Env, env.ExploreBox):
@@ -1383,8 +1395,8 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
 
         if first_setting:
             self.reached_target_position = list()
-            self.teleported = list()
-            self.teleport_pair_nums = list()
+            self.teleported = list()  # type: list[int]
+            self.teleport_pair_nums = list()  # type: list[int]
             self.start_positions = list()
 
         self.start_positions.append(self.start_position)
@@ -1426,11 +1438,13 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             raise ValueError(f"position must have length 2, but found {len(position)}.")
 
         if sample_within_tolerance_prop_to_dt is None:
-            sample_within_tolerance_prop_to_dt = self.target_reached_within_tolerance_prop_to_dt  # type: ignore[reportGeneralTypeIssues]
+            prop_to_dt = self.target_reached_within_tolerance_prop_to_dt  # type: ignore[reportGeneralTypeIssues]
+        else:
+            prop_to_dt = sample_within_tolerance_prop_to_dt
 
         new_position = super().sample_within_tolerance(
             position,
-            sample_within_tolerance_prop_to_dt=sample_within_tolerance_prop_to_dt,
+            sample_within_tolerance_prop_to_dt=prop_to_dt,
             max_attempts=max_attempts,
         )
 
@@ -1495,12 +1509,14 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             else:
                 raise ValueError(f"Unrecognized check_value {check_value}.")
 
+        check_value = np.asarray(check_value)
+
         if not velocity:
             if teleport_coords is None:
                 raise ValueError(
                     "teleport_coords must be specified if check_value is not 'velocity'."
                 )
-            check_value = check_value - teleport_coords
+            check_value -= teleport_coords
 
         norm_teleport_vector = teleport_vector / np.linalg.norm(teleport_vector)
         norm_check = np.asarray(check_value).astype(float) / np.linalg.norm(check_value)
@@ -1526,14 +1542,13 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
 
         tolerance_prop_to_dt = self.target_reached_within_tolerance_prop_to_dt  # type: ignore[reportGeneralTypeIssues]
 
+        teleport = False
+
         # check if close to teleport in
         near_teleport = self.check_if_position_reached(
             teleport_coords, tolerance_prop_to_dt
         )
-        if not near_teleport:
-            teleport_angles = False
-
-        else:
+        if near_teleport:
             # check if agent is within 45 degrees, either side of the teleport in
             teleport_vector = self.get_teleport_vector(
                 teleport_pair_num, direction="in"
@@ -1542,16 +1557,14 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
                 teleport_vector, teleport_coords, check_value="position"
             )
 
-        if not teleport_angles:
-            heading_teleport = False
+            if teleport_angles:
+                # check if agent is heading towards teleport in
+                heading_teleport = self.check_teleport_angles(
+                    teleport_vector, check_value="velocity"
+                )
 
-        else:
-            # check if agent is heading towards teleport in
-            heading_teleport = self.check_teleport_angles(
-                teleport_vector, check_value="velocity"
-            )
-
-        teleport = heading_teleport
+                if heading_teleport:
+                    teleport = True
 
         return teleport
 
@@ -1632,8 +1645,8 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         # get the output vector
         out_vector = util.rotate_to(
             in_vector=self.pos - teleport_in_coords,
-            in_basis=teleport_in_vector,
-            out_basis=teleport_out_vector,
+            in_basis=teleport_in_vector,  # type: ignore[arg-type]
+            out_basis=teleport_out_vector,  # type: ignore[arg-type]
         )
 
         out_coords = teleport_out_coords + out_vector
@@ -1664,9 +1677,9 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         )
 
         out_velocity = util.rotate_to(
-            in_vector=self.velocity,  # type: ignore[reportGeneralTypeIssues]
-            in_basis=teleport_in_vector,
-            out_basis=-teleport_out_vector,
+            in_vector=self.velocity,
+            in_basis=teleport_in_vector,  # type: ignore[arg-type]
+            out_basis=teleport_out_vector,  # type: ignore[arg-type]
         )
 
         return out_velocity
@@ -1709,7 +1722,7 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
 
         return teleported
 
-    def update(
+    def update(  # type: ignore[override]
         self,
         dt: float | None = None,
         speed_fact: int | float = 3,
@@ -1774,20 +1787,19 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         """Get the trajectory nodes.
 
         Returns:
-            nodes (1d array): Nodes that were reached.
+            nodes (2d array): Nodes that were reached (nodes x 2)
             values (1d array): Values of the nodes that were reached.
                 1: target, 0: start and -1: non target end
             steps (1d array): Number of steps at which each node was reached.
-            unreached_targets (1d array): Targets that were not reached
+            unreached_targets (2d array): Targets that were not reached
                 (corresponding to -1 values)
         """
 
         pos = np.asarray(self.history["pos"])
 
-        targets = [
-            target[1] for target in self.trajectory_targets if target[1] is not None
-        ]
-        targets = np.asarray(targets)
+        targets = np.asarray(
+            [target[1] for target in self.trajectory_targets if target[1] is not None]
+        )
         traj_lengs = np.cumsum(self.get_trajectory_lengths_to_date())
         start_position = np.asarray([self.start_positions[0]])
 
@@ -1828,12 +1840,13 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         if len(unreached_targets) != len(np.where(values == -1)[0]):
             raise RuntimeError("Wrong number of reset points found.")
 
+        nodes = nodes.astype(np.float64)
         values = values.astype(np.int64)
         steps = steps.astype(np.int64)
 
-        return nodes, values, steps, unreached_targets
+        return nodes, values, steps, unreached_targets  # type: ignore[return-value]
 
-    def plot_trajectory(
+    def plot_trajectory(  # type: ignore[override]
         self,
         target_alpha: float = 0.7,
         no_legend: bool = False,
@@ -1856,10 +1869,11 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             target_alpha=target_alpha, autosave=False, **kwargs
         )
 
-        if no_legend and ax.get_legend():
-            ax.get_legend().remove()
+        legend = ax.get_legend()
+        if no_legend and legend is not None:
+            legend.remove()
 
-        rutils.save_figure(fig, "trajectory", save=autosave)
+        util.save_figure(fig, "trajectory", save=autosave)
 
         return fig, ax
 
@@ -1891,14 +1905,15 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         if fig is None or ax is None or plot_env:
             fig, ax = self.Environment.plot_environment(fig=fig, ax=ax)
 
-        if ax is None:
-            raise RuntimeError("ax is None.")
+        if fig is None or ax is None:
+            raise RuntimeError("fig or ax is None.")
 
         targets = [
             target[1] for target in self.trajectory_targets if target[1] is not None
         ]
 
-        unique_targets, counts = list(), []
+        unique_targets = list()  # type: list[np.ndarray]
+        counts = list()  # type: list[int]
         for target in targets:
             present = [
                 (target == unique_target).all() for unique_target in unique_targets
@@ -1958,16 +1973,17 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
                 )
                 unreached += 1
 
-        if no_legend and ax.get_legend():
-            ax.get_legend().remove()
+        legend = ax.get_legend()
+        if no_legend and legend is not None:
+            legend.remove()
 
-        rutils.save_figure(fig, "trajectory_targets", save=autosave)
+        util.save_figure(fig, "trajectory_targets", save=autosave)
 
         return fig, ax
 
     def plot_trajectory_targets_over_time(
         self,
-        t_start: float = 0.0,
+        t_start: float | None = None,
         t_end: float | None = None,
         fig: mpl_figure.Figure | None = None,
         ax: plt.Axes | None = None,
@@ -1995,16 +2011,11 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             fig, ax = plt.subplots(figsize=(8, 3))
 
         t, pos = np.array(self.history["t"]), np.array(self.history["pos"])
-        if t_end == None:
-            t_end = t[-1]
-        startid = np.argmin(np.abs(t - (t_start)))
-        endid = np.argmin(np.abs(t - (t_end))) + 1
+        startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
+        t_start, t_end = t[startid], t[endid]
 
-        t = t[startid:endid]
-        pos = pos[startid:endid]
-
-        if startid > endid:
-            raise ValueError("'startid' must be lower than 'endid'.")
+        t = t[startid : endid + 1]  # keep in seconds
+        pos = pos[startid : endid + 1]
 
         # plot reset points as vertical dashed lines
         reset_times = self.get_reset_times()
@@ -2082,10 +2093,11 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             loc="center left", fontsize="medium", bbox_to_anchor=(1, 0.5), frameon=False
         )
 
-        if no_legend and ax.get_legend():
-            ax.get_legend().remove()
+        legend = ax.get_legend()
+        if no_legend and legend is not None:
+            legend.remove()
 
-        rutils.save_figure(fig, "trajectory_targets_over_time", save=autosave)
+        util.save_figure(fig, "trajectory_targets_over_time", save=autosave)
 
         return fig, ax
 
