@@ -1250,6 +1250,7 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         "wait_between_targets": 10,  # number of steps to wait between target reaching
         "target_reached_within_tolerance_prop_to_dt": 0.5,  # proportion of dt to use as target tolerance
         "num_random_walk_steps": 100,  # number of steps to random walk, if target is not in sight
+        "always_log_teleportation": False,  # whether to log teleportation events when they occur
     }
 
     ignored_param_keys = [
@@ -1415,6 +1416,40 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             self.reached_target_position.append(-1)
 
         return
+
+    def log_teleportation(self, last=False):
+        """Log the teleportation events.
+
+        Args:
+            last (bool, optional): Whether to log only the last teleportation event.
+                Defaults to False.
+        """
+
+        if len(self.teleported) == 0:
+            log_str = "No teleportation events."
+
+        elif last:
+            pair_num = self.teleport_pair_nums[-1]
+            step_num = self.teleported[-1]
+            if step_num == len(self.history["t"]):
+                seconds = self.history["t"][-1] + self.dt
+            else:
+                seconds = self.history["t"][step_num]
+            log_str = (
+                f"Teleported through pair {pair_num} at step {step_num} "
+                f"({seconds:.2f} sec.)"
+            )
+
+        else:
+            teleport_str = "    \n".join(
+                [
+                    f"through pair {pair_num} at step {step} ({self.history['t'][step]:.2f} sec.)"
+                    for step, pair_num in zip(self.teleported, self.teleport_pair_nums)
+                ]
+            )
+            log_str = f"Teleportation events:\n    {teleport_str}"
+
+        print(log_str)
 
     def sample_within_tolerance(
         self,
@@ -1695,7 +1730,6 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
                 continue
 
             # teleport (sampling near out teleport coords)
-            print("Teleportation event triggered.")
             if sample:
                 out_coords = self.sample_teleport_out_position(teleport_pair_num)
             else:
@@ -1715,6 +1749,9 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
 
             self.teleported.append(self.num_steps_total)
             self.teleport_pair_nums.append(teleport_pair_num)
+
+            if self.always_log_teleportation:
+                self.log_teleportation(last=True)
 
             break
 
@@ -1848,6 +1885,7 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
 
     def plot_trajectory(  # type: ignore[override]
         self,
+        t_end: bool | None = None,
         target_alpha: float = 0.7,
         no_legend: bool = False,
         autosave: bool | None = None,
@@ -1866,12 +1904,14 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             ax (plt.Axes): Axes.
         """
         fig, ax = super().plot_trajectory(
-            target_alpha=target_alpha, autosave=False, **kwargs
+            t_end=t_end, target_alpha=target_alpha, autosave=False, **kwargs
         )
 
         legend = ax.get_legend()
         if no_legend and legend is not None:
             legend.remove()
+
+        self.add_target(ax, t=t_end)
 
         util.save_figure(fig, "trajectory", save=autosave)
 
@@ -2101,6 +2141,45 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
 
         return fig, ax
 
+    def add_target(
+        self,
+        ax: plt.Axes,
+        t: float | None = None,
+    ):
+        """
+        Add the target for time t to the plot.
+
+        Args:
+            ax: The axis object.
+            t: The current time step.
+        """
+
+        all_t = np.array(self.history["t"])
+        if t is None:
+            t = float(all_t[-1])
+        endid = np.argmin(np.abs(all_t - (t))) + 1
+
+        targets = [
+            target[1] for target in self.trajectory_targets if target[1] is not None
+        ]
+        num_steps = np.asarray(self.reached_target_position)
+        above = np.where(num_steps > endid)[0]
+        target = targets[above[0]] if len(above) else None
+
+        if target is None:
+            return
+
+        ax.scatter(
+            *target,
+            marker=markers.MarkerStyle("x"),
+            s=60,
+            zorder=4,
+            color="red",
+            label="target",
+            lw=3,
+            alpha=0.6,
+        )
+
     def animate_trajectory(
         self, additional_plot_func: Callable | None = None, **kwargs
     ) -> animation.FuncAnimation:
@@ -2116,93 +2195,6 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         Returns:
            matplotlib.animation.FuncAnimation: The animation object.
         """
-
-        def add_target(
-            fig: mpl_figure.Figure,
-            ax: plt.Axes,
-            t: float | None = None,
-            **kwargs,
-        ) -> tuple[mpl_figure.Figure, plt.Axes]:
-            """
-            Add the curret target to the plot.
-
-            Args:
-                fig: The figure object.
-                ax: The axis object.
-                t: The current time step.
-
-            Returns:
-                tuple[mpl_figure.Figure, plt.Axes]: The figure and axis objects.
-            """
-
-            all_t = np.array(self.history["t"])
-            if t is None:
-                t = float(all_t[-1])
-            endid = np.argmin(np.abs(all_t - (t))) + 1
-
-            targets = [
-                target[1] for target in self.trajectory_targets if target[1] is not None
-            ]
-            num_steps = np.asarray(self.reached_target_position)
-            above = np.where(num_steps > endid)[0]
-            target = targets[above[0]] if len(above) else None
-
-            if target is None:
-                target = np.asarray([np.nan, np.nan])
-
-            ax.scatter(
-                *target,
-                marker=markers.MarkerStyle("x"),
-                s=45,
-                zorder=4,
-                color="red",
-                label="target",
-                lw=3,
-                alpha=0.6,
-            )
-
-            return fig, ax
-
-        def remove_prev_handle_labels(
-            fig: mpl_figure.Figure,
-            ax: plt.Axes,
-            t: float | None = None,
-            **kwargs,
-        ) -> tuple[mpl_figure.Figure, plt.Axes]:
-            """
-            Remove previous handle labels from the legend.
-
-            Args:
-                fig: The figure object.
-                ax: The axis object.
-                t: The current time step.
-
-            Returns:
-                tuple[mpl_figure.Figure, plt.Axes]: The figure and axis objects.
-            """
-
-            handles, labels = ax.get_legend_handles_labels()
-            if len(labels) == 0:
-                return fig, ax
-
-            num_unique = len(set(labels))
-            handles = handles[:-num_unique]
-            labels = labels[:-num_unique]
-
-            order = np.argsort(labels)
-            handles = [handles[i] for i in order]
-            labels = [labels[i] for i in order]
-
-            ax.legend(
-                handles=handles,
-                labels=labels,
-                loc="center left",
-                bbox_to_anchor=(1.0, 0.5),
-                frameon=False,
-                fontsize="medium",
-            )
-
-            return fig, ax
 
         def run_all_additional_plot_funcs(
             fig: mpl_figure.Figure,
@@ -2225,8 +2217,8 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             if additional_plot_func is not None:
                 fig, ax = additional_plot_func(fig=fig, ax=ax, t=t, **kwargs)
 
-            fig, ax = add_target(fig, ax, t=t, **kwargs)
-            fig, ax = remove_prev_handle_labels(fig, ax, t=t, **kwargs)
+            self.add_target(ax, t=t)
+            plot_util.remove_prev_handle_labels(ax)
 
             return fig, ax
 
