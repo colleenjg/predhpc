@@ -7,6 +7,7 @@ from matplotlib import animation, markers
 from matplotlib import colors as mpl_colors
 from matplotlib import figure as mpl_figure
 import numpy as np
+import pandas as pd
 import seaborn as sns  # type: ignore[import]
 from ratinabox import Agent  # type: ignore[import]
 from ratinabox import utils as rutils
@@ -81,6 +82,42 @@ class ResetableAgent(Agent):
         self.actual_trajectory_lengths = list()  # type: list[int]
         self.set_all_positions()
         self.set_trajectory_lengths()
+        self.set_target_df()
+
+    def set_target_df(self):
+        """Set the target dataframe, which records the target position and the
+        step at which it was reached.
+        """
+
+        self.target_df = pd.DataFrame(columns=self.target_df_columns)
+
+    @property
+    def target_df_columns(self) -> list:
+        """Get the target dataframe columns.
+
+        Returns:
+            list: List of column names.
+        """
+
+        if not hasattr(self, "_target_df_columns"):
+            self._target_df_columns = [
+                "target",
+                "target_set_step",
+                "target_reached_step",
+            ]
+
+        return self._target_df_columns
+
+    def set_new_target(self):
+        if self.target_position is None:
+            return
+
+        target_data = {
+            "target": self.target_position[0],
+            "target_set_step": self.num_steps_total,
+            "target_reached_step": np.nan,
+        }
+        self.target_df.loc[len(self.target_df)] = target_data  # type: ignore[reportGeneralTypeIssues]
 
     def set_all_positions(self):
         """Set all positions, checking that they are within the environment
@@ -92,7 +129,6 @@ class ResetableAgent(Agent):
         self.target_position = self.format_position(self.target_position)
 
         self.reached_reset_position = list()
-        self.reached_target_position = list()
 
         if self.start_position is not None:
             self.set_position_and_velocity(position=self.start_position, velocity=0)
@@ -530,12 +566,21 @@ class ResetableAgent(Agent):
         if self.target_position is not None and self.check_if_target_position_reached():
             # record the time step at which the agent reached the target position
             self.reached_target = True
-            if len(self.reached_target_position):
-                if self.num_steps_total == self.reached_target_position[-1]:
+            if len(self.target_df):
+                last_recorded = int(
+                    self.target_df.loc[len(self.target_df) - 1, "target_reached_step"]
+                )
+                if self.num_steps_total == last_recorded:
                     self.reached_target = False
 
-            if self.reached_target:
-                self.reached_target_position.append(self.num_steps_total)
+                if self.reached_target:
+                    if not np.isnan(last_recorded):
+                        raise RuntimeError("Target reached twice in a row.")
+                    self.target_df.loc[
+                        len(self.target_df) - 1, "target_reached_step"
+                    ] = self.num_steps_total
+
+                    self.set_new_target()
 
         return self.reached_target
 
@@ -634,7 +679,7 @@ class ResetableAgent(Agent):
             raise RuntimeError("Only 1D and 2D environments are supported.")
 
         n_reached = len(self.reached_reset_position)
-        n_targets = len(self.reached_target_position)
+        n_targets = len(self.target_df)
         alpha /= self.Environment.D
         alpha_pts = 0.9 / self.Environment.D
         for i in range(self.Environment.D):
@@ -683,7 +728,7 @@ class ResetableAgent(Agent):
             if plot_targets and n_targets and self.target_position is not None:
                 x_targ = [
                     t[x]
-                    for x in self.reached_target_position
+                    for x in self.target_df["target_reached_step"]
                     if x >= startid and x < endid
                 ]
                 y_targ = [self.target_position[i]] * n_targets
@@ -724,6 +769,7 @@ class ResetableAgent(Agent):
         background_color: str | None = None,
         plot_traj_ends: bool = True,
         target_alpha: float = 1.0,
+        plot_target: bool = True,
         cmap_per: bool = False,
         scale_cmap_per: bool = False,
         ms_2D: int | float = 15,
@@ -749,6 +795,7 @@ class ResetableAgent(Agent):
             background_color: color of the background if not matplotlib default, only for 1D (probably white)
             plot_traj_ends: plot a point at the end of each trajectory
             target_alpha: transparency with which to plot target position
+            plot_targets: plot target position
             cmap_per: if True, the colormap is used to set the color for each time point. Otherwise, each trajectory has its own color.
             scale_cmap_per: if True, and cmap_per is True, the full range of the colormap is used for each trajectory, regardless of its length
             ms_2D: the size of the points in the 2D plot is set to this value.
@@ -825,7 +872,7 @@ class ResetableAgent(Agent):
             if fig is None or ax is None:
                 raise RuntimeError("fig or ax is None.")
 
-            if self.target_position is not None:
+            if plot_target and self.target_position is not None:
                 ax.scatter(
                     *self.target_position,
                     marker=markers.MarkerStyle("d"),
@@ -835,6 +882,7 @@ class ResetableAgent(Agent):
                     edgecolors="darkgoldenrod",
                     linewidth=0.5,
                     alpha=target_alpha,
+                    label="target",
                 )
 
             s = ms_2D * np.ones_like(time)
@@ -1092,6 +1140,38 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
     def at_branch(self) -> bool:
         return self.pos[1] > self.Environment.branch_y
 
+    @property
+    def target_df_columns(self) -> list:
+        """Get the target dataframe columns.
+
+        Returns:
+            list: List of column names.
+        """
+
+        if not hasattr(self, "_target_df_columns"):
+            self._target_df_columns = [
+                "target_arm",
+                "target_x",
+                "target_y",
+                "target_set_step",
+                "target_reached_step",
+            ]
+
+        return self._target_df_columns
+
+
+    def set_new_target(self):
+        if self.target_position is None:
+            return
+
+        target_data = {
+            "target": self.target_position[0],
+            "target_set_step": self.num_steps_total,
+            "target_reached_step": np.nan,
+        }
+        self.target_df.loc[len(self.target_df)] = target_data  # type: ignore[reportGeneralTypeIssues]
+
+
     def get_direction(self) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
         """Get the direction to the target."""
 
@@ -1143,16 +1223,26 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
             **kwargs,
         )
 
+
+    def set_new_target(self)
+
     def set_current_arm(self):
         """Sets which arm the agent will navigate to, this run."""
 
         # randomly choose a current target arm
         arms = ["left", "right"]
-        self.target = arms[np.random.rand() > self.left_arm_prop]  # type: ignore[reportGeneralTypeIssues]
+        arm_idx = np.random.rand() > self.left_arm_prop  # type: ignore[reportGeneralTypeIssues]
+        self.target = arms[arm_idx]
 
-        if not hasattr(self, "trajectory_targets"):
-            self.trajectory_targets = list()
-        self.trajectory_targets.append(self.target)
+
+        target_data = {
+            "target_arm": arms[arm_idx],
+            "target_x": self.target[0],
+            "target_y": self.target[1],
+            "target_set_step": self.num_steps_total,
+            "target_reached_step": np.nan,
+        }
+        self.target_df.loc[len(self.target_df)] = target_data  # type: ignore[reportGeneralTypeIssues]
 
         return
 
@@ -1286,6 +1376,25 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
 
         super().__init__(Env, self.params)
 
+    @property
+    def target_df_columns(self) -> list:
+        """Get the target dataframe columns.
+
+        Returns:
+            list: List of column names.
+        """
+
+        if not hasattr(self, "_target_df_columns"):
+            self._target_df_columns = [
+                "target_object_type",
+                "target_x",
+                "target_y",
+                "target_set_step",
+                "target_reached_step",
+            ]
+
+        return self._target_df_columns
+
     def get_targets_and_probabilities(
         self,
         skip_object_position: np.ndarray[tuple[int], np.dtype[np.float64]]
@@ -1340,11 +1449,10 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         self.target_position = objects[target_idx]
         self.target_type = obj_types[target_idx]
 
-        if not hasattr(self, "trajectory_targets"):
-            self.trajectory_targets = list()
         self.trajectory_targets.append(
             (self.target, self.target_position, self.target_type)
         )
+        self.new_target_position_set.append(self.num_steps_total)
 
         self.steps_before_checking_for_target = 0
 
@@ -1395,6 +1503,8 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         self.set_random_walk()
 
         if first_setting:
+            self.trajectory_targets = list()
+            self.new_target_position_set = list()
             self.reached_target_position = list()
             self.teleported = list()  # type: list[int]
             self.teleport_pair_nums = list()  # type: list[int]
@@ -1544,7 +1654,7 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             else:
                 raise ValueError(f"Unrecognized check_value {check_value}.")
 
-        check_value = np.asarray(check_value)
+        check_value = np.array(check_value)  # copy
 
         if not velocity:
             if teleport_coords is None:
@@ -1750,7 +1860,7 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             self.teleported.append(self.num_steps_total)
             self.teleport_pair_nums.append(teleport_pair_num)
 
-            if self.always_log_teleportation:
+            if self.always_log_teleportation:  # type: ignore[reportGeneralTypeIssues]
                 self.log_teleportation(last=True)
 
             break
@@ -1904,12 +2014,21 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             ax (plt.Axes): Axes.
         """
         fig, ax = super().plot_trajectory(
-            t_end=t_end, target_alpha=target_alpha, autosave=False, **kwargs
+            t_end=t_end,
+            target_alpha=target_alpha,
+            plot_target=False,
+            autosave=False,
+            **kwargs,
         )
 
         legend = ax.get_legend()
         if no_legend and legend is not None:
             legend.remove()
+
+        if t_end is None:
+            import pdb
+
+            pdb.set_trace()
 
         self.add_target(ax, t=t_end)
 
@@ -1925,7 +2044,6 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         plot_env: bool = True,
         no_legend: bool = False,
         autosave: bool | None = None,
-        **kwargs,
     ) -> tuple[mpl_figure.Figure, plt.Axes]:
         """Plot the trajectory targets.
 
@@ -1934,8 +2052,9 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             ax (plt.Axes, optional): Axes to plot on.
             alpha (float, optional): Alpha value of the targets.
             plot_env (bool, optional): Whether to plot the environment.
+                Defaults to True.
+            no_legend (bool, optional): Whether to remove the legend. Defaults to False.
             autosave (bool, optional): Whether to autosave the figure. Defaults to None.
-            **kwargs: Additional keyword arguments.
 
         Returns:
             fig (mpl_figure.Figure): Figure with the plot.
@@ -2029,7 +2148,6 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         ax: plt.Axes | None = None,
         no_legend: bool = False,
         autosave: bool | None = None,
-        **kwargs,
     ) -> tuple[mpl_figure.Figure, plt.Axes]:
         """Plot the trajectory targets over time.
 
@@ -2040,7 +2158,6 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             ax (plt.Axes, optional): Axes to plot on.
             no_legend (bool, optional): Whether to remove the legend. Defaults to False.
             autosave (bool, optional): Whether to autosave the figure. Defaults to None.
-            **kwargs: Additional keyword arguments.
 
         Returns:
             fig (mpl_figure.Figure): Figure with the plot.

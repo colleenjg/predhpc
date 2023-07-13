@@ -1,5 +1,6 @@
 import copy
 import itertools
+import random
 from typing import Any
 import warnings
 
@@ -528,10 +529,9 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         # objects is reasonable.
         wall_orientations = ["x", "y"]
         wall_directions = [-1, 1]
-        wall_ori_direcs = np.asarray(
-            itertools.product(wall_orientations, wall_directions)
-        )
-        np.random.shuffle(wall_ori_direcs)
+        wall_ori_direcs = list(itertools.product(wall_orientations, wall_directions))
+
+        random.shuffle(wall_ori_direcs)
 
         end_coords = None
         for wall_ori, wall_direc in wall_ori_direcs:
