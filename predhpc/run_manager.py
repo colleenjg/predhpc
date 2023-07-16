@@ -196,7 +196,13 @@ def plot_time_series_with_btsp_events(
             color="k",
             alpha=0.7,
         )
-    for t in CA1s.Agent.reached_target_position:  # type: ignore[reportGeneralTypeIssues]
+
+    target_reached_step = CA1s.Agent.target_df["target_reached_step"].to_numpy()
+    if np.isnan(target_reached_step[-1]):
+        target_reached_step = target_reached_step[:-1]
+    target_reached_step = target_reached_step.astype(int)
+
+    for t in target_reached_step:
         y_hei = lo + (hi - lo) * 0.82
         ax.scatter(
             CA1s.Agent.history["t"][t] / 60,
@@ -281,10 +287,7 @@ def learn_T_maze_btsp(
             btsp_targs = [CA1s.n - 1]  # type: ignore[reportGeneralTypeIssues]
 
         # check whether a target BTSP signal should go out
-        if (
-            Ag.reached_target
-            and len(Ag.reached_target_position) == btsp_after_num_target_reaches
-        ):
+        if Ag.reached_target and len(Ag.target_df) == btsp_after_num_target_reaches + 1:
             btsp_targs = [0]
 
         # check for restart
@@ -296,16 +299,16 @@ def learn_T_maze_btsp(
             CA1_weights.append(CA1s.inputs[CA3_PCs.name]["w"].copy())  # type: ignore[reportGeneralTypeIssues]
 
         if break_in_n < 0:
-            if len(Ag.reached_target_position) >= num_rewards:
+            if len(Ag.target_df) > num_rewards:
                 break_in_n = 20
         else:
             if break_in_n == 0:
                 break
             break_in_n -= 1
 
-    if len(Ag.reached_target_position) < num_rewards:
+    if len(Ag.target_df) <= num_rewards:
         print(
-            f"Only reached the reward {len(Ag.reached_target_position)} "
+            f"Only reached the reward {len(Ag.target_df) - 1} "
             f"times (target: {num_rewards})."
         )
 
@@ -459,10 +462,20 @@ def plot_1D_time_info(
             color="k",
             alpha=0.7,
         )
-    for positions, ls in [
-        (Ag.reached_reset_position, "dashed"),
-        (Ag.reached_target_position, "dotted"),
+    for end_point, ls in [
+        ("reset", "dashed"),
+        ("target", "dotted"),
     ]:
+        if end_point == "reset":
+            positions = Ag.trajectory_df["stop_step"].to_numpy()
+        elif end_point == "target":
+            positions = Ag.target_df["target_reached_step"].to_numpy()
+        else:
+            raise ValueError(f"Unknown end point: {end_point}")
+        if np.isnan(positions[-1]):
+            positions = positions[:-1]
+        positions = positions.astype(int)
+
         for t in positions:
             axes_flat[2].axvline(
                 CA1s.Agent.history["t"][t] / 60,
@@ -541,7 +554,7 @@ def learn_1D_btsp(
 
         # check whether a restart BTSP signal should go out
         btsp_targs = list()
-        if len(Ag.reached_target_position) == btsp_after_num_target_reaches:
+        if len(Ag.target_df) == btsp_after_num_target_reaches + 1:
             if restarted and CA1s_n > 1:
                 btsp_targs = [CA1s_n - 1]
 
@@ -558,16 +571,16 @@ def learn_1D_btsp(
             CA1_weights.append(CA1s.inputs[CA3_PCs_name]["w"].copy())
 
         if break_in_n < 0:
-            if len(Ag.reached_target_position) >= num_rewards:
+            if len(Ag.target_df) > num_rewards:
                 break_in_n = 20
         else:
             if break_in_n == 0:
                 break
             break_in_n -= 1
 
-    if len(Ag.reached_target_position) < num_rewards:
+    if len(Ag.target_df) <= num_rewards:
         print(
-            f"Only reached the reward {len(Ag.reached_target_position)} times "
+            f"Only reached the reward {len(Ag.target_df) - 1} times "
             f"(target: {num_rewards})."
         )
 

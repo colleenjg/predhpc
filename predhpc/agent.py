@@ -79,10 +79,13 @@ class ResetableAgent(Agent):
                     "Fixed direction not implemented for periodic boundary conditions."
                 )
 
-        self.actual_trajectory_lengths = list()  # type: list[int]
         self.set_all_positions()
         self.set_trajectory_lengths()
         self.set_target_df()
+        self.set_trajectory_df()
+
+        self._last_target_reached_step = -1
+        self._last_stop_step = -1
 
     def set_target_df(self):
         """Set the target dataframe, which records the target position and the
@@ -90,6 +93,7 @@ class ResetableAgent(Agent):
         """
 
         self.target_df = pd.DataFrame(columns=self.target_df_columns)
+        self.set_new_target()
 
     @property
     def target_df_columns(self) -> list:
@@ -101,22 +105,89 @@ class ResetableAgent(Agent):
 
         if not hasattr(self, "_target_df_columns"):
             self._target_df_columns = [
-                "target",
+                "target_x",
                 "target_set_step",
                 "target_reached_step",
             ]
 
+            if self.Environment.D == 2:
+                self._trajectory_df_columns.append("target_x")
+
         return self._target_df_columns
+
+    def set_trajectory_df(self):
+        """Set the trajectory dataframe, which records the trajectory start and stop
+        position, and the number of steps it lasted.
+        """
+
+        self.trajectory_df = pd.DataFrame(columns=self.trajectory_df_columns)
+        self.set_new_trajectory()
+
+    @property
+    def trajectory_df_columns(self) -> list:
+        """Get the target dataframe columns.
+
+        Returns:
+            list: List of column names.
+        """
+
+        if not hasattr(self, "_trajectory_df_columns"):
+            self._trajectory_df_columns = [
+                "start_position_x",
+                "stop_position_x",
+                "start_step",
+                "stop_step",
+                "num_steps_total",
+            ]
+
+            if self.Environment.D == 2:
+                self._trajectory_df_columns.extend(
+                    ["start_position_y", "stop_position_y"]
+                )
+
+        return self._trajectory_df_columns
+
+    def set_new_trajectory(self):
+        """Add start information for a new trajectory."""
+
+        trajectory_data = {
+            "start_position_x": self.pos[0],
+            "start_step": self.num_steps_total,
+        }
+
+        if self.Environment.D == 2:
+            trajectory_data["start_position_y"] = self.pos[1]
+
+        self.trajectory_df.loc[len(self.trajectory_df)] = trajectory_data  # type: ignore[reportGeneralTypeIssues]
+
+    def end_trajectory(self):
+        """Add stop information for a trajectory that is ending."""
+
+        idx = len(self.trajectory_df) - 1
+        start_step = self.trajectory_df.loc[idx, "start_step"]
+
+        self.trajectory_df.loc[idx, "stop_position_x"] = self.pos[0]
+        self.trajectory_df.loc[idx, "stop_step"] = self.num_steps_total
+        self.trajectory_df.loc[idx, "num_steps_total"] = (
+            self.num_steps_total - start_step
+        )
+
+        if self.Environment.D == 2:
+            self.trajectory_df["stop_position_y"] = self.pos[1]
 
     def set_new_target(self):
         if self.target_position is None:
             return
 
         target_data = {
-            "target": self.target_position[0],
+            "target_x": self.target_position[0],
             "target_set_step": self.num_steps_total,
             "target_reached_step": np.nan,
         }
+
+        if self.Environment.D == 2:
+            target_data["target_y"] = self.target_position[1]
+
         self.target_df.loc[len(self.target_df)] = target_data  # type: ignore[reportGeneralTypeIssues]
 
     def set_all_positions(self):
@@ -127,8 +198,6 @@ class ResetableAgent(Agent):
         self.start_position = self.format_position(self.start_position)
         self.reset_position = self.format_position(self.reset_position)
         self.target_position = self.format_position(self.target_position)
-
-        self.reached_reset_position = list()
 
         if self.start_position is not None:
             self.set_position_and_velocity(position=self.start_position, velocity=0)
@@ -382,12 +451,9 @@ class ResetableAgent(Agent):
 
         self.set_position_and_velocity(position=self.start_position, velocity=0)
 
-        self.actual_trajectory_lengths.append(self.current_trajectory_length)
         if self.trajectory_lengths is not None:
-            i = len(self.actual_trajectory_lengths) % len(self.trajectory_lengths)
+            i = (len(self.trajectory_df) - 1) % len(self.trajectory_lengths)
             self.trajectory_length = self.trajectory_lengths[i]
-
-        self.current_trajectory_length = 0
 
         return
 
@@ -397,19 +463,29 @@ class ResetableAgent(Agent):
         Returns:
             list: Trajectory lengths to date.
         """
-        traj_leng_to_date = self.actual_trajectory_lengths
-        if self.current_trajectory_length > 0:
-            traj_leng_to_date = self.actual_trajectory_lengths + [
-                self.current_trajectory_length
+
+        trajectory_lengths_to_date = self.trajectory_df["num_steps_total"].to_numpy()
+
+        if np.isnan(trajectory_lengths_to_date[-1]):
+            last_start = self.trajectory_df.loc[
+                len(self.trajectory_df) - 1, "start_step"
             ]
-        return traj_leng_to_date
+            last_length = self.num_steps_total - last_start
+            if last_length == 0:
+                trajectory_lengths_to_date = trajectory_lengths_to_date[:-1]
+            else:
+                trajectory_lengths_to_date[-1] = last_length
+
+        trajectory_lengths_to_date = trajectory_lengths_to_date.astype(int)
+
+        return trajectory_lengths_to_date
 
     def log_trajectories_to_date(self):
         """Log the trajectory lengths to date."""
-        traj_leng_to_date = self.get_trajectory_lengths_to_date()
+        trajectory_lengths_to_date = self.get_trajectory_lengths_to_date()
         print(
-            f"Trajectory lengths ({len(traj_leng_to_date)}) to date (in steps): "
-            f"{traj_leng_to_date}"
+            f"Trajectory lengths ({len(trajectory_lengths_to_date)}) to date "
+            f"(in steps): {trajectory_lengths_to_date}"
         )
 
     def log_trajectory_stats_to_date(self, log_as_time: bool = True):
@@ -459,19 +535,17 @@ class ResetableAgent(Agent):
         """Get the reset times.
 
         Returns:
-            list: Reset times.
+            1d array: Reset times.
 
         Raises:
             ValueError: If agent does not have reset steps.
         """
 
-        if hasattr(self, "actual_trajectory_lengths"):
-            if len(self.actual_trajectory_lengths) == 0:
-                reset_times = np.array([])
-            else:
-                reset_times = np.cumsum(self.actual_trajectory_lengths) * self.dt
-        else:
-            raise ValueError("Agent does not have reset steps.")
+        reset_steps = self.trajectory_df["stop_step"].to_numpy()
+        if np.isnan(reset_steps[-1]):
+            reset_steps = reset_steps[:-1]
+
+        reset_times = reset_steps * self.dt
 
         return reset_times
 
@@ -541,17 +615,17 @@ class ResetableAgent(Agent):
         self.reached_end = False
         if self.reset_position is not None and self.check_if_reset_position_reached():
             # record the time step at which the agent reached the reset position
-            self.reached_end = True
-            if len(self.reached_reset_position):
-                if self.num_steps_total == self.reached_reset_position[-1]:
-                    self.reached_end = False
-
-            if self.reached_end:
-                self.reached_reset_position.append(self.num_steps_total)
+            if self.num_steps_total == self._last_stop_step:
+                self.reached_end = False
+            else:
+                self.reached_end = True
 
         if self.trajectory_length is not None:
             if self.current_trajectory_length >= self.trajectory_length:
                 self.reached_end = True
+
+        if self.reached_end:
+            self._last_stop_step = self.num_steps_total
 
         return self.reached_end
 
@@ -565,22 +639,18 @@ class ResetableAgent(Agent):
         self.reached_target = False
         if self.target_position is not None and self.check_if_target_position_reached():
             # record the time step at which the agent reached the target position
-            self.reached_target = True
-            if len(self.target_df):
-                last_recorded = int(
-                    self.target_df.loc[len(self.target_df) - 1, "target_reached_step"]
-                )
-                if self.num_steps_total == last_recorded:
-                    self.reached_target = False
+            if self.num_steps_total == self._last_target_reached_step:
+                self.reached_target = False
+            else:
+                self.reached_target = True
 
-                if self.reached_target:
-                    if not np.isnan(last_recorded):
-                        raise RuntimeError("Target reached twice in a row.")
-                    self.target_df.loc[
-                        len(self.target_df) - 1, "target_reached_step"
-                    ] = self.num_steps_total
+        if self.reached_target:
+            self._last_target_reached_step = self.num_steps_total
+            self.target_df.loc[
+                len(self.target_df) - 1, "target_reached_step"
+            ] = self.num_steps_total
 
-                    self.set_new_target()
+            self.set_new_target()
 
         return self.reached_target
 
@@ -593,7 +663,9 @@ class ResetableAgent(Agent):
         if not skip_checks:
             self.check_and_record_target_reached()
             if self.check_if_trajectory_end_reached():
+                self.end_trajectory()
                 self.reset()
+                self.set_new_trajectory()
 
         self.prev_average_measured_speed = self.average_measured_speed
         prev_velocity = self.velocity
@@ -678,8 +750,11 @@ class ResetableAgent(Agent):
         else:
             raise RuntimeError("Only 1D and 2D environments are supported.")
 
-        n_reached = len(self.reached_reset_position)
-        n_targets = len(self.target_df)
+        reached_reset_position = self.trajectory_df["stop_step"].to_numpy()
+        if np.isnan(reached_reset_position[-1]):
+            reached_reset_position = reached_reset_position[:-1]
+        reached_reset_position = reached_reset_position.astype(int)
+
         alpha /= self.Environment.D
         alpha_pts = 0.9 / self.Environment.D
         for i in range(self.Environment.D):
@@ -692,14 +767,14 @@ class ResetableAgent(Agent):
                 s=ms / 10,
             )
 
-            if n_reached:
+            if len(reached_reset_position):
                 if self.start_position is not None:
                     x_start = [
                         t[x]
-                        for x in self.reached_reset_position
+                        for x in reached_reset_position
                         if x >= startid and x < endid
                     ]
-                    y_start = [self.start_position[i]] * n_reached
+                    y_start = [self.start_position[i]] * len(x_start)
                     ax.scatter(
                         x_start,
                         y_start,
@@ -712,10 +787,10 @@ class ResetableAgent(Agent):
                 if self.reset_position is not None:
                     x_reset = [
                         t[x - 1]
-                        for x in self.reached_reset_position
+                        for x in reached_reset_position
                         if x >= startid and x < endid
                     ]
-                    y_reset = [self.reset_position[i]] * n_reached
+                    y_reset = [self.reset_position[i]] * len(x_reset)
                     ax.scatter(
                         x_reset,
                         y_reset,
@@ -725,21 +800,26 @@ class ResetableAgent(Agent):
                         s=ms / 3,
                     )
 
-            if plot_targets and n_targets and self.target_position is not None:
-                x_targ = [
-                    t[x]
-                    for x in self.target_df["target_reached_step"]
-                    if x >= startid and x < endid
-                ]
-                y_targ = [self.target_position[i]] * n_targets
-                ax.scatter(
-                    x_targ,
-                    y_targ,
-                    marker=markers.MarkerStyle("d"),
-                    color="gold",
-                    alpha=alpha_pts,
-                    s=ms / 5,
-                )
+            if plot_targets and self.target_position is not None:
+                target_reached_step = self.target_df["target_reached_step"].to_numpy()
+                if np.isnan(target_reached_step[-1]):
+                    target_reached_step = target_reached_step[:-1]
+
+                if len(target_reached_step) != 0:
+                    target_reached_step = target_reached_step.astype(int)
+
+                    x_targ = [
+                        t[x] for x in target_reached_step if x >= startid and x < endid
+                    ]
+                    y_targ = [self.target_position[i]] * len(x_targ)
+                    ax.scatter(
+                        x_targ,
+                        y_targ,
+                        marker=markers.MarkerStyle("d"),
+                        color="gold",
+                        alpha=alpha_pts,
+                        s=ms / 5,
+                    )
 
         ax.set_xlabel("Time / min")
         ax.set_ylabel("Position / m")
@@ -777,27 +857,35 @@ class ResetableAgent(Agent):
         autosave: bool | None = None,
         **kwargs,  # hacky catch-all...
     ) -> tuple[mpl_figure.Figure, plt.Axes]:
-        """Plots the trajectory between t_start (seconds) and t_end (defaulting to the last time available)
+        """Plots the trajectory between t_start (seconds) and t_end (defaulting to the
+        last time available)
 
-        From Agent.plot_trajectory() in ratinabox/agent.py. Modified to enable plotting of reset steps, and use of colormaps for trajectories.
+        From Agent.plot_trajectory() in ratinabox/agent.py. Modified to enable plotting
+        of reset steps, and use of colormaps for trajectories.
 
         Args:
             t_start: start time in seconds (default = self.history["t"][0])
             t_end: end time in seconds (default = self.history["t"][-1])
             framerate: how many scatter points / per second of motion to display
-            fig, ax: the fig, ax to plot on top of, optional, if not provided used self.Environment.plot_Environment().
+            fig, ax: the fig, ax to plot on top of, optional, if not provided used
+                self.Environment.plot_Environment().
               This can be used to plot trajectory on top of receptive fields etc.
-            decay_point_size: decay trajectory point size over time (recent times = largest)
+            decay_point_size: decay trajectory point size over time
+                (recent times = largest)
             plot_agent: dedicated point show agent current position
             colormap: colormap to use to plot trajectories
             alpha: plot point opaqness
-            xlim: In 1D, forces the top (right) xlim to be a certain time (minutes) (useful if animating this function)
-            background_color: color of the background if not matplotlib default, only for 1D (probably white)
+            xlim: In 1D, forces the top (right) xlim to be a certain time (minutes)
+                (useful if animating this function)
+            background_color: color of the background if not matplotlib default, only
+                for 1D (probably white)
             plot_traj_ends: plot a point at the end of each trajectory
             target_alpha: transparency with which to plot target position
             plot_targets: plot target position
-            cmap_per: if True, the colormap is used to set the color for each time point. Otherwise, each trajectory has its own color.
-            scale_cmap_per: if True, and cmap_per is True, the full range of the colormap is used for each trajectory, regardless of its length
+            cmap_per: if True, the colormap is used to set the color for each time
+                point. Otherwise, each trajectory has its own color.
+            scale_cmap_per: if True, and cmap_per is True, the full range of the
+                colormap is used for each trajectory, regardless of its length
             ms_2D: the size of the points in the 2D plot is set to this value.
             size_fact: if not None, the size of the points is multiplied by this value.
             autosave (bool, optional): Whether to autosave the figure. Defaults to None.
@@ -831,8 +919,7 @@ class ResetableAgent(Agent):
         elif len(time) == 0:
             raise RuntimeError("Duration too short. No time points to plot.")
 
-        last_length = len(t) - sum(self.actual_trajectory_lengths)
-        trajectory_lengths = self.actual_trajectory_lengths + [last_length]
+        trajectory_lengths = self.get_trajectory_lengths_to_date()
         traj_idx = [np.full(steps, i) for i, steps in enumerate(trajectory_lengths)]
         if cmap_per:
             if scale_cmap_per:
@@ -890,7 +977,7 @@ class ResetableAgent(Agent):
                 s = ms_2D * np.exp((time - time[-1]) / 10)
                 s[(time[-1] - time) > ms_2D] *= 0
 
-            if plot_traj_ends == True and len(self.actual_trajectory_lengths):
+            if plot_traj_ends == True and len(self.trajectory_df) - 1 > 0:
                 ends = np.where(np.diff(traj_idx) > 0)[0]
                 ends = np.append(ends, len(trajectory) - 1)
                 s[ends] = ms_2D * 2
@@ -994,7 +1081,8 @@ class ResetableAgent(Agent):
             colormap = "crest"
         cmap = sns.color_palette(colormap, as_cmap=True)
 
-        all_ends = np.cumsum(self.actual_trajectory_lengths)
+        actual_trajectory_lengths = self.get_trajectory_lengths_to_date()
+        all_ends = np.cumsum(actual_trajectory_lengths)
         start_c, end_c = None, None
         traj_starts, traj_ends = None, None
         if plot_starts:
@@ -1159,32 +1247,37 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
 
         return self._target_df_columns
 
+    def set_current_arm(self):
+        # randomly choose a current target arm
+        arms = ["left", "right"]
+        arm_idx = np.random.rand() > self.left_arm_prop  # type: ignore[reportGeneralTypeIssues]
+        self.current_arm = arms[arm_idx]
 
     def set_new_target(self):
-        if self.target_position is None:
-            return
+        """Set a new target."""
 
         target_data = {
-            "target": self.target_position[0],
+            "target_arm": self.target_arm,
+            "target_x": self.target_position[0],
+            "target_y": self.target_position[1],
             "target_set_step": self.num_steps_total,
             "target_reached_step": np.nan,
         }
         self.target_df.loc[len(self.target_df)] = target_data  # type: ignore[reportGeneralTypeIssues]
 
-
     def get_direction(self) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
         """Get the direction to the target."""
 
-        if self.target == "left":
-            target = self.Environment.left_T_end
+        if self.current_arm == "left":
+            trajectory_end = self.Environment.left_T_end
 
-        elif self.target == "right":
-            target = self.Environment.right_T_end
+        elif self.current_arm == "right":
+            trajectory_end = self.Environment.right_T_end
 
         else:
-            raise RuntimeError("Target must be 'left' or 'right'.")
+            raise RuntimeError("Current arm must be 'left' or 'right'.")
 
-        direction = np.asarray(target) - self.pos
+        direction = np.asarray(trajectory_end) - self.pos
 
         return direction
 
@@ -1202,7 +1295,9 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
 
         self.check_and_record_target_reached()
         if self.check_if_trajectory_end_reached():
+            self.end_trajectory()
             self.reset()
+            self.set_new_trajectory()
 
         # calculate drift_velocity
         if self.near_branch:
@@ -1223,37 +1318,12 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
             **kwargs,
         )
 
-
-    def set_new_target(self)
-
-    def set_current_arm(self):
-        """Sets which arm the agent will navigate to, this run."""
-
-        # randomly choose a current target arm
-        arms = ["left", "right"]
-        arm_idx = np.random.rand() > self.left_arm_prop  # type: ignore[reportGeneralTypeIssues]
-        self.target = arms[arm_idx]
-
-
-        target_data = {
-            "target_arm": arms[arm_idx],
-            "target_x": self.target[0],
-            "target_y": self.target[1],
-            "target_set_step": self.num_steps_total,
-            "target_reached_step": np.nan,
-        }
-        self.target_df.loc[len(self.target_df)] = target_data  # type: ignore[reportGeneralTypeIssues]
-
-        return
-
     def reset(self):
-        """Reset the agent to a random location."""
+        """Reset the agent."""
 
         super().reset()
 
         self.set_current_arm()
-
-        return
 
     def set_all_positions(self):
         """
@@ -1269,26 +1339,24 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
             self.format_position(reset_position)
             for reset_position in [self.left_reset_position, self.right_reset_position]
         ]
-        self.reached_reset_position = list()
 
         # set target position
-        target_arm = self.target_arm  # type: ignore[reportGeneralTypeIssues]
         target_location_prop_to_arm = self.target_location_prop_to_arm  # type: ignore[reportGeneralTypeIssues]
-        if target_arm == "left":
+        T_split = self.Environment.T_split
+
+        if self.target_arm == "left":
             edge = self.Environment.left_T_end
-        elif target_arm == "right":
+        elif self.target_arm == "right":
             edge = self.Environment.right_T_end
         else:
-            raise RuntimeError("Target must be 'left' or 'right'.")
+            raise ValueError("target_arm must be 'left' or 'right'.")
 
-        T_split = self.Environment.T_split
-        self.target_position = [
+        target_position = [
             T_split[i] + (edge[i] - T_split[i]) * target_location_prop_to_arm
             for i in [0, 1]
         ]
-        self.target_position = self.format_position(self.target_position)
+        self.target_position = self.format_position(target_position)
 
-        self.reached_target_position = list()
         self.steps_before_checking_for_target = 0
 
         # set initial position and velocity
