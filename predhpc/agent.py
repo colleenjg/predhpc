@@ -79,8 +79,8 @@ class ResetableAgent(Agent):
                     "Fixed direction not implemented for periodic boundary conditions."
                 )
 
-        self.set_all_positions()
         self.set_trajectory_lengths()
+        self.set_all_positions()
         self.set_target_df()
         self.set_trajectory_df()
 
@@ -105,13 +105,13 @@ class ResetableAgent(Agent):
 
         if not hasattr(self, "_target_df_columns"):
             self._target_df_columns = [
-                "target_x",
-                "target_set_step",
-                "target_reached_step",
+                "position_x",
+                "set_step",
+                "reached_step",
             ]
 
             if self.Environment.D == 2:
-                self._trajectory_df_columns.append("target_x")
+                self._trajectory_df_columns.append("position_x")
 
         return self._target_df_columns
 
@@ -132,18 +132,19 @@ class ResetableAgent(Agent):
         """
 
         if not hasattr(self, "_trajectory_df_columns"):
-            self._trajectory_df_columns = [
-                "start_position_x",
-                "stop_position_x",
-                "start_step",
-                "stop_step",
-                "num_steps_total",
-            ]
+            trajectory_df_columns = ["start_position_x"]
 
             if self.Environment.D == 2:
-                self._trajectory_df_columns.extend(
-                    ["start_position_y", "stop_position_y"]
-                )
+                trajectory_df_columns.append("start_position_y")
+
+            trajectory_df_columns.extend(["start_step", "stop_position_x"])
+
+            if self.Environment.D == 2:
+                trajectory_df_columns.append("stop_position_y")
+
+            trajectory_df_columns.extend(["stop_step", "num_steps_total"])
+
+            self._trajectory_df_columns = trajectory_df_columns
 
         return self._trajectory_df_columns
 
@@ -164,7 +165,7 @@ class ResetableAgent(Agent):
         """Add stop information for a trajectory that is ending."""
 
         idx = len(self.trajectory_df) - 1
-        start_step = self.trajectory_df.loc[idx, "start_step"]
+        start_step = int(self.trajectory_df.loc[idx, "start_step"])
 
         self.trajectory_df.loc[idx, "stop_position_x"] = self.pos[0]
         self.trajectory_df.loc[idx, "stop_step"] = self.num_steps_total
@@ -180,13 +181,12 @@ class ResetableAgent(Agent):
             return
 
         target_data = {
-            "target_x": self.target_position[0],
-            "target_set_step": self.num_steps_total,
-            "target_reached_step": np.nan,
+            "position_x": self.target_position[0],
+            "set_step": self.num_steps_total,
         }
 
         if self.Environment.D == 2:
-            target_data["target_y"] = self.target_position[1]
+            target_data["position_y"] = self.target_position[1]
 
         self.target_df.loc[len(self.target_df)] = target_data  # type: ignore[reportGeneralTypeIssues]
 
@@ -467,9 +467,9 @@ class ResetableAgent(Agent):
         trajectory_lengths_to_date = self.trajectory_df["num_steps_total"].to_numpy()
 
         if np.isnan(trajectory_lengths_to_date[-1]):
-            last_start = self.trajectory_df.loc[
-                len(self.trajectory_df) - 1, "start_step"
-            ]
+            last_start = int(
+                self.trajectory_df.loc[len(self.trajectory_df) - 1, "start_step"]
+            )
             last_length = self.num_steps_total - last_start
             if last_length == 0:
                 trajectory_lengths_to_date = trajectory_lengths_to_date[:-1]
@@ -647,9 +647,12 @@ class ResetableAgent(Agent):
         if self.reached_target:
             self._last_target_reached_step = self.num_steps_total
             self.target_df.loc[
-                len(self.target_df) - 1, "target_reached_step"
+                len(self.target_df) - 1, "reached_step"
             ] = self.num_steps_total
-
+            self.target_df.loc[len(self.target_df) - 1, "num_steps"] = (
+                self.num_steps_total
+                - self.target_df.loc[len(self.target_df) - 1, "set_step"]
+            )
             self.set_new_target()
 
         return self.reached_target
@@ -801,7 +804,7 @@ class ResetableAgent(Agent):
                     )
 
             if plot_targets and self.target_position is not None:
-                target_reached_step = self.target_df["target_reached_step"].to_numpy()
+                target_reached_step = self.target_df["reached_step"].to_numpy()
                 if np.isnan(target_reached_step[-1]):
                     target_reached_step = target_reached_step[:-1]
 
@@ -1239,10 +1242,11 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
         if not hasattr(self, "_target_df_columns"):
             self._target_df_columns = [
                 "target_arm",
-                "target_x",
-                "target_y",
-                "target_set_step",
-                "target_reached_step",
+                "position_x",
+                "position_y",
+                "set_step",
+                "reached_step",
+                "num_steps",
             ]
 
         return self._target_df_columns
@@ -1256,12 +1260,14 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
     def set_new_target(self):
         """Set a new target."""
 
+        if self.target_position is None:
+            raise RuntimeError("Target position is None.")
+
         target_data = {
-            "target_arm": self.target_arm,
-            "target_x": self.target_position[0],
-            "target_y": self.target_position[1],
-            "target_set_step": self.num_steps_total,
-            "target_reached_step": np.nan,
+            "target_arm": self.target_arm,  # type: ignore[reportGeneralTypeIssues]
+            "position_x": self.target_position[0],
+            "position_y": self.target_position[1],
+            "set_step": self.num_steps_total,
         }
         self.target_df.loc[len(self.target_df)] = target_data  # type: ignore[reportGeneralTypeIssues]
 
@@ -1344,9 +1350,10 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
         target_location_prop_to_arm = self.target_location_prop_to_arm  # type: ignore[reportGeneralTypeIssues]
         T_split = self.Environment.T_split
 
-        if self.target_arm == "left":
+        target_arm = self.target_arm  # type: ignore[reportGeneralTypeIssues]
+        if target_arm == "left":
             edge = self.Environment.left_T_end
-        elif self.target_arm == "right":
+        elif target_arm == "right":
             edge = self.Environment.right_T_end
         else:
             raise ValueError("target_arm must be 'left' or 'right'.")
@@ -1454,75 +1461,160 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
 
         if not hasattr(self, "_target_df_columns"):
             self._target_df_columns = [
-                "target_object_type",
-                "target_x",
-                "target_y",
-                "target_set_step",
-                "target_reached_step",
+                "object_idx",
+                "object_type_name",
+                "object_type_num",
+                "position_x",
+                "position_y",
+                "set_step",
+                "random_walk_periods",
+                "reached_step",
+                "num_steps",
+                "num_random_walk_steps",
             ]
+
+            # add a target in sight column with lists
 
         return self._target_df_columns
 
-    def get_targets_and_probabilities(
-        self,
-        skip_object_position: np.ndarray[tuple[int], np.dtype[np.float64]]
-        | None = None,
-    ) -> tuple[
-        list[np.ndarray[tuple[int], np.dtype[np.float64]]] | list[None],
-        list[int],
-        list[float],
-        list[str],
-    ]:
-        """Get the targets and the probabilities to use when sampling from them."""
+    def set_target_df(self):
+        """Set the target dataframe, which records the target position and the
+        step at which it was reached.
+        """
 
-        reward_num = self.Environment.type_name_to_num_dict["reward"]
-        novel_num = self.Environment.type_name_to_num_dict["novel"]
+        self.target_df = pd.DataFrame(columns=self.target_df_columns)
 
-        objects = [None]
-        obj_types = [-1]
-        obj_weights = [self.no_target_factor]  # type: ignore[reportGeneralTypeIssues]
-        obj_names = ["no target"]
-        for obj, obj_type in zip(
-            self.Environment.objects["objects"],
-            self.Environment.objects["object_types"],
-        ):
-            if obj_type not in [reward_num, novel_num]:
-                continue
-            elif (
-                skip_object_position is not None and (obj == skip_object_position).all()
-            ):
-                continue
-            objects.append(obj)
-            obj_types.append(obj_type)
-            obj_weight = self.reward_factor if obj_type == reward_num else 1  # type: ignore[reportGeneralTypeIssues]
-            obj_weights.append(obj_weight)
-            obj_name = "reward" if obj_type == reward_num else "novel"
-            obj_names.append(obj_name)
+        self.target_df["random_walk_periods"] = self.target_df[
+            "random_walk_periods"
+        ].astype(object)
 
-        div = sum(obj_weights)
-        obj_weights = [obj_wei / div for obj_wei in obj_weights]
+        self.set_new_target()
+        self.set_random_walk()
 
-        return objects, obj_types, obj_weights, obj_names
+    def get_target_probability_df(self) -> pd.DataFrame:
+        """Get the target probability dataframe.
 
-    def set_current_target(self):
-        """Set the current target. Resets the timer"""
+        Returns:
+            pd.DataFrame: Dataframe with target probabilities.
+        """
+        target_probability_df = self.Environment.object_df.loc[
+            ~self.Environment.object_df["object_type_name"].str.contains("teleport")
+        ].copy()  # makes a copy
 
-        objects, obj_types, obj_weights, obj_names = self.get_targets_and_probabilities(
-            self.target_position
+        target_probability_df.insert(0, "object_df_idx", target_probability_df.index)
+
+        # reset index
+        target_probability_df.reset_index(drop=True, inplace=True)
+
+        # add a no target row
+        target_probability_df.loc[
+            len(target_probability_df), "object_type_name"
+        ] = "no_target"
+
+        # add target probabilities
+        target_probability_df.loc[:, "target_factor"] = 1
+        target_probability_df.loc[
+            target_probability_df["object_type_name"] == "reward", "target_factor"
+        ] = self.reward_factor  # type: ignore[reportGeneralTypeIssues]
+        target_probability_df.loc[
+            target_probability_df["object_type_name"] == "no_target", "target_factor"
+        ] = self.no_target_factor  # type: ignore[reportGeneralTypeIssues]
+
+        target_probability_df.loc[:, "target_probability"] = (
+            target_probability_df["target_factor"]
+            / target_probability_df["target_factor"].sum()
         )
-        target_idx = np.random.choice(len(objects), 1, p=np.asarray(obj_weights))[0]
 
-        # sample an object to go toward (check if in FOV, 5 attempts, otherwise no target for x steps)
-        self.target = obj_names[target_idx]
-        self.target_position = objects[target_idx]
-        self.target_type = obj_types[target_idx]
+        return target_probability_df
 
-        self.trajectory_targets.append(
-            (self.target, self.target_position, self.target_type)
-        )
-        self.new_target_position_set.append(self.num_steps_total)
+    def check_random_reached(self):
+        """Check if the target was reached during a random walk."""
+
+        if self.current_num_of_random_walk_steps != 0 and self.reached_target:
+            self.target_df.loc[len(self.target_df) - 1, "random_walk_periods"][
+                -1
+            ].append(self.num_steps_total)
+
+            self.current_num_of_random_walk_steps = 0
+
+    def set_new_target(self):
+        """Set a new target."""
+
+        # add random walk steps
+        if len(self.target_df) != 0:
+            self.check_random_reached()
+            random_walk_periods = np.asarray(
+                self.target_df.loc[len(self.target_df) - 1, "random_walk_periods"]
+            )
+            num_random_walk_steps = 0
+            if len(random_walk_periods) > 0:
+                num_random_walk_steps = np.sum(np.diff(random_walk_periods, axis=1))
+            self.target_df.loc[
+                len(self.target_df) - 1, "num_random_walk_steps"
+            ] = num_random_walk_steps
+
+        target_probability_df = self.get_target_probability_df()
+
+        object_weights = target_probability_df["target_probability"].values
+        idx = np.random.choice(len(object_weights), 1, p=np.asarray(object_weights))[0]
+
+        target_row = target_probability_df.loc[idx]
+
+        if target_row["object_type_name"] == "no_target":
+            target_data = {
+                "object_type_name": "no_target",
+            }
+        else:
+            target_data = {
+                "object_idx": target_row["object_df_idx"],
+                "object_type_name": target_row["object_type_name"],
+                "object_type_num": target_row["object_type_num"],
+                "position_x": target_row["position_x"],
+                "position_y": target_row["position_y"],
+            }
+
+        target_data["set_step"] = self.num_steps_total  # type: ignore[reportGeneralTypeIssues]
+        target_data["random_walk_periods"] = list()
+
+        new_idx = len(self.target_df)
+        self.target_df.loc[new_idx] = target_data  # type: ignore[reportGeneralTypeIssues]
 
         self.steps_before_checking_for_target = 0
+
+        if target_row["object_type_name"] == "no_target":
+            self.target_position = None
+        else:
+            self.target_position = np.asarray(
+                [target_data["position_x"], target_data["position_y"]]
+            )
+
+    @property
+    def teleportation_df(self):
+        """Set the target dataframe, which records the target position and the
+        step at which it was reached.
+        """
+
+        if not hasattr(self, "_teleportation_df"):
+            teleportation_columns = [
+                "teleport_pair_num",
+                "step_num",
+            ]
+
+            for direction in ["in", "out"]:
+                for key in [
+                    "object_idx",
+                    "object_type_num",
+                    "object_type_name",
+                    "position_x",
+                    "position_y",
+                    "velocity_x",
+                    "velocity_y",
+                ]:
+                    teleportation_columns.append(f"{direction}_{key}")
+
+            self._teleportation_df = pd.DataFrame(columns=teleportation_columns)
+
+        return self._teleportation_df
 
     def check_if_target_is_in_sight(self) -> bool:
         """Check if the target is in sight.
@@ -1546,6 +1638,9 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
 
         if self.target_position is None or not self.check_if_target_is_in_sight():
             self.current_num_of_random_walk_steps = int(self.num_random_walk_steps)  # type: ignore[reportGeneralTypeIssues]
+            self.target_df.loc[len(self.target_df) - 1, "random_walk_periods"].append(
+                [self.num_steps_total]
+            )
         else:
             self.current_num_of_random_walk_steps = 0
 
@@ -1565,20 +1660,13 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             self.must_fix_velocity_record = False
 
         self.target_position = None
-        self.set_current_target()
+        if not first_setting:
+            self.set_new_target()
 
         self.steps_before_checking_for_target = 0
-        self.set_random_walk()
 
-        if first_setting:
-            self.trajectory_targets = list()
-            self.new_target_position_set = list()
-            self.reached_target_position = list()
-            self.teleported = list()  # type: list[int]
-            self.teleport_pair_nums = list()  # type: list[int]
-            self.start_positions = list()
-
-        self.start_positions.append(self.start_position)
+        if not first_setting:
+            self.set_random_walk()
 
     def reset(self):
         """Reset the agent to a random location."""
@@ -1586,12 +1674,7 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         super().reset()
 
         self.set_all_positions(first_setting=False)
-
-        if (
-            len(self.reached_target_position) == 0
-            or self.num_steps_total != self.reached_target_position[-1]
-        ):
-            self.reached_target_position.append(-1)
+        self.set_random_walk()
 
         return
 
@@ -1603,12 +1686,12 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
                 Defaults to False.
         """
 
-        if len(self.teleported) == 0:
+        if len(self.teleportation_df) == 0:
             log_str = "No teleportation events."
 
         elif last:
-            pair_num = self.teleport_pair_nums[-1]
-            step_num = self.teleported[-1]
+            step_num = self.teleportation_df["step_num"].tolist()[-1]
+            pair_num = self.teleportation_df["teleport_pair_num"].tolist()[-1]
             if step_num == len(self.history["t"]):
                 seconds = self.history["t"][-1] + self.dt
             else:
@@ -1619,10 +1702,12 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             )
 
         else:
+            step_nums = self.teleportation_df["step_num"].tolist()
+            pair_nums = self.teleportation_df["teleport_pair_num"].tolist()
             teleport_str = "    \n".join(
                 [
                     f"through pair {pair_num} at step {step} ({self.history['t'][step]:.2f} sec.)"
-                    for step, pair_num in zip(self.teleported, self.teleport_pair_nums)
+                    for step, pair_num in zip(step_nums, pair_nums)
                 ]
             )
             log_str = f"Teleportation events:\n    {teleport_str}"
@@ -1889,7 +1974,7 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             teleport_pair_num, direction="out"
         )
 
-        out_velocity = util.rotate_to(
+        out_velocity = -util.rotate_to(
             in_vector=self.velocity,
             in_basis=teleport_in_vector,  # type: ignore[arg-type]
             out_basis=teleport_out_vector,  # type: ignore[arg-type]
@@ -1919,14 +2004,51 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             # retain rotational velocity
             rotational_velocity = self.rotational_velocity
 
+            in_coords = self.pos.copy()
+            in_velocity = self.velocity.copy()
+
             self.set_position_and_velocity(
                 position=out_coords,
                 velocity=out_velocity,
                 rotational_velocity=rotational_velocity,
             )
 
-            self.teleported.append(self.num_steps_total)
-            self.teleport_pair_nums.append(teleport_pair_num)
+            # record teleportation data
+            teleportation_data = {
+                "teleport_pair_num": teleport_pair_num,
+                "step_num": self.num_steps_total,
+            }
+
+            for direction in ["in", "out"]:
+                type_num = self.Environment.teleport_pairs_dict[teleport_pair_num][
+                    direction
+                ][0]
+                object_idx = self.Environment.object_df.loc[
+                    self.Environment.object_df["object_type_num"] == type_num
+                ].index
+                if len(object_idx) == 0:
+                    raise RuntimeError(
+                        f"Could not find object index for object type number {type_num}."
+                    )
+                elif len(object_idx) > 1:
+                    raise RuntimeError(
+                        f"Found multiple object indices for object type number {type_num}."
+                    )
+                teleportation_data[f"{direction}_object_idx"] = object_idx[0]
+                teleportation_data[f"{direction}_object_type_num"] = type_num
+                teleportation_data[
+                    f"{direction}_object_type_name"
+                ] = self.Environment.object_type_num_to_name_dict[type_num]
+
+                coords = in_coords if direction == "in" else out_coords
+                velocity = in_velocity if direction == "in" else out_velocity
+
+                teleportation_data[f"{direction}_position_x"] = coords[0]
+                teleportation_data[f"{direction}_position_y"] = coords[1]
+                teleportation_data[f"{direction}_velocity_x"] = velocity[0]
+                teleportation_data[f"{direction}_velocity_y"] = velocity[1]
+
+            self.teleportation_df.loc[len(self.teleportation_df)] = teleportation_data
 
             if self.always_log_teleportation:  # type: ignore[reportGeneralTypeIssues]
                 self.log_teleportation(last=True)
@@ -1961,20 +2083,22 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         if self.check_if_trajectory_end_reached():
             self.reset()
         elif target_reached:
-            self.set_current_target()
+            self.set_random_walk()
+        elif self.current_num_of_random_walk_steps == 0:
+            if self.target_position is None:
+                self.set_new_target()
             self.set_random_walk()
 
         self.teleport_if_applicable()
-
-        if self.current_num_of_random_walk_steps == 0:
-            if self.target_position is None:
-                self.set_current_target()
-            self.set_random_walk()
 
         # calculate drift_velocity
         if self.current_num_of_random_walk_steps > 0:
             drift_velocity = None
             self.current_num_of_random_walk_steps -= 1
+            if self.current_num_of_random_walk_steps == 0:
+                self.target_df.loc[len(self.target_df) - 1, "random_walk_periods"][
+                    -1
+                ].append(self.num_steps_total + 1)
         else:
             direction = np.asarray(self.target_position) - self.pos
             drift_velocity = (
@@ -1990,76 +2114,6 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             drift_to_random_strength_ratio=drift_to_random_strength_ratio,
             **kwargs,
         )
-
-    def get_trajectory_nodes(
-        self,
-    ) -> tuple[
-        np.ndarray[tuple[int, int], np.dtype[np.float64]],
-        np.ndarray[tuple[int], np.dtype[np.int64]],
-        np.ndarray[tuple[int], np.dtype[np.int64]],
-        np.ndarray[tuple[int, int], np.dtype[np.float64]],
-    ]:
-        """Get the trajectory nodes.
-
-        Returns:
-            nodes (2d array): Nodes that were reached (nodes x 2)
-            values (1d array): Values of the nodes that were reached.
-                1: target, 0: start and -1: non target end
-            steps (1d array): Number of steps at which each node was reached.
-            unreached_targets (2d array): Targets that were not reached
-                (corresponding to -1 values)
-        """
-
-        pos = np.asarray(self.history["pos"])
-
-        targets = np.asarray(
-            [target[1] for target in self.trajectory_targets if target[1] is not None]
-        )
-        traj_lengs = np.cumsum(self.get_trajectory_lengths_to_date())
-        start_position = np.asarray([self.start_positions[0]])
-
-        reached_target_position = np.asarray(self.reached_target_position)
-        reached_targets_idxs = np.where(reached_target_position != -1)[0]
-        reached_target_position = reached_target_position[reached_targets_idxs]
-
-        reached_targets = np.zeros(len(targets)).astype(bool)
-        reached_targets[reached_targets_idxs] = True
-        unreached_targets = targets[~reached_targets]
-        targets = targets[reached_targets]
-
-        # get start and end nodes
-        nodes = np.insert(targets, 0, start_position[0], axis=0)
-        values = np.insert(np.ones(len(nodes) - 1), 0, 0)
-        steps = np.insert(reached_target_position, 0, 0)
-        for l, leng in enumerate(traj_lengs):
-            if leng in reached_target_position:
-                continue
-            idx = np.where(leng < reached_target_position)[0]
-            if len(idx):
-                # add the end node
-                nodes = np.insert(nodes, idx[0], pos[leng - 1 : leng], axis=0)
-                values = np.insert(values, idx[0], -1)
-                steps = np.insert(steps, idx[0], leng)
-                # add the start node
-                nodes = np.insert(
-                    nodes, idx[0] + 1, start_position[l + 1 : l + 2], axis=0
-                )
-                values = np.insert(values, idx[0], 0)
-                steps = np.insert(steps, idx[0], leng + 1)
-            elif self.trajectory_targets[-1][0] != "no target":
-                # add the end node
-                nodes = np.append(nodes, pos[-2:-1], axis=0)
-                values = np.append(values, -1)
-                steps = np.append(steps, leng)
-
-        if len(unreached_targets) != len(np.where(values == -1)[0]):
-            raise RuntimeError("Wrong number of reset points found.")
-
-        nodes = nodes.astype(np.float64)
-        values = values.astype(np.int64)
-        steps = steps.astype(np.int64)
-
-        return nodes, values, steps, unreached_targets  # type: ignore[return-value]
 
     def plot_trajectory(  # type: ignore[override]
         self,
@@ -2093,12 +2147,7 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         if no_legend and legend is not None:
             legend.remove()
 
-        if t_end is None:
-            import pdb
-
-            pdb.set_trace()
-
-        self.add_target(ax, t=t_end)
+        self.add_target_to_plot(ax, t=t_end)
 
         util.save_figure(fig, "trajectory", save=autosave)
 
@@ -2108,9 +2157,10 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         self,
         fig: mpl_figure.Figure | None = None,
         ax: plt.Axes | None = None,
-        alpha: float = 0.8,
+        alpha: float = 1.0,
         plot_env: bool = True,
         no_legend: bool = False,
+        colormap: str | None | mpl_colors.Colormap = None,
         autosave: bool | None = None,
     ) -> tuple[mpl_figure.Figure, plt.Axes]:
         """Plot the trajectory targets.
@@ -2122,6 +2172,7 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             plot_env (bool, optional): Whether to plot the environment.
                 Defaults to True.
             no_legend (bool, optional): Whether to remove the legend. Defaults to False.
+            colormap (str, optional): Colormap to use. Defaults to None.
             autosave (bool, optional): Whether to autosave the figure. Defaults to None.
 
         Returns:
@@ -2135,70 +2186,78 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         if fig is None or ax is None:
             raise RuntimeError("fig or ax is None.")
 
-        targets = [
-            target[1] for target in self.trajectory_targets if target[1] is not None
-        ]
-
-        unique_targets = list()  # type: list[np.ndarray]
-        counts = list()  # type: list[int]
-        for target in targets:
-            present = [
-                (target == unique_target).all() for unique_target in unique_targets
-            ]
-            if sum(present):
-                counts[present.index(True)] += 1
-            else:
-                unique_targets.append(target)
-                counts.append(1)
-
-        for target, count in zip(unique_targets, counts):
-            # write the number of times the target was visited
-            ax.text(
-                target[0],
-                target[1],
-                str(count),
-                horizontalalignment="left",
-                verticalalignment="bottom",
-                color="white",
-                fontsize=10,
-                zorder=10,
-                fontweight="bold",
-            )
-
-        if len(targets) == 0:
+        if len(self.target_df) == 0:
             return fig, ax
 
-        nodes, values, steps, unreached_targets = self.get_trajectory_nodes()
+        sub_target_df = self.target_df[
+            self.target_df["object_type_name"] != "no_target"
+        ]
 
-        # get linewidths
-        step_diff = np.diff(steps)
-        lws = list()
-        if len(step_diff) != 0:
-            min_val, max_val = np.min(step_diff), np.max(step_diff)
-            lws = np.around((step_diff - min_val) / (max_val - min_val), 1) + 1
+        env_width = self.Environment.extent[1] - self.Environment.extent[0]
+        env_height = self.Environment.extent[3] - self.Environment.extent[2]
 
-        unreached = 0
-        for n, node in enumerate(nodes[:-1]):
+        for object_idx in np.sort(sub_target_df["object_idx"].unique()):
+            object_df = sub_target_df[sub_target_df["object_idx"] == object_idx]
+            count = len(object_df)
+            # write the number of times the target was visited
+            for shift, color in [(1, "white"), (0, "black")]:
+                shift_x = shift * 0.006 * env_width
+                shift_y = shift * 0.006 * env_height
+                ax.text(
+                    object_df.loc[object_df.index[0], "position_x"] + shift_x,
+                    object_df.loc[object_df.index[0], "position_y"] + shift_y,
+                    str(count),
+                    horizontalalignment="left",
+                    verticalalignment="bottom",
+                    color=color,
+                    fontsize=10,
+                    zorder=10,
+                    fontweight="bold",
+                )
+
+        reached_df = sub_target_df[~sub_target_df["reached_step"].isna()]
+
+        min_val, max_val = 0, 1
+        if len(reached_df) != 0:
+            reached_steps = reached_df["reached_step"].to_numpy()
+            reached_steps = np.insert(reached_steps, 0, 0)
+
+            # get linewidth calculation values
+            min_val = np.min(np.diff(reached_steps))
+            max_val = np.max(np.diff(reached_steps))
+
+        if colormap is None:
+            colormap = "crest"
+        cmap = sns.color_palette(colormap, as_cmap=True)
+
+        start_pos = self.history["pos"][0]
+        start_step = 0
+        for i, idx in enumerate(sub_target_df.index):
+            target_row = sub_target_df.loc[idx]
+            color = cmap(i / len(sub_target_df))
+
+            reached_step = target_row["reached_step"]
+            if np.isfinite(reached_step):
+                num_steps = reached_step - start_step
+                lw = 1 + (num_steps - min_val) / (max_val - min_val)
+                ls = None
+            else:
+                ls = "dashed"
+                lw = None
+
             ax.plot(
-                [node[0], nodes[n + 1][0]],
-                [node[1], nodes[n + 1][1]],
-                color="black",
-                linewidth=lws[n],
+                [start_pos[0], target_row["position_x"]],
+                [start_pos[1], target_row["position_y"]],
+                color=color,
+                linewidth=lw,
+                linestyle=ls,
                 alpha=alpha,
                 zorder=1,
             )
 
-            # add missed targets
-            if values[n] == -1:
-                ax.plot(
-                    [nodes[n + 1][0], unreached_targets[unreached][0]],
-                    [nodes[n + 1][1], unreached_targets[unreached][1]],
-                    color="black",
-                    ls="dashed",
-                    alpha=alpha,
-                    zorder=1,
-                )
-                unreached += 1
+            start_pos = target_row[["position_x", "position_y"]].to_list()
+            if np.isfinite(reached_step):
+                start_step = reached_step
 
         legend = ax.get_legend()
         if no_legend and legend is not None:
@@ -2261,53 +2320,47 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         ax.legend(loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
 
         # plot teleportation points as vertical dashed lines
-        for step, pair in zip(self.teleported, self.teleport_pair_nums):
+        for idx in self.teleportation_df.index:
+            step = self.teleportation_df.loc[idx, "step_num"]
             if step < startid or step > endid:
                 continue
 
-            obj_type = self.Environment.teleport_pairs_dict[pair]["in"][0]
-            color = self.Environment.type_num_to_plot_params_dict[obj_type]["color"]
+            object_type = self.teleportation_df.loc[idx, "in_object_type_num"]
+            color = self.Environment.type_num_to_plot_params_dict[object_type]["color"]
             ax.axvline(t[step], color=color, ls="dashed", alpha=0.8, zorder=-1)
 
         # plot target objects
-        targets, target_types = zip(
-            *[
-                (target[1], target[2])
-                for target in self.trajectory_targets
-                if target[1] is not None
-            ]
-        )
-
-        # get the number of steps to the target
-        num_steps = np.asarray(self.reached_target_position)
-        if len(num_steps) < len(targets):
-            num_steps = np.append(num_steps, -1)
-        if len(num_steps) != len(targets):
-            raise RuntimeError("Cannot match targets to number of steps to reach.")
-
         type_num_to_plot_params_dict = copy.deepcopy(
             self.Environment.type_num_to_plot_params_dict
         )
+
         r = 0
         reset_times = np.append(reset_times, t[-1])
-        for target, target_type, num_step in zip(targets, target_types, num_steps):
-            plot_params = type_num_to_plot_params_dict[target_type]
+        for idx in self.target_df.index:
+            row = self.target_df.loc[idx]
+            if row["object_type_name"] == "no_target":
+                continue
+
+            plot_params = type_num_to_plot_params_dict[row["object_type_num"]]
             label = None
             if "name" in plot_params:
                 label = plot_params.pop("name")
                 plot_params["markersize"] = plot_params.pop("s") / 8
-            if num_step == -1:
-                target_time = reset_times[r]
+
+            if np.isnan(row["reached_step"]):
+                target_reached_time = reset_times[r]
                 alpha = 0.3
                 r += 1
             else:
-                target_time = t[num_step]
+                target_reached_time = t[int(row["reached_step"])]
                 alpha = 0.8
-            if target_time < t_start or target_time > t_end:
+
+            if target_reached_time < t_start or target_reached_time > t_end:
                 continue
+
             ax.plot(
-                [target_time] * 2,
-                target,
+                [target_reached_time] * 2,
+                [row["position_x"], row["position_y"]],
                 **plot_params,
                 label=label,
                 lw=1.5,
@@ -2315,18 +2368,22 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             )
 
         ax.legend(
-            loc="center left", fontsize="medium", bbox_to_anchor=(1, 0.5), frameon=False
+            loc="center left", fontsize="small", bbox_to_anchor=(1, 0.5), frameon=False
         )
 
         legend = ax.get_legend()
         if no_legend and legend is not None:
             legend.remove()
 
+        # expand x limits a bit
+        pad = (t_end - t_start) * 0.02
+        ax.set_xlim(t_start - pad, t_end + pad)
+
         util.save_figure(fig, "trajectory_targets_over_time", save=autosave)
 
         return fig, ax
 
-    def add_target(
+    def add_target_to_plot(
         self,
         ax: plt.Axes,
         t: float | None = None,
@@ -2344,18 +2401,19 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             t = float(all_t[-1])
         endid = np.argmin(np.abs(all_t - (t))) + 1
 
-        targets = [
-            target[1] for target in self.trajectory_targets if target[1] is not None
-        ]
-        num_steps = np.asarray(self.reached_target_position)
-        above = np.where(num_steps > endid)[0]
-        target = targets[above[0]] if len(above) else None
+        # get target
+        past_df = self.target_df.loc[self.target_df["set_step"] <= endid]
+        if len(past_df) == 0:  # no current
+            return
 
-        if target is None:
+        idx = past_df.index[-1]
+        last_reached = past_df.loc[idx, "reached_step"]
+        if not np.isnan(last_reached) and last_reached < endid:
             return
 
         ax.scatter(
-            *target,
+            past_df.loc[idx, "position_x"],
+            past_df.loc[idx, "position_y"],
             marker=markers.MarkerStyle("x"),
             s=60,
             zorder=4,
@@ -2402,7 +2460,7 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             if additional_plot_func is not None:
                 fig, ax = additional_plot_func(fig=fig, ax=ax, t=t, **kwargs)
 
-            self.add_target(ax, t=t)
+            self.add_target_to_plot(ax, t=t)
             plot_util.remove_prev_handle_labels(ax)
 
             return fig, ax

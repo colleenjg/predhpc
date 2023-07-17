@@ -8,9 +8,9 @@ import numpy as np
 from matplotlib import pyplot as plt  # type: ignore[import]
 from matplotlib import markers
 from matplotlib import figure as mpl_figure
+import pandas as pd
 
 from ratinabox import Environment  # type: ignore[import]
-from ratinabox import utils as rutils
 
 from predhpc import util
 
@@ -221,7 +221,30 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         self.add_teleport_pairs(self.init_random_teleport_pairs)  # type: ignore[reportGeneralTypeIssues]
         self.add_walls(self.init_random_walls)  # type: ignore[reportGeneralTypeIssues]
 
-    def get_new_teleport_pair_obj_type_nums(
+    @property
+    def object_df_columns(self):
+        if not hasattr(self, "_object_df_columns"):
+            self._object_df_columns = [
+                "object_type_num",
+                "object_type_name",
+                "idx_within_type",
+                "position_x",
+                "position_y",
+                "teleport_pair_num",
+                "teleport_direction",
+            ]
+
+        return self._object_df_columns
+
+    @property
+    def object_df(self):
+        if not hasattr(self, "_object_df"):
+            object_df = pd.DataFrame(columns=self.object_df_columns)
+            self._object_df = object_df
+
+        return self._object_df
+
+    def get_new_teleport_pair_object_type_nums(
         self, first: int | None = None
     ) -> dict[str, int]:
         """Get object type numbers for a new teleport pair.
@@ -231,27 +254,27 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
                 available number. Defaults to None.
 
         Returns:
-            obj_type_nums (dict): Dictionary of object type numbers for the
+            object_type_nums (dict): Dictionary of object type numbers for the
                 teleport pair.
         """
 
         if first is None:
-            first = np.max(list(self.obj_type_num_to_name_dict.keys())) + 1
+            first = np.max(list(self.object_type_num_to_name_dict.keys())) + 1
 
         first = int(first)  # type: ignore[reportGeneralTypeIssues]
 
-        obj_type_nums = {
+        object_type_nums = {
             "in": first,
             "out": first + 1,
         }
 
-        return obj_type_nums
+        return object_type_nums
 
-    def reset_obj_type_dicts(self):
+    def reset_object_type_dicts(self):
         """Reset the object type dictionaries."""
 
         dict_attr_names = [
-            "_obj_type_num_to_name_dict",
+            "_object_type_num_to_name_dict",
             "_type_num_to_plot_params_dict",
             "_teleport_pairs_dict",
         ]
@@ -261,34 +284,34 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
                 delattr(self, dict_attr_name)
 
     @property
-    def obj_type_num_to_name_dict(self) -> dict[int, str]:
+    def object_type_num_to_name_dict(self) -> dict[int, str]:
         """Dictionary for getting object type name from number."""
 
-        if not hasattr(self, "_obj_type_num_to_name_dict"):
-            obj_type_num_to_name_dict = {
+        if not hasattr(self, "_object_type_num_to_name_dict"):
+            object_type_num_to_name_dict = {
                 0: "reward",
                 1: "novel",
             }
 
             for n in range(self.num_teleport_pairs):
-                obj_type_nums = self.get_new_teleport_pair_obj_type_nums(
-                    first=np.max(list(obj_type_num_to_name_dict.keys())) + 1
+                object_type_nums = self.get_new_teleport_pair_object_type_nums(
+                    first=np.max(list(object_type_num_to_name_dict.keys())) + 1
                 )
-                for direction, i in obj_type_nums.items():
-                    obj_type_num_to_name_dict[i] = f"teleport_{n}_{direction}"
-            self._obj_type_num_to_name_dict = obj_type_num_to_name_dict
+                for direction, i in object_type_nums.items():
+                    object_type_num_to_name_dict[i] = f"teleport_{n}_{direction}"
+            self._object_type_num_to_name_dict = object_type_num_to_name_dict
 
-        return self._obj_type_num_to_name_dict
+        return self._object_type_num_to_name_dict
 
     @property
     def type_name_to_num_dict(self) -> dict[str, int]:
         """Dictionary for getting object type number from name."""
 
-        obj_type_name_to_num_dict = {
-            val: key for key, val in self.obj_type_num_to_name_dict.items()
+        object_type_name_to_num_dict = {
+            val: key for key, val in self.object_type_num_to_name_dict.items()
         }
 
-        return obj_type_name_to_num_dict
+        return object_type_name_to_num_dict
 
     @property
     def type_num_to_plot_params_dict(self) -> dict[int, dict[str, Any]]:
@@ -297,14 +320,14 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         if not hasattr(self, "_type_num_to_plot_params_dict"):
             teleport_nums = [
                 val.replace("teleport_", "").replace("in_", "")
-                for val in self.obj_type_num_to_name_dict.values()
+                for val in self.object_type_num_to_name_dict.values()
                 if val.startswith("teleport") and "_in" in val
             ]
             teleport_vals = np.linspace(0.5, 1, len(teleport_nums))
             teleport_colors = plt.get_cmap("Oranges")(teleport_vals)  # type: ignore[reportGeneralTypeIssues]
 
             type_num_to_plot_params_dict = dict()
-            for num, name in self.obj_type_num_to_name_dict.items():
+            for num, name in self.object_type_num_to_name_dict.items():
                 if name == "reward":
                     type_num_to_plot_params_dict[num] = {
                         "name": name,
@@ -369,7 +392,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
 
         num_novel, num_reward, num_teleport = 0, 0, 0
         for object_type in self.object_types:  # type: ignore[reportGeneralTypeIssues]
-            object_name = self.obj_type_num_to_name_dict[object_type]
+            object_name = self.object_type_num_to_name_dict[object_type]
             if object_name == "novel":
                 num_novel += 1
             elif object_name == "reward":
@@ -425,8 +448,8 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
             return np.inf
 
         closest_distances = list()
-        for obj_coords in self.objects["objects"]:
-            closest_distance = np.linalg.norm(coords - np.asarray(obj_coords), ord=2)
+        for object_coords in self.objects["objects"]:
+            closest_distance = np.linalg.norm(coords - np.asarray(object_coords), ord=2)
             closest_distances.append(closest_distance)
 
         closest_dist = np.min(closest_distances)
@@ -566,6 +589,30 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
     ):
         super().add_object(object, type=object_type)  # type: ignore[reportGeneralTypeIssues]
 
+        # add to object dataframe
+        sub_df = self.object_df[self.object_df["object_type_num"] == object_type]
+        if len(sub_df) == 0:
+            idx_within_type = 0
+        else:
+            idx_within_type = sub_df["idx_within_type"].max() + 1
+
+        object_type_name = self.object_type_num_to_name_dict[int(object_type)]
+
+        new_object = {
+            "object_type_num": object_type,
+            "object_type_name": object_type_name,
+            "idx_within_type": idx_within_type,
+            "position_x": object[0],
+            "position_y": object[1],
+        }
+
+        if "teleport" in object_type_name:
+            _, teleport_pair_num, teleport_direction = object_type_name.split("_")
+            new_object["teleport_pair_num"] = int(teleport_pair_num)
+            new_object["teleport_direction"] = teleport_direction
+
+        self.object_df.loc[len(self.object_df)] = new_object  # type: ignore[reportGeneralTypeIssues]
+
     def add_reward_objects(self, num: int = 1):
         """Add reward objects.
 
@@ -580,7 +627,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
             self.add_object(coords, object_type=reward_type)
 
         if num > 0:
-            self.reset_obj_type_dicts()
+            self.reset_object_type_dicts()
 
     def add_novel_objects(self, num: int = 1):
         """Add novel objects.
@@ -596,7 +643,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
             self.add_object(coords, object_type=novel_type)
 
         if num > 0:
-            self.reset_obj_type_dicts()
+            self.reset_object_type_dicts()
 
     def add_teleport_pairs(self, num: int = 1):
         """Add teleport pairs (directional).
@@ -606,12 +653,12 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         """
 
         for _ in range(num):
-            obj_type_nums = self.get_new_teleport_pair_obj_type_nums()
-            for _, i in obj_type_nums.items():
-                coords = self.sample_coords()
-                self.add_object(coords, object_type=i)
+            object_type_nums = self.get_new_teleport_pair_object_type_nums()
             self.num_teleport_pairs += 1
-            self.reset_obj_type_dicts()  # within loop, so that teleport pair object types are not reused
+            self.reset_object_type_dicts()  # within loop, so that teleport pair object types are not reused
+            for _, object_type_num in object_type_nums.items():
+                coords = self.sample_coords()
+                self.add_object(coords, object_type=object_type_num)
 
     @property
     def teleport_pairs_dict(self) -> dict[int, dict[str, tuple[int, list[float]]]]:
@@ -619,9 +666,9 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
 
         if not hasattr(self, "_teleport_pairs_dict"):
             teleport_pairs_dict = dict()
-            for name, obj_type in self.type_name_to_num_dict.items():
+            for name, object_type in self.type_name_to_num_dict.items():
                 if name.startswith("teleport_") and "in" in name:
-                    obj_type_in = obj_type
+                    object_type_in = object_type
                     teleport_pair = int(
                         name.replace("teleport_", "").replace("_in", "")
                     )
@@ -630,12 +677,12 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
                         raise RuntimeError(
                             f"Teleport in {teleport_pair} does not have 'out' pair."
                         )
-                    obj_type_out = self.type_name_to_num_dict[out_key]
+                    object_type_out = self.type_name_to_num_dict[out_key]
 
                     coords = list()
-                    for obj_type in [obj_type_in, obj_type_out]:
+                    for object_type in [object_type_in, object_type_out]:
                         object_idxs = np.where(
-                            self.objects["object_types"] == obj_type
+                            self.objects["object_types"] == object_type
                         )[0]
                         if len(object_idxs) != 1:
                             raise RuntimeError(
@@ -645,8 +692,8 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
                         coords.append(self.objects["objects"][object_idxs[0]])
 
                     teleport_pairs_dict[teleport_pair] = {
-                        "in": (obj_type_in, coords[0]),
-                        "out": (obj_type_out, coords[1]),
+                        "in": (object_type_in, coords[0]),
+                        "out": (object_type_out, coords[1]),
                     }
 
             self._teleport_pairs_dict = teleport_pairs_dict
@@ -818,14 +865,16 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
             type_num_to_plot_params_dict = copy.deepcopy(
                 self.type_num_to_plot_params_dict
             )
-            for coords, obj_type in zip(
+            for coords, object_type in zip(
                 self.objects["objects"], self.objects["object_types"]
             ):
                 label = None
-                if "name" in type_num_to_plot_params_dict[obj_type].keys():
-                    label = type_num_to_plot_params_dict[obj_type].pop("name")
+                if "name" in type_num_to_plot_params_dict[object_type].keys():
+                    label = type_num_to_plot_params_dict[object_type].pop("name")
                 ax.scatter(
-                    *coords, **type_num_to_plot_params_dict[obj_type], label=label
+                    *coords,
+                    **type_num_to_plot_params_dict[object_type],
+                    label=label,
                 )
 
             ax.legend(loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
