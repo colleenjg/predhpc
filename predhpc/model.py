@@ -9,13 +9,13 @@ from torch.utils.data import TensorDataset, DataLoader
 from torchinfo import summary as tsummary
 
 if TYPE_CHECKING:
-    from predhpc import neurons
+    from predhpc.neurons import trainable_neurons
 
 
 class TorchNeuronModel(torch.nn.Module):
     def __init__(
         self,
-        seq_neuron_layers: list["neurons.TorchLayer"],
+        seq_neuron_layers: list["trainable_neurons.TorchLayer"],
         device: str = "cpu",
         lr: float = 1e-4,
         RMSprop: bool = False,

@@ -7,7 +7,7 @@ from matplotlib import animation, markers
 from matplotlib import colors as mpl_colors
 from matplotlib import figure as mpl_figure
 import numpy as np
-import pandas as pd
+import pandas as pd  # type: ignore[import]
 import seaborn as sns  # type: ignore[import]
 from ratinabox import Agent  # type: ignore[import]
 from ratinabox import utils as rutils
@@ -72,7 +72,7 @@ class ResetableAgent(Agent):
         if self.Environment.dimensionality == "2D":
             self.fixed_direction = False
         elif self.fixed_direction:
-            if self.speed_mean < 0:  # type: ignore[reportGeneralTypeIssues]
+            if self.speed_mean < 0:  # type: ignore[attr-defined]
                 raise ValueError("Cannot have fixed direction with negative speed.")
             if self.Environment.boundary_conditions == "periodic":
                 raise NotImplementedError(
@@ -111,7 +111,7 @@ class ResetableAgent(Agent):
             ]
 
             if self.Environment.D == 2:
-                self._trajectory_df_columns.append("position_x")
+                self._target_df_columns.append("position_x")
 
         return self._target_df_columns
 
@@ -159,13 +159,13 @@ class ResetableAgent(Agent):
         if self.Environment.D == 2:
             trajectory_data["start_position_y"] = self.pos[1]
 
-        self.trajectory_df.loc[len(self.trajectory_df)] = trajectory_data  # type: ignore[reportGeneralTypeIssues]
+        self.trajectory_df.loc[len(self.trajectory_df)] = trajectory_data  # type: ignore[assignment]
 
     def end_trajectory(self):
         """Add stop information for a trajectory that is ending."""
 
         idx = len(self.trajectory_df) - 1
-        start_step = int(self.trajectory_df.loc[idx, "start_step"])
+        start_step = int(self.trajectory_df.loc[idx, "start_step"])  # type: ignore[assignment]
 
         self.trajectory_df.loc[idx, "stop_position_x"] = self.pos[0]
         self.trajectory_df.loc[idx, "stop_step"] = self.num_steps_total
@@ -188,7 +188,7 @@ class ResetableAgent(Agent):
         if self.Environment.D == 2:
             target_data["position_y"] = self.target_position[1]
 
-        self.target_df.loc[len(self.target_df)] = target_data  # type: ignore[reportGeneralTypeIssues]
+        self.target_df.loc[len(self.target_df)] = target_data  # type: ignore[assignment]
 
     def set_all_positions(self):
         """Set all positions, checking that they are within the environment
@@ -199,9 +199,9 @@ class ResetableAgent(Agent):
         self.reset_position = self.format_position(self.reset_position)
         self.target_position = self.format_position(self.target_position)
 
+        self.must_fix_record_after_manual_update = False
         if self.start_position is not None:
             self.set_position_and_velocity(position=self.start_position, velocity=0)
-            self.must_fix_velocity_record = False
         self.steps_before_checking_for_target = 0
 
     def set_trajectory_lengths(self):
@@ -217,8 +217,8 @@ class ResetableAgent(Agent):
         elif self.num_trajectories:
             self.trajectory_length = util.get_trajectory_lengths(
                 num_trajectories=self.num_trajectories,
-                exp_factors=self.exp_factors,  # type: ignore[reportGeneralTypeIssues]
-                random_max=self.random_max,  # type: ignore[reportGeneralTypeIssues]
+                exp_factors=self.exp_factors,  # type: ignore[attr-defined]
+                random_max=self.random_max,  # type: ignore[attr-defined]
             )
 
         self.trajectory_lengths = None
@@ -288,11 +288,16 @@ class ResetableAgent(Agent):
 
         return position
 
-    def fix_velocity_record(self, dt: float | None = None):
+    def fix_record_after_manual_update(self, dt: float | None = None):
         """Fix values computed and recorded based on the velocity, if applicable."""
 
-        if not hasattr(self, "prev_average_measured_speed"):
+        if not hasattr(self, "recorded_stats"):
             return
+
+        self.recorded_stats = {
+            "average_measured_speed": self.average_measured_speed,  # type: ignore[has-type]
+            "distance_travelled": self.distance_travelled,  # type: ignore[has-type]
+        }
 
         if dt is None:
             dt = float(self.dt)
@@ -300,20 +305,26 @@ class ResetableAgent(Agent):
         velocity = np.asarray(self.velocity).astype(np.float64)  # type: ignore[has-type]
 
         tau_speed = 10
-        self.average_measured_speed = (
-            self.prev_average_measured_speed  # type: ignore[has-type]
-            + dt / tau_speed * (np.linalg.norm(velocity, ord=2))
+        self.average_measured_speed = self.recorded_stats[
+            "average_measured_speed"
+        ] + dt / tau_speed * (  # type: ignore[has-type]
+            np.linalg.norm(velocity, ord=2)
         )
 
         self.save_velocity = velocity
 
-        if self.save_history is True and len(self.history["vel"]):  # type: ignore[reportGeneralTypeIssues]
-            self.history["vel"][-1] = self.save_velocity
+        self.distance_travelled = (
+            self.recorded_stats["distance_travelled"]
+            + np.linalg.norm(velocity, ord=2) * dt
+        )
+
+        if self.save_history is True and len(self.history["vel"]):  # type: ignore[attr-defined]
+            self.history["vel"][-1] = self.save_velocity.tolist()
             if self.Environment.dimensionality == "2D":
-                rotational_velocity = float(self.rotational_velocity)  # type: ignore[has-type]
+                rotational_velocity = float(self.rotational_velocity)  # type: ignore[arg-type]
                 self.history["rot_vel"][-1] = rotational_velocity
 
-    def check_and_fix_velocity(
+    def check_and_fix_velocity_for_1D(
         self,
         prev_velocity: np.ndarray[tuple[int], np.dtype[np.float64]],
         dt: float | None = None,
@@ -333,7 +344,7 @@ class ResetableAgent(Agent):
             dt = self.dt
 
         new_velocity = self.velocity  # type: ignore[has-type]
-        speed_mean, speed_std = self.speed_mean, self.speed_std  # type: ignore[reportGeneralTypeIssues]
+        speed_mean, speed_std = self.speed_mean, self.speed_std  # type: ignore[attr-defined]
         for _ in range(10):
             if new_velocity < 0:  # resample velocity until it is positive
                 new_velocity = prev_velocity + rutils.ornstein_uhlenbeck(
@@ -341,7 +352,7 @@ class ResetableAgent(Agent):
                     x=prev_velocity,
                     drift=speed_mean,
                     noise_scale=speed_std,
-                    coherence_time=self.speed_coherence_time,  # type: ignore[reportGeneralTypeIssues]
+                    coherence_time=self.speed_coherence_time,  # type: ignore[attr-defined]
                 )
             else:
                 break
@@ -350,7 +361,7 @@ class ResetableAgent(Agent):
             new_velocity = prev_velocity * 0  # set to 0
 
         self.velocity = new_velocity
-        self.fix_velocity_record(dt=dt)
+        self.fix_record_after_manual_update(dt=dt)
 
     def set_position_and_velocity(
         self,
@@ -366,7 +377,7 @@ class ResetableAgent(Agent):
 
         # initialise starting positions and velocity
 
-        speed_mean, speed_std = self.speed_mean, self.speed_std  # type: ignore[reportGeneralTypeIssues]
+        speed_mean, speed_std = self.speed_mean, self.speed_std  # type: ignore[attr-defined]
         if self.Environment.dimensionality == "2D":
             if position is None:
                 self.pos = self.Environment.sample_positions(n=1, method="random")[0]
@@ -397,7 +408,7 @@ class ResetableAgent(Agent):
                         "solid 1D boundary conditions and non-zero speed mean."
                     )
 
-        self.must_fix_velocity_record = True
+        self.must_fix_record_after_manual_update = True
 
         return
 
@@ -446,17 +457,6 @@ class ResetableAgent(Agent):
 
         return new_position
 
-    def reset(self):
-        """Reset the agent to a random location."""
-
-        self.set_position_and_velocity(position=self.start_position, velocity=0)
-
-        if self.trajectory_lengths is not None:
-            i = (len(self.trajectory_df) - 1) % len(self.trajectory_lengths)
-            self.trajectory_length = self.trajectory_lengths[i]
-
-        return
-
     def get_trajectory_lengths_to_date(self):
         """Return the trajectory lengths to date.
 
@@ -468,7 +468,7 @@ class ResetableAgent(Agent):
 
         if np.isnan(trajectory_lengths_to_date[-1]):
             last_start = int(
-                self.trajectory_df.loc[len(self.trajectory_df) - 1, "start_step"]
+                self.trajectory_df.loc[len(self.trajectory_df) - 1, "start_step"]  # type: ignore[assignment]
             )
             last_length = self.num_steps_total - last_start
             if last_length == 0:
@@ -581,7 +581,7 @@ class ResetableAgent(Agent):
         """
 
         return self.check_if_position_reached(
-            self.reset_position, self.reset_reached_within_tolerance_prop_to_dt  # type: ignore[reportGeneralTypeIssues]
+            self.reset_position, self.reset_reached_within_tolerance_prop_to_dt  # type: ignore[attr-defined]
         )
 
     def check_if_target_position_reached(self) -> bool:
@@ -599,10 +599,10 @@ class ResetableAgent(Agent):
 
         else:
             target_reached = self.check_if_position_reached(
-                self.target_position, self.target_reached_within_tolerance_prop_to_dt  # type: ignore[reportGeneralTypeIssues]
+                self.target_position, self.target_reached_within_tolerance_prop_to_dt  # type: ignore[attr-defined]
             )
             if target_reached:
-                self.steps_before_checking_for_target = self.wait_between_targets  # type: ignore[reportGeneralTypeIssues]
+                self.steps_before_checking_for_target = self.wait_between_targets  # type: ignore[attr-defined]
             return target_reached
 
     def check_if_trajectory_end_reached(self) -> bool:
@@ -645,19 +645,40 @@ class ResetableAgent(Agent):
                 self.reached_target = True
 
         if self.reached_target:
+            df_idx = len(self.target_df) - 1
             self._last_target_reached_step = self.num_steps_total
-            self.target_df.loc[
-                len(self.target_df) - 1, "reached_step"
-            ] = self.num_steps_total
-            self.target_df.loc[len(self.target_df) - 1, "num_steps"] = (
-                self.num_steps_total
-                - self.target_df.loc[len(self.target_df) - 1, "set_step"]
-            )
+            self.target_df.loc[df_idx, "reached_step"] = self.num_steps_total
+
+            num_steps = self.num_steps_total - self.target_df.loc[df_idx, "set_step"]  # type: ignore[operator]
+            self.target_df.loc[df_idx, "num_steps"] = num_steps
             self.set_new_target()
 
         return self.reached_target
 
-    def update(self, dt: float | None = None, skip_checks: bool = False, **kwargs):
+    def reset(self):
+        """Reset the agent to a random location."""
+
+        self.end_trajectory()
+
+        self.set_position_and_velocity(position=self.start_position, velocity=0)
+
+        if self.trajectory_lengths is not None:
+            i = (len(self.trajectory_df) - 1) % len(self.trajectory_lengths)
+            self.trajectory_length = self.trajectory_lengths[i]
+
+        self.current_trajectory_length = 0
+
+        self.set_new_trajectory()
+
+        return
+
+    def update(
+        self,
+        dt: float | None = None,
+        skip_checks: bool = False,
+        new_pos: np.ndarray[tuple[int], np.dtype[np.float64]] | None = None,
+        **kwargs,
+    ):
         """Update the agent, optionally with a new position and velocity.
 
         See Agent.update() in ratinabox/agent.py for kwargs.
@@ -666,23 +687,41 @@ class ResetableAgent(Agent):
         if not skip_checks:
             self.check_and_record_target_reached()
             if self.check_if_trajectory_end_reached():
-                self.end_trajectory()
                 self.reset()
-                self.set_new_trajectory()
 
-        self.prev_average_measured_speed = self.average_measured_speed
-        prev_velocity = self.velocity
+        self.recorded_stats = {
+            "average_measured_speed": self.average_measured_speed,
+            "distance_travelled": self.distance_travelled,
+            "position": self.pos,
+            "velocity": self.velocity,
+        }
 
-        super().update(dt=dt, **kwargs)
+        if new_pos is not None:
+            if dt is not None:
+                self.dt = dt
+            self.t += self.dt
+            if not self.Environment.check_if_position_is_in_environment(new_pos):
+                raise ValueError(
+                    f"New position {new_pos} is not within the environment."
+                )
+            self.pos = new_pos
+            self.must_fix_record_after_manual_update = True
+
+            # write to history
+            if self.save_history is True:  # type: ignore[attr-defined]
+                self.save_to_history()
+        else:
+            super().update(dt=dt, **kwargs)
 
         if self.Environment.dimensionality == "1D" and self.fixed_direction:
-            self.check_and_fix_velocity(prev_velocity=prev_velocity, dt=dt)
+            self.check_and_fix_velocity_for_1D(
+                prev_velocity=self.recorded_stats["velocity"], dt=dt
+            )
 
-        elif self.must_fix_velocity_record:
-            self.velocity = prev_velocity
-            self.fix_velocity_record(dt=dt)
+        elif self.must_fix_record_after_manual_update:
+            self.fix_record_after_manual_update(dt=dt)
 
-        self.must_fix_velocity_record = False
+        self.must_fix_record_after_manual_update = False
 
         self.current_trajectory_length += 1
         self.num_steps_total += 1
@@ -846,6 +885,7 @@ class ResetableAgent(Agent):
         ax: plt.Axes | None = None,
         decay_point_size: bool = False,
         plot_agent: bool = True,
+        agent_color: str = "r",
         colormap: str | None | mpl_colors.Colormap = None,
         alpha: float = 0.7,
         xlim: float | None = None,
@@ -876,6 +916,7 @@ class ResetableAgent(Agent):
             decay_point_size: decay trajectory point size over time
                 (recent times = largest)
             plot_agent: dedicated point show agent current position
+            agent_color: color of agent point
             colormap: colormap to use to plot trajectories
             alpha: plot point opaqness
             xlim: In 1D, forces the top (right) xlim to be a certain time (minutes)
@@ -946,7 +987,7 @@ class ResetableAgent(Agent):
 
         if colormap is None:
             colormap = "crest"
-        c = sns.color_palette(colormap, as_cmap=True)(cmap_vals_np)  # type: ignore[reportGeneralTypeIssues]
+        c = sns.color_palette(colormap, as_cmap=True)(cmap_vals_np)  # type: ignore[callable]
         ##############################
 
         if self.Environment.dimensionality == "2D":
@@ -985,12 +1026,12 @@ class ResetableAgent(Agent):
                 ends = np.append(ends, len(trajectory) - 1)
                 s[ends] = ms_2D * 2
                 # set last colormap value to dark red
-                c[ends] = mpl_colors.to_rgba("darkred")  # type: ignore[reportGeneralTypeIssues]
+                c[ends] = mpl_colors.to_rgba("darkred")  # type: ignore[arg-type]
 
             if plot_agent == True:
                 s[-1] = ms_2D * 2.75
                 # set last colormap value to red
-                c[-1] = mpl_colors.to_rgba("r")  # type: ignore[reportGeneralTypeIssues]
+                c[-1] = mpl_colors.to_rgba(agent_color)  # type: ignore[arg-type]
 
             ax.scatter(
                 trajectory[:, 0],
@@ -1020,7 +1061,7 @@ class ResetableAgent(Agent):
             ax.set_yticks([ex[1]])
             if background_color is not None:
                 ax.set_facecolor(background_color)
-                fig.patch.set_facecolor(background_color)  # type: ignore[reportGeneralTypeIssues]
+                fig.patch.set_facecolor(background_color)  # type: ignore[attr-defined]
 
         if fig is None or ax is None:
             raise RuntimeError("fig or ax is None.")
@@ -1089,11 +1130,11 @@ class ResetableAgent(Agent):
         start_c, end_c = None, None
         traj_starts, traj_ends = None, None
         if plot_starts:
-            traj_starts = np.insert(all_ends, 0, 0)
-            start_c = cmap(np.linspace(0, 1, len(traj_starts)))  # type: ignore[reportGeneralTypeIssues]
+            traj_starts = np.insert(all_ends, 0, 0)[:-1]
+            start_c = cmap(np.linspace(0, 1, len(traj_starts)))  # type: ignore[callable]
         if plot_ends:
-            traj_ends = np.append(all_ends - 1, len(t) - 1)
-            end_c = cmap(np.linspace(0, 1, len(traj_ends)))  # type: ignore[reportGeneralTypeIssues]
+            traj_ends = all_ends - 1
+            end_c = cmap(np.linspace(0, 1, len(traj_ends)))  # type: ignore[callable]
         if not (plot_starts or plot_ends):
             raise ValueError(
                 "At least one of 'plot_starts' or 'plot_ends' must be True."
@@ -1136,7 +1177,7 @@ class ResetableAgent(Agent):
                 if plot_agent == True:
                     s[-1] = 40
                     # set last colormap value to red
-                    c[-1] = mpl_colors.to_rgba("r")  # type: ignore[reportGeneralTypeIssues]
+                    c[-1] = mpl_colors.to_rgba("r")  # type: ignore[arg-type]
 
                 ax.scatter(
                     trajectory[:, 0],
@@ -1175,7 +1216,7 @@ class ResetableAgent(Agent):
                 ax.set_yticks([ex[1]])
                 if background_color is not None:
                     ax.set_facecolor(background_color)
-                    fig.patch.set_facecolor(background_color)  # type: ignore[reportGeneralTypeIssues]
+                    fig.patch.set_facecolor(background_color)  # type: ignore[attr-defined]
 
         if fig is None or ax is None:
             raise RuntimeError("fig or ax is None.")
@@ -1210,6 +1251,7 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
         """
 
         self.check_if_ignored_params(params)
+        params = self.add_fixed_params(params)
 
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
@@ -1217,11 +1259,9 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
         if not isinstance(Env, env.TEnv):
             raise TypeError("Env must be a TEnv object.")
 
-        self.set_fixed_params()
-
         super().__init__(Env, self.params)
 
-        self.set_current_arm()
+        self.set_current_trajectory_arm()
 
     @property
     def near_branch(self) -> bool:
@@ -1251,10 +1291,10 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
 
         return self._target_df_columns
 
-    def set_current_arm(self):
+    def set_current_trajectory_arm(self):
         # randomly choose a current target arm
         arms = ["left", "right"]
-        arm_idx = np.random.rand() > self.left_arm_prop  # type: ignore[reportGeneralTypeIssues]
+        arm_idx = int(np.random.rand() > self.left_arm_prop)  # type: ignore[attr-defined]
         self.current_arm = arms[arm_idx]
 
     def set_new_target(self):
@@ -1264,12 +1304,12 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
             raise RuntimeError("Target position is None.")
 
         target_data = {
-            "target_arm": self.target_arm,  # type: ignore[reportGeneralTypeIssues]
+            "target_arm": self.target_arm,  # type: ignore[attr-defined]
             "position_x": self.target_position[0],
             "position_y": self.target_position[1],
             "set_step": self.num_steps_total,
         }
-        self.target_df.loc[len(self.target_df)] = target_data  # type: ignore[reportGeneralTypeIssues]
+        self.target_df.loc[len(self.target_df)] = target_data  # type: ignore[assignment]
 
     def get_direction(self) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
         """Get the direction to the target."""
@@ -1301,9 +1341,7 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
 
         self.check_and_record_target_reached()
         if self.check_if_trajectory_end_reached():
-            self.end_trajectory()
             self.reset()
-            self.set_new_trajectory()
 
         # calculate drift_velocity
         if self.near_branch:
@@ -1312,7 +1350,7 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
             direction = self.Environment.T_split - self.pos
         drift_velocity = (
             speed_fact
-            * self.speed_mean  # type: ignore[reportGeneralTypeIssues]
+            * self.speed_mean  # type: ignore[attr-defined]
             * (direction / np.linalg.norm(direction, ord=2))
         )
 
@@ -1329,7 +1367,7 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
 
         super().reset()
 
-        self.set_current_arm()
+        self.set_current_trajectory_arm()
 
     def set_all_positions(self):
         """
@@ -1347,10 +1385,10 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
         ]
 
         # set target position
-        target_location_prop_to_arm = self.target_location_prop_to_arm  # type: ignore[reportGeneralTypeIssues]
+        target_location_prop_to_arm = self.target_location_prop_to_arm  # type: ignore[attr-defined]
         T_split = self.Environment.T_split
 
-        target_arm = self.target_arm  # type: ignore[reportGeneralTypeIssues]
+        target_arm = self.target_arm  # type: ignore[attr-defined]
         if target_arm == "left":
             edge = self.Environment.left_T_end
         elif target_arm == "right":
@@ -1363,13 +1401,14 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
             for i in [0, 1]
         ]
         self.target_position = self.format_position(target_position)
+        self.Environment.add_object(self.target_position)
 
         self.steps_before_checking_for_target = 0
 
         # set initial position and velocity
         if self.start_position is not None:
             self.set_position_and_velocity(position=self.start_position, velocity=0)
-            self.must_fix_velocity_record = False
+            self.must_fix_record_after_manual_update = False
 
     def check_if_reset_position_reached(self, position: str = "both") -> bool:
         """Check if the agent has reached either of the reset positions.
@@ -1380,7 +1419,7 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
         # calculate the distance between the current position and the reset position
         if position == "both":
             distances = [
-                np.linalg.norm(self.pos - reset_position, ord=2)  # type: ignore[reportGeneralTypeIssues]
+                np.linalg.norm(self.pos - reset_position, ord=2)  # type: ignore[operator]
                 for reset_position in self.reset_position
             ]
             distance = min(distances)
@@ -1392,7 +1431,7 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
             raise ValueError("pos must be 'both', 'left', or 'right'.")
 
         # check if the distance is less than the tolerance
-        if distance < (self.dt * self.reset_reached_within_tolerance_prop_to_dt):  # type: ignore[reportGeneralTypeIssues]
+        if distance < (self.dt * self.reset_reached_within_tolerance_prop_to_dt):  # type: ignore[attr-defined]
             return True
 
         return False
@@ -1440,14 +1479,13 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         """
 
         self.check_if_ignored_params(params)
+        params = self.add_fixed_params(params)
 
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
 
         if not isinstance(Env, env.ExploreBox):
             raise TypeError("Env must be an ExploreBox object.")
-
-        self.set_fixed_params()
 
         super().__init__(Env, self.params)
 
@@ -1515,10 +1553,10 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         target_probability_df.loc[:, "target_factor"] = 1
         target_probability_df.loc[
             target_probability_df["object_type_name"] == "reward", "target_factor"
-        ] = self.reward_factor  # type: ignore[reportGeneralTypeIssues]
+        ] = self.reward_factor  # type: ignore[attr-defined]
         target_probability_df.loc[
             target_probability_df["object_type_name"] == "no_target", "target_factor"
-        ] = self.no_target_factor  # type: ignore[reportGeneralTypeIssues]
+        ] = self.no_target_factor  # type: ignore[attr-defined]
 
         target_probability_df.loc[:, "target_probability"] = (
             target_probability_df["target_factor"]
@@ -1531,10 +1569,9 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         """Check if the target was reached during a random walk."""
 
         if self.current_num_of_random_walk_steps != 0 and self.reached_target:
-            self.target_df.loc[len(self.target_df) - 1, "random_walk_periods"][
-                -1
-            ].append(self.num_steps_total)
-
+            df_idx = len(self.target_df) - 1
+            column = "random_walk_periods"
+            self.target_df.loc[df_idx, column][-1].append(self.num_steps_total)  # type: ignore[attr-defined]
             self.current_num_of_random_walk_steps = 0
 
     def set_new_target(self):
@@ -1573,11 +1610,11 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
                 "position_y": target_row["position_y"],
             }
 
-        target_data["set_step"] = self.num_steps_total  # type: ignore[reportGeneralTypeIssues]
-        target_data["random_walk_periods"] = list()
+        target_data["set_step"] = self.num_steps_total  # type: ignore[assignment]
+        target_data["random_walk_periods"] = list()  # type: ignore[assignment]
 
         new_idx = len(self.target_df)
-        self.target_df.loc[new_idx] = target_data  # type: ignore[reportGeneralTypeIssues]
+        self.target_df.loc[new_idx] = target_data  # type: ignore[assignment]
 
         self.steps_before_checking_for_target = 0
 
@@ -1607,6 +1644,8 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
                     "object_type_name",
                     "position_x",
                     "position_y",
+                    "vector_x",
+                    "vector_y",
                     "velocity_x",
                     "velocity_y",
                 ]:
@@ -1637,10 +1676,10 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         """Set the random walk."""
 
         if self.target_position is None or not self.check_if_target_is_in_sight():
-            self.current_num_of_random_walk_steps = int(self.num_random_walk_steps)  # type: ignore[reportGeneralTypeIssues]
-            self.target_df.loc[len(self.target_df) - 1, "random_walk_periods"].append(
-                [self.num_steps_total]
-            )
+            self.current_num_of_random_walk_steps = int(self.num_random_walk_steps)  # type: ignore[attr-defined]
+            df_idx = len(self.target_df) - 1
+            column = "random_walk_periods"
+            self.target_df.loc[df_idx, column].append([self.num_steps_total])  # type: ignore[has-method]
         else:
             self.current_num_of_random_walk_steps = 0
 
@@ -1657,7 +1696,7 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         self.start_position = self.Environment.sample_coords()
         self.set_position_and_velocity(position=self.start_position, velocity=0)
         if first_setting:
-            self.must_fix_velocity_record = False
+            self.must_fix_record_after_manual_update = False
 
         self.target_position = None
         if not first_setting:
@@ -1667,16 +1706,6 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
 
         if not first_setting:
             self.set_random_walk()
-
-    def reset(self):
-        """Reset the agent to a random location."""
-
-        super().reset()
-
-        self.set_all_positions(first_setting=False)
-        self.set_random_walk()
-
-        return
 
     def log_teleportation(self, last=False):
         """Log the teleportation events.
@@ -1736,7 +1765,7 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             raise ValueError(f"position must have length 2, but found {len(position)}.")
 
         if sample_within_tolerance_prop_to_dt is None:
-            prop_to_dt = self.target_reached_within_tolerance_prop_to_dt  # type: ignore[reportGeneralTypeIssues]
+            prop_to_dt = self.target_reached_within_tolerance_prop_to_dt  # type: ignore[attr-defined]
         else:
             prop_to_dt = sample_within_tolerance_prop_to_dt
 
@@ -1799,10 +1828,10 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         if isinstance(check_value, str):
             if check_value == "position":
                 # in the right area wrt teleport location
-                check_value = self.pos  # type: ignore[reportGeneralTypeIssues]
+                check_value = self.pos
             elif check_value == "velocity":
                 # heading towards teleport
-                check_value = -self.velocity  # type: ignore[reportGeneralTypeIssues]
+                check_value = -self.velocity
                 velocity = True
             else:
                 raise ValueError(f"Unrecognized check_value {check_value}.")
@@ -1834,11 +1863,11 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             bool: Whether the agent should teleport.
         """
 
-        teleport_coords = self.Environment.teleport_pairs_dict[teleport_pair_num]["in"][
-            1
-        ]
+        teleport_coords = self.Environment.get_teleport_coords(
+            teleport_pair_num, direction="in"
+        )
 
-        tolerance_prop_to_dt = self.target_reached_within_tolerance_prop_to_dt  # type: ignore[reportGeneralTypeIssues]
+        tolerance_prop_to_dt = self.target_reached_within_tolerance_prop_to_dt  # type: ignore[attr-defined]
 
         teleport = False
 
@@ -1866,45 +1895,113 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
 
         return teleport
 
+    def get_drift_velocity(
+        self,
+        pos: np.ndarray[tuple[int], np.dtype[np.float64]] | None = None,
+        speed_fact: int | float = 3,
+    ) -> np.ndarray[tuple[int], np.dtype[np.float64]] | None:
+        """Get the drift velocity.
+
+        Args:
+            pos (np.ndarray, optional): The position to use. Defaults to None.
+
+        Returns:
+            np.ndarray: The drift velocity.
+        """
+
+        if pos is None:
+            pos = self.pos
+
+        # calculate drift_velocity
+        if self.current_num_of_random_walk_steps > 0:
+            drift_velocity = None
+        else:
+            direction = np.asarray(self.target_position) - pos
+            drift_velocity = (
+                speed_fact
+                * self.speed_mean  # type: ignore[attr-defined]
+                * (direction / np.linalg.norm(direction, ord=2))
+            )
+
+        return drift_velocity
+
+    def calculate_update(
+        self,
+        velocity: np.ndarray[tuple[int], np.dtype[np.float64]] | None = None,
+        speed_fact: int | float = 3,
+        drift_to_random_strength_ratio: float = 0.7,
+    ) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
+        """Anticipate the agent's next update.
+
+        Args:
+            velocity (np.ndarray, optional): The velocity to use. Defaults to None.
+
+        Returns:
+            np.ndarray: The update vector.
+        """
+
+        if velocity is None:
+            velocity = self.velocity
+
+        drift_velocity = self.get_drift_velocity(speed_fact=speed_fact)
+
+        update_vector = util.get_update_vector(
+            velocity,
+            drift_velocity=drift_velocity,
+            dt=self.dt,
+            rotational_velocity=self.rotational_velocity,  # type: ignore[arg-type]
+            rotational_velocity_coherence_time=self.rotational_velocity_coherence_time,  # type: ignore[attr-defined]
+            speed_mean=self.speed_mean,  # type: ignore[attr-defined]
+            speed_coherence_time=self.speed_coherence_time,  # type: ignore[attr-defined]
+            rotational_velocity_std=self.rotational_velocity_std,  # type: ignore[attr-defined]
+            drift_to_random_strength_ratio=drift_to_random_strength_ratio,
+        )
+
+        return update_vector
+
     def sample_teleport_out_position(
-        self, teleport_pair_num: int = 0, max_attempts: int = 100
+        self,
+        teleport_pair_num: int = 0,
+        max_attempts: int = 100,
+        adjust_backwards: bool = True,
     ) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
         """Sample a position within the tolerance of the teleportation out coordinates.
 
         Args:
             teleport_pair_num (int): The teleport pair to sample from.
             max_attempts (int): The maximum number of attempts to make at sampling.
+            adjust_backwards (bool, optional): Whether to adjust the teleport out
+                position to account for the agent's next update. Defaults to True.
 
         Returns:
             np.ndarray: The sampled position.
         """
 
-        teleport_coords = self.Environment.teleport_pairs_dict[teleport_pair_num][
-            "out"
-        ][1]
+        teleport_coords = self.Environment.get_teleport_coords(
+            teleport_pair_num, direction="out"
+        )
+
         teleport_vector = self.get_teleport_vector(teleport_pair_num, direction="out")
 
-        tolerance_prop_to_dt = self.target_reached_within_tolerance_prop_to_dt  # type: ignore[reportGeneralTypeIssues]
+        tolerance_prop_to_dt = self.target_reached_within_tolerance_prop_to_dt  # type: ignore[attr-defined]
 
         i = 0
         out_coords = None
-        all_samp = []
         while out_coords is None:
             sampled_out_coords = self.sample_within_tolerance(
                 teleport_coords, tolerance_prop_to_dt
             )
-            for x in [1, -1]:
-                for y in [1, -1]:
-                    coords_diff = sampled_out_coords - teleport_coords
-                    check_coords = teleport_coords + coords_diff * np.asarray([x, y])
-                    all_samp.append(check_coords)
-                    # position coordinates on the correct side of the teleport
-                    in_range = self.check_teleport_angles(
-                        teleport_vector, teleport_coords, check_value=check_coords
-                    )
-                    if in_range:
-                        out_coords = check_coords
-                        break
+            for x, y in [(1, 1), (1, -1), (-1, 1), (-1, -1)]:
+                coords_diff = sampled_out_coords - teleport_coords
+                check_coords = teleport_coords + coords_diff * np.asarray([x, y])
+                # position coordinates on the correct side of the teleport
+                in_range = self.check_teleport_angles(
+                    teleport_vector, teleport_coords, check_value=check_coords
+                )
+                if in_range:
+                    out_coords = check_coords
+                    break
+
             if i > max_attempts:
                 raise RuntimeError(
                     f"Could not find a suitable out teleportation coordinate for "
@@ -1915,27 +2012,29 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         return out_coords
 
     def get_teleport_out_position(
-        self, teleport_pair_num: int = 0
+        self, teleport_pair_num: int = 0, adjust_backwards: bool = True
     ) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
         """Get the teleport out position based on the teleport in position and the agent's current position.
 
         Args:
             teleport_pair_num (int, optional): The teleport pair to use. Defaults to 0.
+            adjust_backwards (bool, optional): Whether to adjust the teleport out
+                position to account for the agent's next update. Defaults to True.
 
         Returns:
             np.ndarray: The teleport out position.
         """
 
         # get the teleport input info
-        teleport_in_coords = self.Environment.teleport_pairs_dict[teleport_pair_num][
-            "in"
-        ][1]
+        teleport_in_coords = self.Environment.get_teleport_coords(
+            teleport_pair_num, direction="in"
+        )
         teleport_in_vector = self.get_teleport_vector(teleport_pair_num, direction="in")
 
         # get the teleport output info
-        teleport_out_coords = self.Environment.teleport_pairs_dict[teleport_pair_num][
-            "out"
-        ][1]
+        teleport_out_coords = self.Environment.get_teleport_coords(
+            teleport_pair_num, direction="out"
+        )
         teleport_out_vector = self.get_teleport_vector(
             teleport_pair_num, direction="out"
         )
@@ -1982,10 +2081,15 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
 
         return out_velocity
 
-    def teleport_if_applicable(self, sample: bool = False) -> bool:
+    def teleport_coords_if_applicable(
+        self,
+        sample: bool = False,
+        speed_fact: int | float = 3,
+        drift_to_random_strength_ratio: float = 0.7,
+    ) -> np.ndarray[tuple[int], np.dtype[np.float64]] | None:
         """Check if the agent should teleport."""
 
-        teleport = False
+        out_coords = None
         for teleport_pair_num in self.Environment.teleport_pairs_dict.keys():
             teleport = self.check_if_teleport_in_should_activate(teleport_pair_num)
 
@@ -2001,17 +2105,21 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             # rotate with respect to teleport in and out vectors
             out_velocity = self.rotate_velocity(teleport_pair_num)
 
-            # retain rotational velocity
-            rotational_velocity = self.rotational_velocity
-
             in_coords = self.pos.copy()
             in_velocity = self.velocity.copy()
 
-            self.set_position_and_velocity(
-                position=out_coords,
-                velocity=out_velocity,
-                rotational_velocity=rotational_velocity,
+            # simulate update for records (as if the teleportation was a normal step)
+            update = self.calculate_update(
+                out_velocity,
+                speed_fact=speed_fact,
+                drift_to_random_strength_ratio=drift_to_random_strength_ratio,
             )
+
+            # set a teleported position that will be used for calculating stats
+            self.pos = out_coords - update
+
+            if not self.Environment.check_if_position_is_in_environment(out_coords):
+                raise RuntimeError("Teleport out position is not in the environment.")
 
             # record teleportation data
             teleportation_data = {
@@ -2042,22 +2150,57 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
 
                 coords = in_coords if direction == "in" else out_coords
                 velocity = in_velocity if direction == "in" else out_velocity
+                teleport_coords = self.Environment.teleport_pairs_dict[
+                    teleport_pair_num
+                ][direction][1]
+                vector = coords - teleport_coords
 
                 teleportation_data[f"{direction}_position_x"] = coords[0]
                 teleportation_data[f"{direction}_position_y"] = coords[1]
+                teleportation_data[f"{direction}_vector_x"] = vector[0]
+                teleportation_data[f"{direction}_vector_y"] = vector[1]
                 teleportation_data[f"{direction}_velocity_x"] = velocity[0]
                 teleportation_data[f"{direction}_velocity_y"] = velocity[1]
 
-            self.teleportation_df.loc[len(self.teleportation_df)] = teleportation_data
+            self.teleportation_df.loc[len(self.teleportation_df)] = teleportation_data  # type: ignore[assignment]
 
-            if self.always_log_teleportation:  # type: ignore[reportGeneralTypeIssues]
+            if self.always_log_teleportation:  # type: ignore[attr-defined]
                 self.log_teleportation(last=True)
 
             break
 
-        teleported = teleport
+        return out_coords
 
-        return teleported
+    def fix_record_after_manual_update(self, dt: float | None = None):
+        """Fix values computed and recorded based on the velocity, if applicable.
+        Applies to teleportation events."""
+
+        if not hasattr(self, "recorded_stats"):
+            return
+
+        if dt is None:
+            dt = self.dt
+
+        prev_pos_recorded = np.asarray(self.history["pos"][-2])
+        prev_pos_used = np.asarray(self.recorded_stats["position"])
+        if not (prev_pos_recorded == prev_pos_used).any():
+            self.velocity = (self.pos - prev_pos_used) / dt
+
+        super().fix_record_after_manual_update(dt=dt)
+
+    def reset(self):
+        """Reset the agent to a random location."""
+
+        self.end_trajectory()
+
+        super().reset()
+
+        self.set_all_positions(first_setting=False)
+        self.set_random_walk()
+
+        self.set_new_trajectory()
+
+        return
 
     def update(  # type: ignore[override]
         self,
@@ -2089,35 +2232,73 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
                 self.set_new_target()
             self.set_random_walk()
 
-        self.teleport_if_applicable()
+        teleport_coords = self.teleport_coords_if_applicable(
+            speed_fact=speed_fact,
+            drift_to_random_strength_ratio=drift_to_random_strength_ratio,
+        )
+
+        drift_velocity = None
+        if teleport_coords is None:
+            drift_velocity = self.get_drift_velocity(
+                pos=self.pos, speed_fact=speed_fact
+            )
 
         # calculate drift_velocity
         if self.current_num_of_random_walk_steps > 0:
-            drift_velocity = None
             self.current_num_of_random_walk_steps -= 1
+            if teleport_coords is not None:
+                self.current_num_of_random_walk_steps = 0  # end random walk
             if self.current_num_of_random_walk_steps == 0:
-                self.target_df.loc[len(self.target_df) - 1, "random_walk_periods"][
-                    -1
-                ].append(self.num_steps_total + 1)
-        else:
-            direction = np.asarray(self.target_position) - self.pos
-            drift_velocity = (
-                speed_fact
-                * self.speed_mean  # type: ignore[reportGeneralTypeIssues]
-                * (direction / np.linalg.norm(direction, ord=2))
-            )
+                df_idx = len(self.target_df) - 1
+                column = "random_walk_periods"
+                self.target_df.loc[df_idx, column][-1].append(self.num_steps_total + 1)  # type: ignore[has-method]
 
         super().update(
             dt=dt,
             skip_checks=True,
+            new_pos=teleport_coords,
             drift_velocity=drift_velocity,
             drift_to_random_strength_ratio=drift_to_random_strength_ratio,
             **kwargs,
         )
 
+    def get_agent_state_color(self, t: float | None = None) -> str:
+        """Get the agent state.
+
+        Args:
+            t (float, optional): The time to get the state color for. Defaults to None.
+
+        Returns:
+            str: The agent state color.
+        """
+
+        # get agent color based on whether the agent is aiming for a target
+        endid = plot_util.get_plotting_times(np.array(self.history["t"]), t_end=t)[1]
+        agent_color = "lavenderblush"
+        past_df = self.target_df.loc[self.target_df["set_step"] <= endid]
+        if len(past_df):
+            row = past_df.loc[past_df.index[-1]]
+            if row["object_type_name"] == "no_target":
+                agent_color = "lavenderblush"
+            elif np.isnan(row["reached_step"]) or endid < row["reached_step"]:
+                agent_color = "red"
+                # check if this was during random walk
+                random_walk_periods = row["random_walk_periods"]
+                if len(random_walk_periods) > 0:
+                    for random_walk_period in random_walk_periods:
+                        if len(random_walk_period) == 1:
+                            if random_walk_period[0] <= endid:
+                                agent_color = "violet"
+                                break
+                        elif random_walk_period[0] <= endid < random_walk_period[1]:
+                            agent_color = "violet"
+                            break
+
+        return agent_color
+
     def plot_trajectory(  # type: ignore[override]
         self,
-        t_end: bool | None = None,
+        t_end: float | None = None,
         target_alpha: float = 0.7,
         no_legend: bool = False,
         autosave: bool | None = None,
@@ -2135,10 +2316,12 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             fig (mpl_figure.Figure): Figure.
             ax (plt.Axes): Axes.
         """
+
         fig, ax = super().plot_trajectory(
             t_end=t_end,
             target_alpha=target_alpha,
             plot_target=False,
+            agent_color=self.get_agent_state_color(t=t_end),
             autosave=False,
             **kwargs,
         )
@@ -2234,7 +2417,7 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         start_step = 0
         for i, idx in enumerate(sub_target_df.index):
             target_row = sub_target_df.loc[idx]
-            color = cmap(i / len(sub_target_df))
+            color = cmap(i / len(sub_target_df))  # type: ignore[callable]
 
             reached_step = target_row["reached_step"]
             if np.isfinite(reached_step):
@@ -2298,6 +2481,9 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
         t_start, t_end = t[startid], t[endid]
 
+        if t_start is None or t_end is None:
+            raise RuntimeError("t_start or t_end is None.")
+
         t = t[startid : endid + 1]  # keep in seconds
         pos = pos[startid : endid + 1]
 
@@ -2321,7 +2507,7 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
 
         # plot teleportation points as vertical dashed lines
         for idx in self.teleportation_df.index:
-            step = self.teleportation_df.loc[idx, "step_num"]
+            step = int(self.teleportation_df.loc[idx, "step_num"])  # type: ignore[assignment]
             if step < startid or step > endid:
                 continue
 
@@ -2378,6 +2564,7 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         # expand x limits a bit
         pad = (t_end - t_start) * 0.02
         ax.set_xlim(t_start - pad, t_end + pad)
+        plot_util.pad_axes(ax, which="y", pad_prop=0.02)
 
         util.save_figure(fig, "trajectory_targets_over_time", save=autosave)
 
@@ -2407,13 +2594,13 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             return
 
         idx = past_df.index[-1]
-        last_reached = past_df.loc[idx, "reached_step"]
+        last_reached = past_df.loc[idx, "reached_step"]  # type: ignore[assignment]
         if not np.isnan(last_reached) and last_reached < endid:
             return
 
         ax.scatter(
-            past_df.loc[idx, "position_x"],
-            past_df.loc[idx, "position_y"],
+            past_df.loc[idx, "position_x"],  # type: ignore[assignment]
+            past_df.loc[idx, "position_y"],  # type: ignore[assignment]
             marker=markers.MarkerStyle("x"),
             s=60,
             zorder=4,
@@ -2460,7 +2647,7 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
             if additional_plot_func is not None:
                 fig, ax = additional_plot_func(fig=fig, ax=ax, t=t, **kwargs)
 
-            self.add_target_to_plot(ax, t=t)
+            # self.add_target_to_plot(ax, t=t)
             plot_util.remove_prev_handle_labels(ax)
 
             return fig, ax

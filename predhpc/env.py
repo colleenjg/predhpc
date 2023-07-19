@@ -1,6 +1,5 @@
 import copy
 import itertools
-import random
 from typing import Any
 import warnings
 
@@ -8,7 +7,7 @@ import numpy as np
 from matplotlib import pyplot as plt  # type: ignore[import]
 from matplotlib import markers
 from matplotlib import figure as mpl_figure
-import pandas as pd
+import pandas as pd  # type: ignore[import]
 
 from ratinabox import Environment  # type: ignore[import]
 
@@ -44,26 +43,10 @@ class TEnv(Environment, util.ParamsManagerMixin):
 
     def __init__(self, params: dict[str, Any] = dict()):
         self.check_if_ignored_params(params)
+        params = self.add_fixed_params(params)
 
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
-
-        self.set_fixed_params()
-
-        super().__init__(self.params)
-
-        prop_env = self.prop_env  # type: ignore[reportGeneralTypeIssues]
-        if self.stem_width_as_prop_of_x is None:  # type: ignore[has-type]
-            self.stem_width_as_prop_of_x = prop_env
-
-        if self.arm_height_as_prop_of_y is None:  # type: ignore[has-type]
-            self.arm_height_as_prop_of_y = prop_env
-
-    def set_fixed_params(self):
-        """Sets fixed parameters."""
-        all_fixed_params = self.get_all_fixed_params()
-        for key, value in all_fixed_params.items():
-            self.params[key] = value
 
         self.params["boundary"] = util.get_T_shape_env_boundaries(
             prop_env=self.params["prop_env"],
@@ -73,15 +56,41 @@ class TEnv(Environment, util.ParamsManagerMixin):
             arm_height_as_prop_of_y=self.params["arm_height_as_prop_of_y"],
         )
 
+        super().__init__(self.params)
+
+        prop_env = self.prop_env  # type: ignore[attr-defined]
+        if self.stem_width_as_prop_of_x is None:  # type: ignore[attr-defined,has-type]
+            self.stem_width_as_prop_of_x = prop_env
+
+        if self.arm_height_as_prop_of_y is None:  # type: ignore[attr-defined,has-type]
+            self.arm_height_as_prop_of_y = prop_env
+
+    def add_fixed_params(self, params: dict[str, Any] = dict()) -> dict[str, Any]:
+        """Sets fixed parameters."""
+        all_fixed_params = self.get_all_fixed_params()
+
+        params = copy.copy(
+            params
+        )  # avoid deep copy to preserve reference to input layers
+        for key, value in all_fixed_params.items():
+            if key in params.keys() and value != params[key]:
+                raise ValueError(
+                    f"'{key}' parameter should not be passed, unless it is set to "
+                    f"'{value}'."
+                )
+            params[key] = value
+
+        return params
+
     def get_scale_x(self):
         """Get the x-scale of the environament in the x direction."""
 
-        return self.scale_x  # type: ignore[reportGeneralTypeIssues]
+        return self.scale_x  # type: ignore[attr-defined]
 
     def get_scale_y(self):
         """Get the y-scale of the environament in the x direction."""
 
-        return self.scale_y  # type: ignore[reportGeneralTypeIssues]
+        return self.scale_y  # type: ignore[attr-defined]
 
     @property
     def branch_y(self) -> float:
@@ -142,7 +151,8 @@ class TEnv(Environment, util.ParamsManagerMixin):
     ) -> tuple[mpl_figure.Figure, plt.Axes]:
         """Plot the environment."""
 
-        fig, ax_env = super().plot_environment(fig=fig, ax=ax, autosave=False, **kwargs)
+        # with DontPlotObjects(self):
+        fig, ax = super().plot_environment(fig=fig, ax=ax, autosave=False, **kwargs)
 
         if fig is None or ax is None:
             raise RuntimeError("fig or ax is None.")
@@ -187,6 +197,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         "init_random_teleport_pairs": 2,
         "wall_lengths": [0.1, 0.2],
         "min_dist": 0.1,  # between objects (walls is half)
+        "init_seed": None,
     }
 
     ignored_param_keys = list()  # type: list[str]
@@ -203,23 +214,27 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         """Initialize the environment."""
 
         self.check_if_ignored_params(params)
+        params = self.add_fixed_params(params)
 
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
 
-        self.set_fixed_params()
-
         super().__init__(self.params)
 
-        if min(self.wall_lengths) <= 0:  # type: ignore[reportGeneralTypeIssues]
+        if min(self.wall_lengths) <= 0:  # type: ignore[attr-defined]
             raise ValueError("Wall lengths must be positive.")
 
         self.num_teleport_pairs = 0
 
-        self.add_reward_objects(self.init_random_reward_obj)  # type: ignore[reportGeneralTypeIssues]
-        self.add_novel_objects(self.init_random_novel_obj)  # type: ignore[reportGeneralTypeIssues]
-        self.add_teleport_pairs(self.init_random_teleport_pairs)  # type: ignore[reportGeneralTypeIssues]
-        self.add_walls(self.init_random_walls)  # type: ignore[reportGeneralTypeIssues]
+        if self.init_seed is None:  # type: ignore[attr-defined]
+            self.rng = np.random
+        else:
+            self.rng = np.random.RandomState(self.init_seed)  # type: ignore[attr-defined,assignment]
+
+        self.add_reward_objects(self.init_random_reward_obj)  # type: ignore[attr-defined]
+        self.add_novel_objects(self.init_random_novel_obj)  # type: ignore[attr-defined]
+        self.add_teleport_pairs(self.init_random_teleport_pairs)  # type: ignore[attr-defined]
+        self.add_walls(self.init_random_walls)  # type: ignore[attr-defined]
 
     @property
     def object_df_columns(self):
@@ -261,7 +276,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         if first is None:
             first = np.max(list(self.object_type_num_to_name_dict.keys())) + 1
 
-        first = int(first)  # type: ignore[reportGeneralTypeIssues]
+        first = int(first)  # type: ignore[assignment]
 
         object_type_nums = {
             "in": first,
@@ -324,7 +339,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
                 if val.startswith("teleport") and "_in" in val
             ]
             teleport_vals = np.linspace(0.5, 1, len(teleport_nums))
-            teleport_colors = plt.get_cmap("Oranges")(teleport_vals)  # type: ignore[reportGeneralTypeIssues]
+            teleport_colors = plt.get_cmap("Oranges")(teleport_vals)  # type: ignore[callable]
 
             type_num_to_plot_params_dict = dict()
             for num, name in self.object_type_num_to_name_dict.items():
@@ -366,6 +381,22 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
 
         return self._type_num_to_plot_params_dict
 
+    def get_teleport_coords(self, teleport_pair_num, direction="in"):
+        """Get the teleport coordinates for the given teleport pair.
+
+        Args:
+            teleport_pair_num (int): The teleport pair to get the coordinates for.
+            direction (str, optional): The direction to get the coordinates for.
+                Defaults to "in".
+
+        Returns:
+            np.ndarray: The teleport coordinates.
+        """
+
+        teleport_coords = self.teleport_pairs_dict[teleport_pair_num][direction][1]
+
+        return teleport_coords
+
     def get_teleport_pair_orientation(self, teleport_pair_num: int = 1) -> str:
         """Get the orientation of a teleport pair.
 
@@ -391,7 +422,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         """
 
         num_novel, num_reward, num_teleport = 0, 0, 0
-        for object_type in self.object_types:  # type: ignore[reportGeneralTypeIssues]
+        for object_type in self.object_types:  # type: ignore[attr-defined]
             object_name = self.object_type_num_to_name_dict[object_type]
             if object_name == "novel":
                 num_novel += 1
@@ -426,11 +457,24 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
 
         return marker
 
-    def set_fixed_params(self):
+    def add_fixed_params(self, params: dict[str, Any] = dict()) -> dict[str, Any]:
         """Sets fixed parameters."""
+
         all_fixed_params = self.get_all_fixed_params()
+
+        params = copy.copy(
+            params
+        )  # avoid deep copy to preserve reference to input layers
         for key, value in all_fixed_params.items():
-            self.params[key] = value
+            if key in params.keys() and value != params[key]:
+                raise ValueError(
+                    f"'{key}' parameter should not be passed, unless it is set to "
+                    f"'{value}'."
+                )
+
+            params[key] = value
+
+        return params
 
     def get_dist_from_coords_to_closest_object(
         self, coords: np.ndarray[tuple[int], np.dtype[np.float64]]
@@ -499,12 +543,12 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         """
 
         if min_dist is None:
-            min_dist = float(self.min_dist)  # type: ignore[reportGeneralTypeIssues]
+            min_dist = float(self.min_dist)  # type: ignore[attr-defined]
 
         i = 0
         while True:
-            x = np.random.uniform(self.extent[0], self.extent[1])
-            y = np.random.uniform(self.extent[2], self.extent[3])
+            x = self.rng.uniform(self.extent[0], self.extent[1])
+            y = self.rng.uniform(self.extent[2], self.extent[3])
 
             coords = np.array([x, y])
 
@@ -542,10 +586,10 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
             return None
 
         if min_dist is None:
-            min_dist = float(self.min_dist / 2)  # type: ignore[reportGeneralTypeIssues]
+            min_dist = float(self.min_dist / 2)  # type: ignore[attr-defined]
 
         # sample wall length
-        wall_length = np.random.uniform(*self.wall_lengths)  # type: ignore[reportGeneralTypeIssues]
+        wall_length = self.rng.uniform(*self.wall_lengths)  # type: ignore[attr-defined]
 
         # sample orientation + direction, then cycle through if needed, before
         # abandoning each time check that the wall's max distance from another
@@ -554,7 +598,9 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         wall_directions = [-1, 1]
         wall_ori_direcs = list(itertools.product(wall_orientations, wall_directions))
 
-        random.shuffle(wall_ori_direcs)
+        shuffle_order = np.arange(len(wall_ori_direcs))
+        self.rng.shuffle(shuffle_order)
+        wall_ori_direcs = [wall_ori_direcs[i] for i in shuffle_order]
 
         end_coords = None
         for wall_ori, wall_direc in wall_ori_direcs:
@@ -587,7 +633,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         object: np.ndarray[tuple[int], np.dtype[np.float64]],
         object_type: str | int = "new",
     ):
-        super().add_object(object, type=object_type)  # type: ignore[reportGeneralTypeIssues]
+        super().add_object(object, type=object_type)  # type: ignore[arg-type]
 
         # add to object dataframe
         sub_df = self.object_df[self.object_df["object_type_num"] == object_type]
@@ -611,7 +657,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
             new_object["teleport_pair_num"] = int(teleport_pair_num)
             new_object["teleport_direction"] = teleport_direction
 
-        self.object_df.loc[len(self.object_df)] = new_object  # type: ignore[reportGeneralTypeIssues]
+        self.object_df.loc[len(self.object_df)] = new_object  # type: ignore[attr-defined]
 
     def add_reward_objects(self, num: int = 1):
         """Add reward objects.
@@ -732,7 +778,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
             return False
 
         if min_dist is None:
-            min_dist = float(self.min_dist)  # type: ignore[reportGeneralTypeIssues]
+            min_dist = float(self.min_dist)  # type: ignore[attr-defined]
 
         new_wall = np.asarray(new_wall_coords)
 
