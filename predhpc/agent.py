@@ -40,6 +40,7 @@ class ResetableAgent(Agent):
 
     default_params = {
         "dt": 0.01,  # time step, in seconds
+        "head_direction_smoothing_timescale": 0.02,  # higher than dt
         "trajectory_length": None,  # int or iterable of ints
         "num_trajectories": None,  # number of trajectory lengths to sample
         "exp_factors": None,  # exponential factors for trajectory_length (inv. scale, rate, minimum). Defaults to None.

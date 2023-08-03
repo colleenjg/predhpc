@@ -27,6 +27,7 @@ ENV_PARAMS_T_MAZE = {
 
 AGENT_PARAMS_T_MAZE = {
     "dt": DT,
+    "head_direction_smoothing_timescale": DT * 2,
     "thigmotaxis": 0.5,
     "speed_mean": 0.16,
     "speed_std": 0.16,
@@ -72,18 +73,20 @@ CA1_TWO_COMP_PARAMS = {
     "n": 1,
     "name": "CA1_TwoComp",
     "biases": None,
-    "init_weights_zero": False,
     "lr": 1e-4,
     "apply_Ojas_rule": True,
+    "dend_init_weights_zero": False,
     "dend_w_init_loc": 0.03,
     "dend_w_init_scale": 0.01,  # fairly narrow distribution
     "soma_init_weights_zero": True,
-    "soma_to_dend_weight": -0.8,
+    "soma_to_dend_weight": 0.3,
     "dend_to_soma_weight": 0.2,
+    "inhibit_weight": 0.5,
     "soma_btsp_tau": DT * 15,
     "soma_btsp_fr": 80,
     "soma_color": "C2",
     "dend_color": "C3",
+    "inhibit_color": "C3",
 }
 
 ### 1D (LINEAR TRACK) PARAMETERS ###
@@ -94,9 +97,10 @@ ENV_PARAMS_1D = {
 }
 
 AGENT_PARAMS_1D = {
+    "dt": DT,
+    "head_direction_smoothing_timescale": DT * 2,
     "reset_reached_within_tolerance_prop_to_dt": 0.8,
     "target_reached_within_tolerance_prop_to_dt": 3,
-    "dt": DT,
     "speed_mean": 1,  # sets directionality
     "speed_std": 0.5,
     "start_position": 0 + DT,
@@ -339,6 +343,7 @@ def learn_T_maze_btsp(
         CA1s = two_comp_neurons.TwoCompLayer(Ag, params=CA1_params)
         CA1s.set_btsp_learn(soma=True, dend=False)
         CA1s.set_btsp_freeze(soma=False, dend=True)
+        CA1s.set_freeze(inhibit=True)
         CA1s_for_weights = CA1s.SomaCompartment
     else:
         CA1s = learning_neurons.BTSPLayer(Ag, params=CA1_params)
@@ -400,14 +405,18 @@ def learn_T_maze_btsp(
         plot_T_maze(Ag, CA3_PCs, CA1s, autosave=autosave, method="groundtruth")  # type: ignore[arg-type]
 
     if two_compartment:
-        CA1s.DendriteCompartment.plot_rate_maps_across_learning()  # type: ignore[attr-defined]
-        CA1s.SomaCompartment.plot_rate_maps_across_learning()  # type: ignore[attr-defined]
+        fig, _ = CA1s.DendriteCompartment.plot_rate_maps_across_learning()  # type: ignore[attr-defined]
+        fig.suptitle("Rate maps across learning (dendrites)", y=0.90)
+        fig, _ = CA1s.SomaCompartment.plot_rate_maps_across_learning()  # type: ignore[attr-defined]
+        fig.suptitle("Rate maps across learning (somata)", y=0.90)
     else:
         CA1s.plot_rate_maps_across_learning()  # type: ignore[attr-defined]
 
     if two_compartment:
-        plot_time_series_with_btsp_events(CA1s.DendriteCompartment)  # type: ignore[attr-defined]
-        plot_time_series_with_btsp_events(CA1s.SomaCompartment)  # type: ignore[attr-defined]
+        _, ax = plot_time_series_with_btsp_events(CA1s.DendriteCompartment)  # type: ignore[attr-defined]
+        ax.set_title("Time series with BTSP events and proximity to target (dendrites)")
+        _, ax = plot_time_series_with_btsp_events(CA1s.SomaCompartment)  # type: ignore[attr-defined]
+        ax.set_title("Time series with BTSP events and proximity to target (somata)")
     else:
         plot_time_series_with_btsp_events(CA1s)  # type: ignore[arg-type]
 

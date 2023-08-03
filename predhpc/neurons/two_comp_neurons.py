@@ -37,6 +37,10 @@ class TwoCompLayer:
         "soma_to_dend_weight": 0.5,
         "dend_to_soma_weight": 0.5,
         "dend_first": False,
+        "inhibit_dend": True,
+        "inhibit_color": None,
+        "inhibit_weight": 0.5,  # multiplied by -1 identity matrix
+        "inhibit_activation_params": learning_neurons.STANDARD_SIGMOID_PARAMS,
     }
 
     ignored_param_keys = list()  # type: list[str]
@@ -77,9 +81,10 @@ class TwoCompLayer:
                 )
             params[key] = value
 
-        attributes = [
+        local_attributes = [
             "soma_to_dend_weight",
             "dend_to_soma_weight",
+            "dend_first",
         ]
 
         for key, value in all_params.items():
@@ -89,7 +94,7 @@ class TwoCompLayer:
                     "Will be ignored."
                 )
 
-            elif key in attributes:
+            elif key in local_attributes or key.startswith("inhibit_"):
                 setattr(self, key, value)
 
             elif key == "name":
@@ -145,11 +150,34 @@ class TwoCompLayer:
             self.SomaCompartment.name  # type: ignore[attr-defined]
         )
 
-    def set_learn(self, soma=True, dend=True):
+        if self.inhibit_dend:  # type: ignore[attr-defined]
+            inhibit_params = {
+                "name": "SomaInhibitionOfDendrites",
+                "n": self.n,
+                "activation_params": self.inhibit_activation_params,  # type: ignore[attr-defined]
+                "color": self.inhibit_color,  # type: ignore[attr-defined]
+            }
+
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", "No input layers", UserWarning)
+                self.DendriteInhibition = learning_neurons.HebbianLayer(
+                    self.Agent, params=inhibit_params
+                )
+            soma_input = np.eye(self.n) * self.inhibit_weight  # type: ignore[attr-defined]
+            self.DendriteInhibition.add_input(self.SomaCompartment, w=soma_input)
+
+            dend_inhibition = np.eye(self.n) * -1
+            self.DendriteCompartment.add_input(
+                self.DendriteInhibition, w=dend_inhibition
+            )
+
+    def set_learn(self, soma=True, dend=True, inhibit=False):
         if soma:
             self.SomaCompartment.set_learn()
         if dend:
             self.DendriteCompartment.set_learn()
+        if inhibit and self.inhibit_dend:  # type: ignore[attr-defined]
+            self.DendriteInhibition.set_learn()
 
     def set_btsp_learn(self, soma=True, dend=True):
         if soma:
@@ -157,11 +185,13 @@ class TwoCompLayer:
         if dend:
             self.DendriteCompartment.set_btsp_learn()
 
-    def set_freeze(self, soma=True, dend=True):
+    def set_freeze(self, soma=True, dend=True, inhibit=False):
         if soma:
             self.SomaCompartment.set_freeze()
         if dend:
             self.DendriteCompartment.set_freeze()
+        if inhibit and self.inhibit_dend:  # type: ignore[attr-defined]
+            self.DendriteInhibition.set_freeze()
 
     def set_btsp_freeze(self, soma=True, dend=True):
         if soma:
@@ -174,6 +204,9 @@ class TwoCompLayer:
         btsp_targs: list | np.ndarray[tuple[int], np.dtype[np.int64]] = list(),
         dend_first: bool | None = None,
     ):
+        if self.inhibit_dend:  # type: ignore[attr-defined]
+            self.DendriteInhibition.update()
+
         if dend_first is None:
             dend_first = self.dend_first  # type: ignore[attr-defined]
 
