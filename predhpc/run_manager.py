@@ -9,10 +9,10 @@ from matplotlib import markers
 from matplotlib import figure as mpl_figure
 import numpy as np
 from tqdm import tqdm  # type: ignore[import]
-from predhpc.neurons import learning_neurons
 from ratinabox import Environment, PlaceCells, ObjectVectorCells  # type: ignore[import]
 
 from predhpc import agent, env, plot_util, util
+from predhpc.neurons import learning_neurons, two_comp_neurons
 
 
 SCALE = 1.0
@@ -286,7 +286,7 @@ def learn_T_maze_btsp(
     agent.ResetableAgent,
     ObjectVectorCells | None,
     PlaceCells,
-    learning_neurons.BTSPLayer | learning_neurons.TwoCompLayer,
+    learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer,
 ]:
     """Run a T-maze learning experiment with BTSP learning.
 
@@ -333,10 +333,10 @@ def learn_T_maze_btsp(
         if EC_params is not None:
             warnings.warn("EC_params will be ignored if two_compartment is False.")
         ECs = None
-        CA1_params["input_layers"] = [CA3_PCs]  # type: ignore[arg-type, attr-defined]
+        CA1_params["input_layers"] = [CA3_PCs]  # type: ignore[assignment]
 
     if two_compartment:
-        CA1s = learning_neurons.TwoCompLayer(Ag, params=CA1_params)
+        CA1s = two_comp_neurons.TwoCompLayer(Ag, params=CA1_params)
         CA1s.set_btsp_learn(soma=True, dend=False)
         CA1s.set_btsp_freeze(soma=False, dend=True)
         CA1s_for_weights = CA1s.SomaCompartment
