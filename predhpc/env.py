@@ -496,7 +496,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
             closest_distance = np.linalg.norm(coords - np.asarray(object_coords), ord=2)
             closest_distances.append(closest_distance)
 
-        closest_dist = np.min(closest_distances)
+        closest_dist = float(np.min(closest_distances))  # type: ignore[assignment]
 
         return closest_dist
 

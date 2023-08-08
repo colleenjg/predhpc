@@ -301,7 +301,7 @@ class ResetableAgent(Agent):
         }
 
         if dt is None:
-            dt = float(self.dt)
+            dt = float(self.dt)  # type: ignore[has-type]
 
         velocity = np.asarray(self.velocity).astype(np.float64)  # type: ignore[has-type]
 
@@ -322,7 +322,7 @@ class ResetableAgent(Agent):
         if self.save_history is True and len(self.history["vel"]):  # type: ignore[attr-defined]
             self.history["vel"][-1] = self.save_velocity.tolist()
             if self.Environment.dimensionality == "2D":
-                rotational_velocity = float(self.rotational_velocity)  # type: ignore[arg-type]
+                rotational_velocity = float(self.rotational_velocity)  # type: ignore[has-type]
                 self.history["rot_vel"][-1] = rotational_velocity
 
     def check_and_fix_velocity_for_1D(
@@ -342,12 +342,14 @@ class ResetableAgent(Agent):
             return
 
         if dt is None:
-            dt = self.dt
+            dt = self.dt  # type: ignore[has-type]
 
         new_velocity = self.velocity  # type: ignore[has-type]
         speed_mean, speed_std = self.speed_mean, self.speed_std  # type: ignore[attr-defined]
         for _ in range(10):
-            if new_velocity < 0:  # resample velocity until it is positive
+            if (
+                new_velocity < 0
+            ):  # resample velocity until it is positive  # type: ignore[has-type]
                 new_velocity = prev_velocity + rutils.ornstein_uhlenbeck(
                     dt=dt,
                     x=prev_velocity,
@@ -358,7 +360,7 @@ class ResetableAgent(Agent):
             else:
                 break
 
-        if new_velocity < 0:
+        if new_velocity < 0:  # type: ignore[has-type]
             new_velocity = prev_velocity * 0  # set to 0
 
         self.velocity = new_velocity
@@ -431,7 +433,7 @@ class ResetableAgent(Agent):
             position (np.ndarray): The sampled position.
         """
 
-        tolerance = self.dt * sample_within_tolerance_prop_to_dt
+        tolerance = self.dt * sample_within_tolerance_prop_to_dt  # type: ignore[has-type]
 
         new_position = None
         for _ in range(max_attempts):
@@ -497,7 +499,7 @@ class ResetableAgent(Agent):
 
         # get trajectory lengths in seconds
         if log_as_time:
-            traj_leng_to_date = [leng * self.dt for leng in traj_leng_to_date]
+            traj_leng_to_date = [leng * self.dt for leng in traj_leng_to_date]  # type: ignore[has-type]
             traj_length_unit = "sec"
             if np.mean(traj_leng_to_date) / 60 > 2:
                 traj_leng_to_date = [leng / 60 for leng in traj_leng_to_date]
@@ -525,7 +527,7 @@ class ResetableAgent(Agent):
 
         traj_leng_to_date = self.get_trajectory_lengths_to_date()
         fig, ax, _ = plot_util.plot_trajectory_lengths(
-            dt=self.dt, trajectory_lengths=traj_leng_to_date, in_minutes=in_minutes
+            dt=self.dt, trajectory_lengths=traj_leng_to_date, in_minutes=in_minutes  # type: ignore[has-type]
         )
 
         util.save_figure(fig, "trajectories_to_date", save=autosave)
@@ -570,7 +572,7 @@ class ResetableAgent(Agent):
             dist = np.linalg.norm(self.pos - position, ord=2)
 
             # check if the distance is less than the tolerance
-            if dist < (self.dt * sample_within_tolerance_prop_to_dt):
+            if dist < (self.dt * sample_within_tolerance_prop_to_dt):  # type: ignore[has-type]
                 return True
 
         return False
@@ -867,8 +869,8 @@ class ResetableAgent(Agent):
         ax.set_xlabel("Time / min")
         ax.set_ylabel("Position / m")
 
-        bottom = min_y - diff * 0.1
-        top = max_y + diff * 0.1
+        bottom = min_y - diff * 0.1  # type: ignore[operator]
+        top = max_y + diff * 0.1  # type: ignore[operator]
         ax.set_ylim(bottom=bottom, top=top)
         ax.spines["right"].set_visible(False)
         ax.spines["top"].set_visible(False)

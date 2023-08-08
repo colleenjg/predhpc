@@ -482,7 +482,7 @@ def plot_1D_env_info(
 
     # Plot CA1 rate maps across learning
     plot_util.plot_1D_rate_map_across_learning(
-        Ag, CA1s, fig=fig, axes=axes_flat[4:7], autosave=False
+        Ag, CA1s, fig=fig, axes=axes_flat[4:7], autosave=False  # type: ignore[arg-type]
     )
 
     # Plot environment

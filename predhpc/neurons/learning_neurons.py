@@ -1,5 +1,6 @@
 import copy
 from typing import TYPE_CHECKING, Any, Sequence
+import warnings
 
 from matplotlib import pyplot as plt  # type: ignore[import]
 from matplotlib import markers
@@ -7,6 +8,7 @@ from matplotlib import figure as mpl_figure
 import numpy as np
 
 from ratinabox.Neurons import Neurons, FeedForwardLayer  # type: ignore[import]
+from ratinabox import utils as rutils  # type: ignore[import]
 
 from predhpc import util, plot_util
 
@@ -805,6 +807,298 @@ class BTSPLayer(HebbianLayer):
                 Defaults to [].
         """
 
+        filter_tau, btsp_tau = self.filter_tau, self.btsp_tau  # type: ignore[attr-defined]
+        self.update_filtered_inputs(filter_tau, filter_key="filtered_inputs")
+        self.update_filtered_inputs(btsp_tau, filter_key="btsp_filtered_inputs")
+
+        super().update()
+
+        if self.btsp_learn and btsp_targs is not None and len(btsp_targs):
+            n, btsp_fr = self.n, self.btsp_fr  # type: ignore[attr-defined]
+            O = np.zeros(n)
+            O[np.asarray(btsp_targs)] = btsp_fr
+
+            self.update_weights(filter_key="btsp_filtered_inputs", O=O)
+            self.history["btsp_events"].append(self.num_steps_total)
+            self.history["btsp_targets"].append(btsp_targs)
+
+        return
+
+    def plot_btsp_filtered(
+        self,
+        input_layer_name: str,
+        t_start: float | None = None,
+        title: str | None = None,
+        autosave: bool | None = None,
+        **kwargs,
+    ) -> tuple[mpl_figure.Figure, plt.Axes]:
+        """Plot the filtered inputs of the layer.
+
+        Args:
+            input_layer_name (str): Name of the input layer to plot.
+            t_start (float, optional): Start time of the plot. Defaults to None.
+            title (str, optional): Title of the plot. Defaults to None.
+            **kwargs: Keyword arguments passed to the plot function.
+
+        Returns:
+            fig, ax: Figure and axes of the plot.
+        """
+
+        if title is None:
+            title = "BTSP filtered inputs"
+
+        fig, ax, t = super().plot_filtered(
+            input_layer_name,
+            filter_key="btsp_filtered_inputs",
+            t_start=t_start,
+            title=title,
+            autosave=False,
+            **kwargs,
+        )
+
+        _, startid, _ = self.get_plotting_times(t_start=t_start)
+
+        btsp_events = np.asarray(self.history["btsp_events"]) - startid
+        btsp_targets = np.asarray(self.history["btsp_targets"])
+        btsp_mask = (btsp_events >= 0) & (btsp_events < len(t))
+
+        miny, maxy = ax.get_ylim()
+
+        flat_btsp_events = list()  # type: list[int]
+        flat_btsp_targets = list()  # type: list[int]
+        for ev, targ in zip(btsp_events[btsp_mask], btsp_targets[btsp_mask]):
+            flat_btsp_targets.extend(targ)
+            flat_btsp_events.extend([ev for _ in range(len(targ))])
+
+        flat_btsp_events_arr = np.array(flat_btsp_events)
+        flat_btsp_targets_arr = np.array(flat_btsp_targets)  # type: ignore[arg-type]
+
+        height_diff = 0.01 * (maxy - miny)
+        heights = maxy - height_diff * (flat_btsp_targets_arr + 1)
+
+        if len(flat_btsp_events_arr):
+            ax.scatter(
+                t[flat_btsp_events_arr],
+                heights,
+                color="k",
+                alpha=0.8,
+                marker=markers.MarkerStyle("x"),
+                s=10,
+            )
+
+        util.save_figure(fig, f"{self.name}_btsp_filtered_inputs", save=autosave)  # type: ignore[attr-defined]
+
+        return fig, ax
+
+
+class NMDACurrent:
+    def __init__(
+        self,
+        InputLayer,
+        name="NMDACurrent",
+        NMDA_tau=3,  # seconds
+        NMDA_activation_threshold=0.8,  # firing rate
+        save_history=True,
+    ):
+        self.name = name
+        self.InputLayer = InputLayer
+        self.n = self.InputLayer.n
+        self.firingrate = np.zeros(self.InputLayer.n)  # type: ignore[attr-defined]
+
+        self.NMDA_activation_tau = NMDA_tau
+        self.NMDA_inactivation_tau = NMDA_tau
+        self.NMDA_activation_threshold = NMDA_activation_threshold
+
+        self.NMDA_receptor_binding = np.zeros(self.n)
+        self.NMDA_receptor_activation = np.zeros(self.n)
+        self.NMDA_receptor_inactivation = np.zeros(self.n)
+
+        self.save_history = save_history
+
+        if save_history:
+            self.history = dict()
+            self.history["firingrate"] = list()
+            self.history["receptor_binding"] = list()
+            self.history["receptor_activation"] = list()
+            self.history["receptor_inactivation"] = list()
+
+    def get_input_firingrate_to_add(self, evaluate_at="last"):
+        if evaluate_at == "last":
+            input_firingrate = self.InputLayer.firingrate
+        else:
+            input_firingrate = self.InputLayer.get_state(evaluate_at=evaluate_at)
+
+        add = np.zeros_like(input_firingrate)
+        above = input_firingrate > self.NMDA_activation_threshold
+        add[above] = input_firingrate[above]
+
+        return add
+
+    def get_state(self, evaluate_at="last"):
+        if evaluate_at == "last":
+            firingrate = np.zeros(self.InputLayer.n)
+            input_firingrate_to_add = self.get_input_firingrate_to_add(
+                evaluate_at=evaluate_at
+            )
+            firingrate = np.maximum(firingrate, input_firingrate_to_add)
+            firingrate = rutils.activate(
+                firingrate, other_args=self.InputLayer.activation_params  # type: ignore[attr-defined]
+            )
+            return firingrate
+
+        else:
+            return self.firingrate
+
+    def update(self):
+        # decay activation and inactivation
+        self.NMDA_receptor_inactivation *= np.exp(
+            -self.InputLayer.dt / self.NMDA_inactivation_tau
+        )
+        self.NMDA_receptor_activation *= np.exp(
+            -self.InputLayer.dt / self.NMDA_activation_tau
+        )
+
+        # update receptor binding based on inputs
+        self.receptor_binding = np.zeros(self.n) * self.InputLayer.firingrate
+
+        for input_layer in self.inputs.values():
+            X_t = input_layer[filter_key]
+            I_t1 = input_layer["layer"].firingrate
+            d_filt = (I_t1 - X_t) / effective_tau
+            input_layer[filter_key] += d_filt
+
+        # update receptor binding
+
+        # update receptor activation (sigmoid)
+
+        # update receptor inactivation
+
+        effective_NMDA_tau = self.NMDA_tau / self.InputLayer.Agent.dt
+
+        # decay the previous activity
+        firingrate = self.firingrate * np.exp(-1 / effective_NMDA_tau)
+
+        # add the new activity
+        input_firingrate_to_add = self.get_input_firingrate_to_add(evaluate_at="last")
+        firingrate = np.maximum(firingrate, input_firingrate_to_add)
+
+        # apply activation
+        firingrate = rutils.activate(
+            firingrate, other_args=self.InputLayer.activation_params  # type: ignore[attr-defined]
+        )
+
+        self.firingrate = firingrate
+
+        if self.save_history:
+            self.history["firingrate"].append(firingrate.tolist())
+
+
+class NMDALayer(BTSPLayer):
+    """This trained class defines a population of neurons that tune their activity
+    through Hebbian learning with BTSP and NMDA receptors.
+    This class is a subclass of Neurons() and inherits its properties/plotting
+    functions.
+
+    Must be initialised with an Agent, and a "params" dictionary, including input
+    layers.
+
+    List of functions:
+        • get_state()
+        • set_freeze()
+        • set_learn()
+        • add_input()
+        • update()
+        • plot_rate_map()
+        • plot_loss()
+    """
+
+    default_params = {
+        "n": 10,
+        "name": "NMDALayer",
+        "NMDA_tau": 3,
+        "NMDA_threshold": 0.8,
+    }
+
+    ignored_param_keys = list()
+    ignored_params = {key: None for key in ignored_param_keys}
+
+    fixed_params = dict()
+
+    def __init__(self, Agent: "ratinabox.Agent", params: dict[str, Any] = dict()):
+        """Initialise HebbianLayer(), takes as input a parameter
+        dictionary. Any values not provided by the params dictionary are
+        taken from a default dictionary below.
+
+        Args:
+            params (dict, optional). Defaults to dict().
+        """
+
+        self.Agent = Agent
+
+        self.check_if_ignored_params(params)
+
+        self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
+        self.params.update(params)
+
+        super().__init__(Agent, self.params)
+
+        self.add_NMDA_intermediate()
+
+        return
+
+    def add_NMDA_intermediate(self):
+        """Set the NMDA intermediate layer."""
+
+        self.NMDAIntermediate = NMDAIntermediate(
+            self,
+            NMDA_tau=self.NMDA_tau,  # type: ignore[attr-defined]
+            NMDA_threshold=self.NMDA_threshold,  # type: ignore[attr-defined]
+            save_history=self.save_history,  # type: ignore[attr-defined]
+        )
+
+        self.add_input(self.NMDAIntermediate, w=np.eye(self.n))  # type: ignore[attr-defined]
+
+        return self.NMDAIntermediate
+
+    def get_inputs(self, evaluate_at="last", **kwargs):
+        """Returns the firing rate of the feedforward layer cells. By default this layer uses the last saved firingrate from its input layers. Alternatively evaluate_at and kwargs can be set to be anything else which will just be passed to the input layer for evaluation.
+        Once the firing rate of the inout layers is established these are multiplied by the weight matrices and then activated to obtain the firing rate of this FeedForwardLayer.
+
+        Args:
+            evaluate_at (str, optional). Defaults to 'last'.
+        Returns:
+            firingrate: array of firing rates
+        """
+        if evaluate_at == "last":
+            V = np.zeros(self.n)
+        elif evaluate_at == "all":
+            V = np.zeros(
+                (self.n, self.Agent.Environment.flattened_discrete_coords.shape[0])
+            )
+        else:
+            V = np.zeros((self.n, kwargs["pos"].shape[0]))
+
+        for name, inputlayer in self.inputs.items():
+            if name == "NMDACurrent":
+                continue
+            w = inputlayer["w"]
+            if evaluate_at == "last":
+                I = inputlayer["layer"].firingrate
+            else:  # kick can down the road let input layer decide how to evaluate the firingrate. this is core to feedforward layer as this recursive call will backprop through the upstraem layers until it reaches a "core" (e.g. place cells) layer which will then evaluate the firingrate.
+                I = inputlayer["layer"].get_state(evaluate_at, **kwargs)
+            inputlayer["I_temp"] = I
+            V += np.matmul(w, I)
+
+        biases = self.biases
+        if biases.shape != V.shape:
+            biases = biases.reshape((-1, 1))
+        V += biases
+
+        return inputs
+
+    def update(
+        self, btsp_targs: list | np.ndarray[tuple[int], np.dtype[np.int64]] = list()
+    ):
         filter_tau, btsp_tau = self.filter_tau, self.btsp_tau  # type: ignore[attr-defined]
         self.update_filtered_inputs(filter_tau, filter_key="filtered_inputs")
         self.update_filtered_inputs(btsp_tau, filter_key="btsp_filtered_inputs")
