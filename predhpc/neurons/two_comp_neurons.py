@@ -201,7 +201,7 @@ class TwoCompLayer:
 
     def update(
         self,
-        btsp_targs: list | np.ndarray[tuple[int], np.dtype[np.int64]] = list(),
+        btsp_targets: list | np.ndarray[tuple[int], np.dtype[np.int64]] = list(),
         dend_first: bool | None = None,
     ):
         if self.inhibit_dend:  # type: ignore[attr-defined]
@@ -211,10 +211,10 @@ class TwoCompLayer:
             dend_first = self.dend_first  # type: ignore[attr-defined]
 
         if dend_first:
-            self.DendriteCompartment.update(btsp_targs)
-            self.SomaCompartment.update(btsp_targs)
+            self.DendriteCompartment.update(btsp_targets)
+            self.SomaCompartment.update(btsp_targets)
         else:
-            self.SomaCompartment.update(btsp_targs)
-            self.DendriteCompartment.update(btsp_targs)
+            self.SomaCompartment.update(btsp_targets)
+            self.DendriteCompartment.update(btsp_targets)
 
         return

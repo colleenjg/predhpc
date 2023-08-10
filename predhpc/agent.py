@@ -68,11 +68,18 @@ class ResetableAgent(Agent):
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
 
-        super().__init__(Env, self.params)
+        with warnings.catch_warnings():
+            if Env.dimensionality == "1D" and self.params["fixed_direction"]:  # type: ignore[attr-defined]
+                warnings.filterwarnings(
+                    "ignore",
+                    category=UserWarning,
+                    message="Warning: You have solid 1D boundary",
+                )
+            super().__init__(Env, self.params)
 
         if self.Environment.dimensionality == "2D":
             self.fixed_direction = False
-        elif self.fixed_direction:
+        elif self.Environment.dimensionality == "1D" and self.fixed_direction:
             if self.speed_mean < 0:  # type: ignore[attr-defined]
                 raise ValueError("Cannot have fixed direction with negative speed.")
             if self.Environment.boundary_conditions == "periodic":

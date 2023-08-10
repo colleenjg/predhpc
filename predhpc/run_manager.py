@@ -366,19 +366,19 @@ def learn_T_maze_btsp(
         CA3_PCs.update()
 
         # check whether a restart BTSP signal should go out
-        btsp_targs = []
+        btsp_targets = []
         if restarted and CA1s.n > 1:  # type: ignore[attr-defined]
-            btsp_targs = [CA1s.n - 1]  # type: ignore[attr-defined]
+            btsp_targets = [CA1s.n - 1]  # type: ignore[attr-defined]
 
         # check whether a target BTSP signal should go out
         if Ag.reached_target and len(Ag.target_df) == btsp_after_num_target_reaches + 1:
-            btsp_targs = [0]
+            btsp_targets = [0]
 
         # check for restart
         restarted = Ag.reached_end
 
         # run update
-        CA1s.update(btsp_targs=btsp_targs)
+        CA1s.update(btsp_targets=btsp_targets)
         if not i % weight_recording_freq:
             CA1_weights.append(CA1s_for_weights.inputs[CA3_PCs.name]["w"].copy())  # type: ignore[attr-defined]
 
@@ -652,20 +652,20 @@ def learn_1D_btsp(
         CA3_PCs.update()
 
         # check whether a restart BTSP signal should go out
-        btsp_targs = list()
+        btsp_targets = list()
         if len(Ag.target_df) == btsp_after_num_target_reaches + 1:
             if restarted and CA1s_n > 1:
-                btsp_targs = [CA1s_n - 1]
+                btsp_targets = [CA1s_n - 1]
 
             # check whether a target BTSP signal should go out
             if Ag.reached_target:
-                btsp_targs = [0]
+                btsp_targets = [0]
 
         # check for restart
         restarted = Ag.reached_end
 
         # run update
-        CA1s.update(btsp_targs=btsp_targs)
+        CA1s.update(btsp_targets=btsp_targets)
         if not i % weight_recording_freq:
             CA1_weights.append(CA1s.inputs[CA3_PCs_name]["w"].copy())
 

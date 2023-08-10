@@ -797,13 +797,13 @@ class BTSPLayer(HebbianLayer):
             )
 
     def update(
-        self, btsp_targs: list | np.ndarray[tuple[int], np.dtype[np.int64]] = list()
+        self, btsp_targets: list | np.ndarray[tuple[int], np.dtype[np.int64]] = list()
     ):
         """Update the layer, i.e. calculate the new firing rates and update the
         weights and biases, if applicable.
 
         Args:
-            btsp_targs (list or 1D array, optional): List of BTSP targets.
+            btsp_targets (list or 1D array, optional): List of BTSP targets.
                 Defaults to [].
         """
 
@@ -813,14 +813,14 @@ class BTSPLayer(HebbianLayer):
 
         super().update()
 
-        if self.btsp_learn and btsp_targs is not None and len(btsp_targs):
+        if self.btsp_learn and btsp_targets is not None and len(btsp_targets):
             n, btsp_fr = self.n, self.btsp_fr  # type: ignore[attr-defined]
             O = np.zeros(n)
-            O[np.asarray(btsp_targs)] = btsp_fr
+            O[np.asarray(btsp_targets)] = btsp_fr
 
             self.update_weights(filter_key="btsp_filtered_inputs", O=O)
             self.history["btsp_events"].append(self.num_steps_total)
-            self.history["btsp_targets"].append(btsp_targs)
+            self.history["btsp_targets"].append(btsp_targets)
 
         return
 
@@ -891,108 +891,6 @@ class BTSPLayer(HebbianLayer):
         return fig, ax
 
 
-class NMDACurrent:
-    def __init__(
-        self,
-        InputLayer,
-        name="NMDACurrent",
-        NMDA_tau=3,  # seconds
-        NMDA_activation_threshold=0.8,  # firing rate
-        save_history=True,
-    ):
-        self.name = name
-        self.InputLayer = InputLayer
-        self.n = self.InputLayer.n
-        self.firingrate = np.zeros(self.InputLayer.n)  # type: ignore[attr-defined]
-
-        self.NMDA_activation_tau = NMDA_tau
-        self.NMDA_inactivation_tau = NMDA_tau
-        self.NMDA_activation_threshold = NMDA_activation_threshold
-
-        self.NMDA_receptor_binding = np.zeros(self.n)
-        self.NMDA_receptor_activation = np.zeros(self.n)
-        self.NMDA_receptor_inactivation = np.zeros(self.n)
-
-        self.save_history = save_history
-
-        if save_history:
-            self.history = dict()
-            self.history["firingrate"] = list()
-            self.history["receptor_binding"] = list()
-            self.history["receptor_activation"] = list()
-            self.history["receptor_inactivation"] = list()
-
-    def get_input_firingrate_to_add(self, evaluate_at="last"):
-        if evaluate_at == "last":
-            input_firingrate = self.InputLayer.firingrate
-        else:
-            input_firingrate = self.InputLayer.get_state(evaluate_at=evaluate_at)
-
-        add = np.zeros_like(input_firingrate)
-        above = input_firingrate > self.NMDA_activation_threshold
-        add[above] = input_firingrate[above]
-
-        return add
-
-    def get_state(self, evaluate_at="last"):
-        if evaluate_at == "last":
-            firingrate = np.zeros(self.InputLayer.n)
-            input_firingrate_to_add = self.get_input_firingrate_to_add(
-                evaluate_at=evaluate_at
-            )
-            firingrate = np.maximum(firingrate, input_firingrate_to_add)
-            firingrate = rutils.activate(
-                firingrate, other_args=self.InputLayer.activation_params  # type: ignore[attr-defined]
-            )
-            return firingrate
-
-        else:
-            return self.firingrate
-
-    def update(self):
-        # decay activation and inactivation
-        self.NMDA_receptor_inactivation *= np.exp(
-            -self.InputLayer.dt / self.NMDA_inactivation_tau
-        )
-        self.NMDA_receptor_activation *= np.exp(
-            -self.InputLayer.dt / self.NMDA_activation_tau
-        )
-
-        # update receptor binding based on inputs
-        self.receptor_binding = np.zeros(self.n) * self.InputLayer.firingrate
-
-        for input_layer in self.inputs.values():
-            X_t = input_layer[filter_key]
-            I_t1 = input_layer["layer"].firingrate
-            d_filt = (I_t1 - X_t) / effective_tau
-            input_layer[filter_key] += d_filt
-
-        # update receptor binding
-
-        # update receptor activation (sigmoid)
-
-        # update receptor inactivation
-
-        effective_NMDA_tau = self.NMDA_tau / self.InputLayer.Agent.dt
-
-        # decay the previous activity
-        firingrate = self.firingrate * np.exp(-1 / effective_NMDA_tau)
-
-        # add the new activity
-        input_firingrate_to_add = self.get_input_firingrate_to_add(evaluate_at="last")
-        firingrate = np.maximum(firingrate, input_firingrate_to_add)
-
-        # apply activation
-        firingrate = rutils.activate(
-            firingrate, other_args=self.InputLayer.activation_params  # type: ignore[attr-defined]
-        )
-
-        self.firingrate = firingrate
-
-        if self.save_history:
-            self.history["firingrate"].append(firingrate.tolist())
-
-
 class NMDALayer(BTSPLayer):
     """This trained class defines a population of neurons that tune their activity
     through Hebbian learning with BTSP and NMDA receptors.
@@ -1015,8 +913,9 @@ class NMDALayer(BTSPLayer):
     default_params = {
         "n": 10,
         "name": "NMDALayer",
-        "NMDA_tau": 3,
-        "NMDA_threshold": 0.8,
+        "NMDA_activation_threshold": 0.8,
+        "BTSP_induction_threshold": 0.8,
+        "BTSP_plateau_length": 0.1,  # seconds
     }
 
     ignored_param_keys = list()
@@ -1042,25 +941,28 @@ class NMDALayer(BTSPLayer):
 
         super().__init__(Agent, self.params)
 
-        self.add_NMDA_intermediate()
+        self._add_NMDA_current()
+
+        self.ramp_to_btsp = np.zeros(self.n).astype(float)  # type: ignore[attr-defined]
 
         return
 
-    def add_NMDA_intermediate(self):
+    def _add_NMDA_current(self):
         """Set the NMDA intermediate layer."""
 
-        self.NMDAIntermediate = NMDAIntermediate(
+        self.NMDACurrent = NMDACurrent(
             self,
-            NMDA_tau=self.NMDA_tau,  # type: ignore[attr-defined]
-            NMDA_threshold=self.NMDA_threshold,  # type: ignore[attr-defined]
+            name="NMDACurrent",
+            NMDA_activation_threshold=self.NMDA_activation_threshold,  # type: ignore[attr-defined]
+            color=self.color,  # type: ignore[attr-defined]
             save_history=self.save_history,  # type: ignore[attr-defined]
         )
 
-        self.add_input(self.NMDAIntermediate, w=np.eye(self.n))  # type: ignore[attr-defined]
+        self.add_input(self.NMDACurrent, w=np.eye(self.n))  # type: ignore[attr-defined]
 
-        return self.NMDAIntermediate
+        return self.NMDACurrent
 
-    def get_inputs(self, evaluate_at="last", **kwargs):
+    def get_inputs(self, evaluate_at="last", incl_current=False, **kwargs):
         """Returns the firing rate of the feedforward layer cells. By default this layer uses the last saved firingrate from its input layers. Alternatively evaluate_at and kwargs can be set to be anything else which will just be passed to the input layer for evaluation.
         Once the firing rate of the inout layers is established these are multiplied by the weight matrices and then activated to obtain the firing rate of this FeedForwardLayer.
 
@@ -1069,17 +971,18 @@ class NMDALayer(BTSPLayer):
         Returns:
             firingrate: array of firing rates
         """
+
+        n = int(self.n)  # type: ignore[attr-defined]
+
         if evaluate_at == "last":
-            V = np.zeros(self.n)
+            V = np.zeros(n)
         elif evaluate_at == "all":
-            V = np.zeros(
-                (self.n, self.Agent.Environment.flattened_discrete_coords.shape[0])
-            )
+            V = np.zeros((n, self.Agent.Environment.flattened_discrete_coords.shape[0]))
         else:
-            V = np.zeros((self.n, kwargs["pos"].shape[0]))
+            V = np.zeros((n, kwargs["pos"].shape[0]))
 
         for name, inputlayer in self.inputs.items():
-            if name == "NMDACurrent":
+            if name == self.NMDACurrent.name and not incl_current:
                 continue
             w = inputlayer["w"]
             if evaluate_at == "last":
@@ -1094,90 +997,284 @@ class NMDALayer(BTSPLayer):
             biases = biases.reshape((-1, 1))
         V += biases
 
-        return inputs
+        return V
 
-    def update(
-        self, btsp_targs: list | np.ndarray[tuple[int], np.dtype[np.int64]] = list()
-    ):
+    def update(self):
         filter_tau, btsp_tau = self.filter_tau, self.btsp_tau  # type: ignore[attr-defined]
         self.update_filtered_inputs(filter_tau, filter_key="filtered_inputs")
         self.update_filtered_inputs(btsp_tau, filter_key="btsp_filtered_inputs")
 
+        self.NMDACurrent.update()
         super().update()
 
-        if self.btsp_learn and btsp_targs is not None and len(btsp_targs):
-            n, btsp_fr = self.n, self.btsp_fr  # type: ignore[attr-defined]
-            O = np.zeros(n)
-            O[np.asarray(btsp_targs)] = btsp_fr
+        above_threshold = self.firingrate > self.BTSP_induction_threshold  # type: ignore[attr-defined]
+        self.ramp_to_btsp[~above_threshold] = 0
+        self.ramp_to_btsp[above_threshold] += self.Agent.dt / self.BTSP_plateau_length  # type: ignore[attr-defined]
 
-            self.update_weights(filter_key="btsp_filtered_inputs", O=O)
+        btsp_targets = np.where(self.ramp_to_btsp >= 1)[0]
+        if self.btsp_learn and len(btsp_targets):
+            self.update_weights(filter_key="btsp_filtered_inputs")
             self.history["btsp_events"].append(self.num_steps_total)
-            self.history["btsp_targets"].append(btsp_targs)
+            self.history["btsp_targets"].append(btsp_targets)
 
         return
 
-    def plot_btsp_filtered(
+
+class NMDACurrent:
+    def __init__(
         self,
-        input_layer_name: str,
+        InputLayer,
+        name="NMDACurrent",
+        NMDA_activation_decay_tau=0.1,  # seconds
+        NMDA_desensitization_decay_tau=0.3,  # seconds
+        NMDA_activation_threshold=0.8,  # firing rate
+        max_current=3.0,
+        start_desensitization=0.1,
+        color="C5",
+        save_history=True,
+    ):
+        self.name = name
+        self.InputLayer = InputLayer
+        self.Agent = self.InputLayer.Agent
+        self.n = self.InputLayer.n
+        self.firingrate = np.zeros(self.InputLayer.n)  # type: ignore[attr-defined]
+
+        if not isinstance(self.InputLayer, NMDALayer):
+            raise TypeError(
+                f"InputLayer must be of type NMDALayer, not {type(self.InputLayer)}"
+            )
+
+        self.NMDA_activation_decay_tau = NMDA_activation_decay_tau
+        self.NMDA_desensitization_decay_tau = NMDA_desensitization_decay_tau
+        self.NMDA_activation_threshold = NMDA_activation_threshold
+        self.max_current = max_current
+        self.start_desensitization = start_desensitization
+        self.color = color
+
+        self.NMDA_receptor_binding = np.zeros(self.n)
+        self.NMDA_receptor_activation = np.zeros(self.n)
+        self.NMDA_receptor_desensitization = (
+            np.zeros(self.n) * self.start_desensitization
+        )
+
+        self.save_history = save_history
+
+        if save_history:
+            self.history = dict()
+            self.history["t"] = list()
+            self.history["current"] = list()
+            self.history["receptor_binding"] = list()
+            self.history["receptor_activation"] = list()
+            self.history["receptor_desensitization"] = list()
+
+    @property
+    def activation_params(self):
+        self._activation_params = {
+            "activation": "sigmoid",
+            "min_fr": 0.0,
+            "max_fr": 1.0,
+            "width_x": 0.5,
+            "mid_x": self.NMDA_activation_threshold,
+        }
+
+        return self._activation_params
+
+    def get_decay(self, decay_type: str = "activation", dt: float | None = None):
+        """Get the decay factor for the NMDA receptor activation or desensitization.
+
+        Args:
+            decay_type (str, optional): Type of decay. Defaults to "activation".
+            dt (float, optional): Time step. Defaults to None.
+
+        Returns:
+            float: Decay factor.
+        """
+
+        if decay_type == "activation":
+            tau = self.NMDA_activation_decay_tau
+        elif decay_type == "desensitization":
+            tau = self.NMDA_desensitization_decay_tau
+        else:
+            raise ValueError(f"Unknown decay type {decay_type}")
+
+        if dt is None:
+            dt = float(self.Agent.dt)
+
+        decay = np.exp(-dt / tau)
+
+        return decay
+
+    def get_state(
+        self, evaluate_at="last", return_all: bool = False, dt: float | None = None
+    ):
+        """Get the state of the NMDA current.
+
+        Args:
+            evaluate_at (str, optional): Whether to evaluate the state at the last time
+                step or the current time step. Defaults to "last".
+            return_all (bool, optional): Whether to return all state variables.
+                Defaults to False.
+            dt (float, optional): Time step. Defaults to None.
+
+        Returns:
+            np.ndarray: State of the NMDA current.
+        """
+
+        inputs = self.InputLayer.get_inputs(incl_current=False)
+        receptor_binding = rutils.activate(inputs, other_args=self.activation_params)
+
+        if evaluate_at == "last":
+            # biexponential decay: loss of activation and desensitization
+            receptor_activation = self.NMDA_receptor_activation * self.get_decay(
+                "activation", dt=dt
+            )
+            new_desensitization = self.NMDA_receptor_activation - receptor_activation
+            receptor_desensitization = (
+                self.NMDA_receptor_desensitization
+                * self.get_decay("desensitization", dt=dt)
+                + new_desensitization
+            )
+
+            # compute new receptor activation, based on expected proportion of binding
+            # that will occur to receptors that are neither active nor inactive
+            activatable_sites = (
+                np.ones_like(receptor_desensitization)
+                - receptor_activation
+                - receptor_desensitization
+            )
+            effective_binding = activatable_sites * receptor_binding
+            receptor_activation += effective_binding
+        else:
+            receptor_activation = receptor_binding
+
+        current = receptor_activation * self.max_current  # type: ignore[operator]
+
+        if evaluate_at == "last" and return_all:
+            return (
+                current,
+                receptor_binding,
+                receptor_activation,
+                receptor_desensitization,  # type: ignore[unbound]
+            )
+        else:
+            return current
+
+    def update(self):
+        """Update the NMDA current."""
+
+        (
+            current,
+            receptor_binding,
+            receptor_activation,
+            receptor_desensitization,
+        ) = self.get_state(evaluate_at="last", return_all=True)
+
+        self.firingrate = current
+        self.NMDA_receptor_binding = receptor_binding
+        self.NMDA_receptor_activation = receptor_activation
+        self.NMDA_receptor_desensitization = receptor_desensitization
+
+        if self.save_history:
+            self.history["t"].append(self.Agent.t)
+            self.history["current"].append(current.tolist())
+            self.history["receptor_binding"].append(receptor_binding.tolist())
+            self.history["receptor_activation"].append(receptor_activation.tolist())
+            self.history["receptor_desensitization"].append(
+                receptor_desensitization.tolist()
+            )
+
+    def plot_timeseries(
+        self,
         t_start: float | None = None,
         title: str | None = None,
+        datatypes: list[str] | str = "current",
+        chosen_neurons: str
+        | int
+        | list[int]
+        | np.ndarray[tuple[int], np.dtype[np.int64]] = "all",
+        fig: mpl_figure.Figure | None = None,
+        axes: plt.Axes | np.ndarray[plt.Axes, np.dtype[np.int64]] | None = None,
         autosave: bool | None = None,
         **kwargs,
-    ) -> tuple[mpl_figure.Figure, plt.Axes]:
-        """Plot the filtered inputs of the layer.
+    ) -> tuple[mpl_figure.Figure, np.ndarray[plt.Axes, np.dtype[np.int64]]]:
+        """Plot the current, and optionally the receptor binding, activation and
+        densensitization time series.
 
         Args:
             input_layer_name (str): Name of the input layer to plot.
             t_start (float, optional): Start time of the plot. Defaults to None.
             title (str, optional): Title of the plot. Defaults to None.
+            datatypes (list[str] | str, optional): Type of data to plot. Defaults to "current".
+            chosen_neurons (str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]], optional):
+                Neurons to plot. Defaults to "all".
+            fig (mpl_figure.Figure, optional): Figure to plot on. Defaults to None.
+            ax (plt.Axes, optional): Axes to plot on. Defaults to None.
+            autosave (bool, optional): Whether to save the plot. Defaults to None.
             **kwargs: Keyword arguments passed to the plot function.
 
         Returns:
-            fig, ax: Figure and axes of the plot.
+            fig, axes: Figure and axes of the plot.
         """
 
         if title is None:
-            title = "BTSP filtered inputs"
+            title = "NMDA current traces"
 
-        fig, ax, t = super().plot_filtered(
-            input_layer_name,
-            filter_key="btsp_filtered_inputs",
-            t_start=t_start,
-            title=title,
-            autosave=False,
-            **kwargs,
+        all_datatypes = [
+            "current",
+            "receptor_binding",
+            "receptor_activation",
+            "receptor_desensitization",
+        ]
+        if isinstance(datatypes, str):
+            if datatypes == "all":
+                datatypes = all_datatypes
+            else:
+                datatypes = [datatypes]
+
+        chosen_neurons = np.asarray(
+            self.InputLayer.return_list_of_neurons(chosen_neurons=chosen_neurons)  # type: ignore[arg-type, attr-defined]
         )
 
-        _, startid, _ = self.get_plotting_times(t_start=t_start)
+        if fig is None or axes is None:
+            n = len(chosen_neurons)
+            height = max([1, min(n / 12.0 + 5 / 3, 8)]) * len(datatypes)
+            fig, axes = plt.subplots(
+                len(datatypes), 1, sharex=True, sharey=False, figsize=[6, height]
+            )  # type: ignore[assignment]
 
-        btsp_events = np.asarray(self.history["btsp_events"]) - startid
-        btsp_targets = np.asarray(self.history["btsp_targets"])
-        btsp_mask = (btsp_events >= 0) & (btsp_events < len(t))
+        if not isinstance(axes, np.ndarray):
+            axes = np.array([axes])
+        axes = axes.reshape(-1, 1)
 
-        miny, maxy = ax.get_ylim()
-
-        flat_btsp_events = list()  # type: list[int]
-        flat_btsp_targets = list()  # type: list[int]
-        for ev, targ in zip(btsp_events[btsp_mask], btsp_targets[btsp_mask]):
-            flat_btsp_targets.extend(targ)
-            flat_btsp_events.extend([ev for _ in range(len(targ))])
-
-        flat_btsp_events_arr = np.array(flat_btsp_events)
-        flat_btsp_targets_arr = np.array(flat_btsp_targets)  # type: ignore[arg-type]
-
-        height_diff = 0.01 * (maxy - miny)
-        heights = maxy - height_diff * (flat_btsp_targets_arr + 1)
-
-        if len(flat_btsp_events_arr):
-            ax.scatter(
-                t[flat_btsp_events_arr],
-                heights,
-                color="k",
-                alpha=0.8,
-                marker=markers.MarkerStyle("x"),
-                s=10,
+        if len(axes) != len(datatypes):
+            raise ValueError(
+                f"Number of axes ({len(axes)}) does not match number of datatypes "
+                f"to plot ({len(datatypes)})."
             )
 
-        util.save_figure(fig, f"{self.name}_btsp_filtered_inputs", save=autosave)  # type: ignore[attr-defined]
+        for d, datatype in enumerate(datatypes):
+            if datatype not in all_datatypes:
+                raise ValueError(
+                    f"Datatype {datatype} not recognized. "
+                    f"Must be one of {all_datatypes}."
+                )
+            plot_util.plot_timeseries(
+                self,  # type: ignore[assignment]
+                t_start=t_start,
+                fig=fig,
+                ax=axes[d, 0],
+                trace_name=datatype,
+                chosen_neurons=chosen_neurons,
+                autosave=False,
+                **kwargs,
+            )
 
-        return fig, ax
+            axes[d, 0].set_ylabel(datatype.capitalize().replace("_", " "))
+            if d != len(datatypes) - 1:
+                axes[d, 0].set_xlabel("")
+
+        fig.suptitle(title, y=0.90)
+
+        util.save_figure(fig, f"{self.name}_NMDA_current_traces", save=autosave)  # type: ignore[attr-defined]
+
+        return fig, axes
