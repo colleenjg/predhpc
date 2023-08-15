@@ -715,6 +715,7 @@ class BTSPLayer(HebbianLayer):
         "name": "BTSPLayer",
         "btsp_tau": 3,
         "btsp_fr": 1,
+        "btsp_single": False,
     }
 
     ignored_param_keys = list()
@@ -742,6 +743,8 @@ class BTSPLayer(HebbianLayer):
 
         self.history["btsp_events"] = list()
         self.history["btsp_targets"] = list()
+
+        self.btsp_to_date = np.zeros(self.n)
 
         if self.use_targets:  # type: ignore[attr-defined]
             raise ValueError("BTSPLayer does not support targets.")
@@ -814,12 +817,24 @@ class BTSPLayer(HebbianLayer):
         super().update()
 
         if self.btsp_learn and btsp_targets is not None and len(btsp_targets):
+            if self.btsp_single:
+                keep_btsp_targets = np.asarray(
+                    [targ for targ in btsp_targets if self.btsp_to_date[targ] == 0]
+                )
+                if len(keep_btsp_targets) == 0:
+                    return
+                btsp_targets = keep_btsp_targets
+
             n, btsp_fr = self.n, self.btsp_fr  # type: ignore[attr-defined]
             O = np.zeros(n)
             O[np.asarray(btsp_targets)] = btsp_fr
 
+            self.btsp_to_date[np.asarray(btsp_targets)] += +1
+
             self.update_weights(filter_key="btsp_filtered_inputs", O=O)
-            self.history["btsp_events"].append(self.num_steps_total)
+            self.history["btsp_events"].append(
+                self.num_steps_total - 1
+            )  # recorded after update
             self.history["btsp_targets"].append(btsp_targets)
 
         return
@@ -889,6 +904,83 @@ class BTSPLayer(HebbianLayer):
         util.save_figure(fig, f"{self.name}_btsp_filtered_inputs", save=autosave)  # type: ignore[attr-defined]
 
         return fig, ax
+
+    def plot_rate_map(
+        self,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        chosen_neurons: str
+        | int
+        | list[int]
+        | np.ndarray[tuple[int], np.dtype[np.int64]] = "all",
+        mark_btsp: bool = True,
+        autosave: bool | None = None,
+        **kwargs,
+    ) -> tuple[mpl_figure.Figure, np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]]:
+        """Plot the rate map of the layer, ensuring no more than 20 columns
+        are plotted.
+
+        See FeedForwardLayer.plot_rate_map() for more information.
+
+        Args:
+            t_start (float, optional): Start time of the plot. Defaults to None.
+            t_end (float, optional): End time. Defaults to None.
+            chosen_neurons (list, optional): List of neurons to plot. Defaults to "all".
+            mark_btsp (bool, optional): Whether to include BTSP markers
+            autosave (bool, optional): Whether to autosave the figure. Defaults to None.
+
+        Returns:
+            mpl_figure.Figure: Figure object.
+            plt.Axes: Axes object.
+        """
+
+        fig, axes = super().plot_rate_map(
+            t_start=t_start,
+            t_end=t_end,
+            chosen_neurons=chosen_neurons,
+            autosave=False,
+            **kwargs,
+        )
+
+        if mark_btsp:
+            chosen_neurons = self.return_list_of_neurons(chosen_neurons=chosen_neurons)  # type: ignore[arg-type]
+            t, startid, _ = self.get_plotting_times(t_start=t_start, t_end=t_end)
+
+            btsp_events = np.asarray(self.history["btsp_events"]) - startid
+            btsp_targets = np.asarray(self.history["btsp_targets"])
+
+            for event, target in zip(btsp_events, btsp_targets):
+                if event >= len(t):
+                    continue
+                elif event < 0:
+                    alpha = 0.4
+                else:
+                    alpha = 0.8
+
+                if target not in chosen_neurons:
+                    continue
+
+                i = chosen_neurons.index(target)
+
+                pos = self.Agent.history["pos"][event + startid]
+                if self.Agent.Environment.dimensionality == "1D":
+                    sub_ax = axes
+                    pos = np.asarray(pos + [sub_ax.get_ylim()[0]])
+                else:
+                    sub_ax = axes.ravel()[
+                        i
+                    ]  ### WILL THIS WORK? ARE THERE MULTIPLE AXES?
+                sub_ax.scatter(
+                    *pos,
+                    color="k",
+                    alpha=alpha,
+                    marker=markers.MarkerStyle("x"),
+                    s=10,
+                )
+
+        util.save_figure(fig, f"{self.name}_ratemaps", save=autosave)  # type: ignore[attr-defined]
+
+        return fig, axes
 
 
 class NMDALayer(BTSPLayer):
@@ -962,9 +1054,17 @@ class NMDALayer(BTSPLayer):
 
         return self.NMDACurrent
 
-    def get_inputs(self, evaluate_at="last", incl_current=False, **kwargs):
-        """Returns the firing rate of the feedforward layer cells. By default this layer uses the last saved firingrate from its input layers. Alternatively evaluate_at and kwargs can be set to be anything else which will just be passed to the input layer for evaluation.
-        Once the firing rate of the inout layers is established these are multiplied by the weight matrices and then activated to obtain the firing rate of this FeedForwardLayer.
+    def get_incoming_firingrates(self, evaluate_at="last", **kwargs):
+        """Returns the firing rates coming into each neuron. By default this layer uses
+        the last saved firingrate from its input layers. Alternatively evaluate_at and
+        kwargs can be set to be anything else which will just be passed to the input
+        layer for evaluation.
+
+        Once the firing rate of the input layers is established these are multiplied by
+        a normalized weight matrix of 1s.
+
+        NOTE: This means that pre-synaptic plasticity is ignored, and all input neurons
+        are equipotent. May have to be rethought.
 
         Args:
             evaluate_at (str, optional). Defaults to 'last'.
@@ -982,20 +1082,15 @@ class NMDALayer(BTSPLayer):
             V = np.zeros((n, kwargs["pos"].shape[0]))
 
         for name, inputlayer in self.inputs.items():
-            if name == self.NMDACurrent.name and not incl_current:
+            if name == self.NMDACurrent.name:
                 continue
-            w = inputlayer["w"]
+            w_ones = np.ones_like(inputlayer["w"])
             if evaluate_at == "last":
                 I = inputlayer["layer"].firingrate
             else:  # kick can down the road let input layer decide how to evaluate the firingrate. this is core to feedforward layer as this recursive call will backprop through the upstraem layers until it reaches a "core" (e.g. place cells) layer which will then evaluate the firingrate.
                 I = inputlayer["layer"].get_state(evaluate_at, **kwargs)
             inputlayer["I_temp"] = I
-            V += np.matmul(w, I)
-
-        biases = self.biases
-        if biases.shape != V.shape:
-            biases = biases.reshape((-1, 1))
-        V += biases
+            V += np.matmul(w_ones, I)
 
         return V
 
@@ -1013,8 +1108,24 @@ class NMDALayer(BTSPLayer):
 
         btsp_targets = np.where(self.ramp_to_btsp >= 1)[0]
         if self.btsp_learn and len(btsp_targets):
+            if self.btsp_single:
+                keep_btsp_targets = np.asarray(
+                    [targ for targ in btsp_targets if self.btsp_to_date[targ] == 0]
+                )
+                if len(keep_btsp_targets) == 0:
+                    return
+                btsp_targets = keep_btsp_targets
+
+            n, btsp_fr = self.n, self.btsp_fr  # type: ignore[attr-defined]
+            O = np.zeros(n)
+            O[np.asarray(btsp_targets)] = btsp_fr
+
+            self.btsp_to_date[np.asarray(btsp_targets)] += +1
+
             self.update_weights(filter_key="btsp_filtered_inputs")
-            self.history["btsp_events"].append(self.num_steps_total)
+            self.history["btsp_events"].append(
+                self.num_steps_total - 1
+            )  # recorded after update
             self.history["btsp_targets"].append(btsp_targets)
 
         return
@@ -1079,6 +1190,46 @@ class NMDACurrent:
 
         return self._activation_params
 
+    @property
+    def binding_params(self):
+        self._binding_params = {
+            "activation": "sigmoid",
+            "min_fr": 0.0,
+            "max_fr": 1.0,
+            "width_x": 20,
+        }
+        self._binding_params["mid_x"] = self._binding_params["width_x"] / 1.5
+
+        return self._binding_params
+
+    def plot_function(
+        self, param_type="binding", min_fr=-10, max_fr=10, fig=None, ax=None
+    ):
+        if fig is None or ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=(4, 2))
+
+        if param_type == "binding":
+            params = self.binding_params
+        elif param_type == "activation":
+            params = self.activation_params
+        else:
+            raise ValueError(f"Unknown param type {param_type}")
+
+        x = np.linspace(min_fr, max_fr, 1000)
+        y = rutils.activate(x, other_args=params)
+
+        ax.plot(x, y, color=self.color, lw=1.5)
+        ax.axhline(0, color="k", lw=1, ls="dashed")
+        ax.axvline(0, color="k", lw=1, ls="dashed")
+
+        ax.set_xlabel("Input firing rate")
+        ax.set_ylabel("Output value")
+        ax.set_title(f"{param_type.capitalize()} function")
+
+        ax.spines[["right", "top"]].set_visible(False)
+
+        return fig, ax
+
     def get_decay(self, decay_type: str = "activation", dt: float | None = None):
         """Get the decay factor for the NMDA receptor activation or desensitization.
 
@@ -1120,8 +1271,9 @@ class NMDACurrent:
             np.ndarray: State of the NMDA current.
         """
 
-        inputs = self.InputLayer.get_inputs(incl_current=False)
-        receptor_binding = rutils.activate(inputs, other_args=self.activation_params)
+        receptor_binding = rutils.activate(
+            self.InputLayer.get_incoming_firingrates(), other_args=self.binding_params
+        )  # rethink how to measure receptor binding (considering weights / biases)
 
         if evaluate_at == "last":
             # biexponential decay: loss of activation and desensitization
@@ -1135,15 +1287,22 @@ class NMDACurrent:
                 + new_desensitization
             )
 
-            # compute new receptor activation, based on expected proportion of binding
-            # that will occur to receptors that are neither active nor inactive
+            # compute proportion of sites that can be bound with a potential to be
+            # activated (neither currently active, nor inactive)
             activatable_sites = (
                 np.ones_like(receptor_desensitization)
                 - receptor_activation
                 - receptor_desensitization
             )
             effective_binding = activatable_sites * receptor_binding
-            receptor_activation += effective_binding
+
+            # compute additional activation, based on effective binding and level of
+            # depolarization of the neuron
+            neuron_activity_gate = rutils.activate(
+                self.InputLayer.firingrate, other_args=self.activation_params
+            )
+
+            receptor_activation += effective_binding * neuron_activity_gate
         else:
             receptor_activation = receptor_binding
 

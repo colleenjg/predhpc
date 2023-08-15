@@ -82,10 +82,6 @@ class ResetableAgent(Agent):
         elif self.Environment.dimensionality == "1D" and self.fixed_direction:
             if self.speed_mean < 0:  # type: ignore[attr-defined]
                 raise ValueError("Cannot have fixed direction with negative speed.")
-            if self.Environment.boundary_conditions == "periodic":
-                raise NotImplementedError(
-                    "Fixed direction not implemented for periodic boundary conditions."
-                )
 
         self.set_trajectory_lengths()
         self.set_all_positions()

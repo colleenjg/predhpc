@@ -430,7 +430,7 @@ def plot_1D_env_info(
     Ag: agent.ResetableAgent,
     CA3_PCs: PlaceCells,
     CA1s: learning_neurons.BTSPLayer,
-    CA1_weights: list[np.ndarray[tuple[int, int], np.dtype[np.float64]]],
+    CA1_weights: list[np.ndarray[tuple[int, int], np.dtype[np.float64]]] | None = None,
     autosave: bool | None = None,
 ) -> tuple[mpl_figure.Figure, np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]]:
     """Plot environment info for a 1D experiment:
@@ -476,9 +476,13 @@ def plot_1D_env_info(
     axes_flat[2].set_title("CA3 rate map")
 
     # Plot CA1 weights
-    plot_util.plot_1D_input_place_cell_weights(
-        np.asarray(CA1_weights), CA3_PCs, fig=fig, ax=axes_flat[3], autosave=False
-    )
+    if CA1_weights is None:
+        axes_flat[3].axis("off")
+        axes_flat[3].set_title("Input weights across learning")
+    else:
+        plot_util.plot_1D_input_place_cell_weights(
+            np.asarray(CA1_weights), CA3_PCs, fig=fig, ax=axes_flat[3], autosave=False
+        )
 
     # Plot CA1 rate maps across learning
     plot_util.plot_1D_rate_map_across_learning(
