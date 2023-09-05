@@ -128,8 +128,8 @@ class TwoCompLayer:
                 self.dend_params[key] = value
 
     def create_compartments(self):
-        self.SomaCompartment = learning_neurons.BTSPLayer(self.Agent, self.soma_params)
-        self.DendriteCompartment = learning_neurons.BTSPLayer(
+        self.SomaCompartment = learning_neurons.NMDALayer(self.Agent, self.soma_params)
+        self.DendriteCompartment = learning_neurons.NMDALayer(
             self.Agent, self.dend_params
         )
 
@@ -201,7 +201,7 @@ class TwoCompLayer:
 
     def update(
         self,
-        btsp_targets: list | np.ndarray[tuple[int], np.dtype[np.int64]] = list(),
+        # btsp_targets: list | np.ndarray[tuple[int], np.dtype[np.int64]] = list(),
         dend_first: bool | None = None,
     ):
         if self.inhibit_dend:  # type: ignore[attr-defined]
@@ -211,10 +211,12 @@ class TwoCompLayer:
             dend_first = self.dend_first  # type: ignore[attr-defined]
 
         if dend_first:
-            self.DendriteCompartment.update(btsp_targets)
-            self.SomaCompartment.update(btsp_targets)
+            self.DendriteCompartment.update()
+            self.SomaCompartment.update()
         else:
-            self.SomaCompartment.update(btsp_targets)
-            self.DendriteCompartment.update(btsp_targets)
+            self.SomaCompartment.update()
+            self.DendriteCompartment.update()
 
         return
+
+    ##### write a plot_rate_map and a plot_rate_timeseries that shows both compartments

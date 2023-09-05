@@ -744,7 +744,7 @@ class BTSPLayer(HebbianLayer):
         self.history["btsp_events"] = list()
         self.history["btsp_targets"] = list()
 
-        self.btsp_to_date = np.zeros(self.n)
+        self.num_btsp_to_date = np.zeros(self.n)  # type: ignore[attr-defined]
 
         if self.use_targets:  # type: ignore[attr-defined]
             raise ValueError("BTSPLayer does not support targets.")
@@ -817,9 +817,9 @@ class BTSPLayer(HebbianLayer):
         super().update()
 
         if self.btsp_learn and btsp_targets is not None and len(btsp_targets):
-            if self.btsp_single:
+            if self.btsp_single:  # type: ignore[attr-defined]
                 keep_btsp_targets = np.asarray(
-                    [targ for targ in btsp_targets if self.btsp_to_date[targ] == 0]
+                    [targ for targ in btsp_targets if self.num_btsp_to_date[targ] == 0]
                 )
                 if len(keep_btsp_targets) == 0:
                     return
@@ -829,7 +829,7 @@ class BTSPLayer(HebbianLayer):
             O = np.zeros(n)
             O[np.asarray(btsp_targets)] = btsp_fr
 
-            self.btsp_to_date[np.asarray(btsp_targets)] += +1
+            self.num_btsp_to_date[np.asarray(btsp_targets)] += +1
 
             self.update_weights(filter_key="btsp_filtered_inputs", O=O)
             self.history["btsp_events"].append(
@@ -960,12 +960,13 @@ class BTSPLayer(HebbianLayer):
                 if target not in chosen_neurons:
                     continue
 
-                i = chosen_neurons.index(target)
+                i = chosen_neurons.index(target)  # type: ignore[arg-type]
 
                 pos = self.Agent.history["pos"][event + startid]
                 if self.Agent.Environment.dimensionality == "1D":
                     sub_ax = axes
-                    pos = np.asarray(pos + [sub_ax.get_ylim()[0]])
+                    y_pos = np.diff(sub_ax.get_ylim())[0] * 0.1 + sub_ax.get_ylim()[0]
+                    pos = np.asarray(pos + [y_pos])
                 else:
                     sub_ax = axes.ravel()[
                         i
@@ -1110,7 +1111,7 @@ class NMDALayer(BTSPLayer):
         if self.btsp_learn and len(btsp_targets):
             if self.btsp_single:
                 keep_btsp_targets = np.asarray(
-                    [targ for targ in btsp_targets if self.btsp_to_date[targ] == 0]
+                    [targ for targ in btsp_targets if self.num_btsp_to_date[targ] == 0]
                 )
                 if len(keep_btsp_targets) == 0:
                     return
@@ -1120,7 +1121,7 @@ class NMDALayer(BTSPLayer):
             O = np.zeros(n)
             O[np.asarray(btsp_targets)] = btsp_fr
 
-            self.btsp_to_date[np.asarray(btsp_targets)] += +1
+            self.num_btsp_to_date[np.asarray(btsp_targets)] += +1
 
             self.update_weights(filter_key="btsp_filtered_inputs")
             self.history["btsp_events"].append(
