@@ -447,8 +447,10 @@ def plot_1D_env_info(
         fig, axes: Figure and axes.
     """
 
-    # 8 plots
-    height_ratios = [1, 1.2, 1.5, 2, 1, 1, 1, 1]
+    # 7 or 8 plots
+    height_ratios = [1, 1.2, 1.5, 1, 1, 1, 1]
+    if CA1_weights is not None:
+        height_ratios.insert(3, 2)  # add height ratio for weights
     gridspec_kw = {"height_ratios": height_ratios}
     figsize = plot_util.get_figsize(sum(height_ratios), squat_height=True)
     fig, axes = plt.subplots(
@@ -476,21 +478,22 @@ def plot_1D_env_info(
     axes_flat[2].set_title("CA3 rate map")
 
     # Plot CA1 weights
-    if CA1_weights is None:
-        axes_flat[3].axis("off")
-        axes_flat[3].set_title("Input weights across learning")
-    else:
+    i = 3
+    if CA1_weights is not None:
         plot_util.plot_1D_input_place_cell_weights(
             np.asarray(CA1_weights), CA3_PCs, fig=fig, ax=axes_flat[3], autosave=False
         )
+        i += 1
 
     # Plot CA1 rate maps across learning
     plot_util.plot_1D_rate_map_across_learning(
-        Ag, CA1s, fig=fig, axes=axes_flat[4:7], autosave=False  # type: ignore[arg-type]
+        Ag, CA1s, fig=fig, axes=axes_flat[i : i + 3], autosave=False  # type: ignore[arg-type]
     )
 
     # Plot environment
-    plot_util.plot_1D_reset_environment(Ag, fig=fig, ax=axes_flat[7], autosave=False)
+    plot_util.plot_1D_reset_environment(
+        Ag, fig=fig, ax=axes_flat[i + 3], autosave=False
+    )
 
     for a, ax_ in enumerate(axes_flat[:-1]):
         ax_.set_xlabel("")

@@ -1,6 +1,5 @@
 import copy
 from typing import TYPE_CHECKING, Any, Sequence
-import warnings
 
 from matplotlib import pyplot as plt  # type: ignore[import]
 from matplotlib import markers
@@ -953,7 +952,7 @@ class BTSPLayer(HebbianLayer):
                 if event >= len(t):
                     continue
                 elif event < 0:
-                    alpha = 0.4
+                    alpha = 0.5
                 else:
                     alpha = 0.8
 
@@ -965,7 +964,7 @@ class BTSPLayer(HebbianLayer):
                 pos = self.Agent.history["pos"][event + startid]
                 if self.Agent.Environment.dimensionality == "1D":
                     sub_ax = axes
-                    y_pos = np.diff(sub_ax.get_ylim())[0] * 0.1 + sub_ax.get_ylim()[0]
+                    y_pos = sub_ax.get_ylim()[1] - np.diff(sub_ax.get_ylim())[0] * 0.03
                     pos = np.asarray(pos + [y_pos])
                 else:
                     sub_ax = axes.ravel()[
@@ -973,10 +972,11 @@ class BTSPLayer(HebbianLayer):
                     ]  ### WILL THIS WORK? ARE THERE MULTIPLE AXES?
                 sub_ax.scatter(
                     *pos,
-                    color="k",
+                    color=self.color,
                     alpha=alpha,
                     marker=markers.MarkerStyle("x"),
                     s=10,
+                    zorder=20,
                 )
 
         util.save_figure(fig, f"{self.name}_ratemaps", save=autosave)  # type: ignore[attr-defined]

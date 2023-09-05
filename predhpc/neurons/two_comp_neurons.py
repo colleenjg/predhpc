@@ -1,7 +1,10 @@
 import copy
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Sequence
+
 import warnings
 
+from matplotlib import pyplot as plt
+from matplotlib import figure as mpl_figure
 import numpy as np
 
 from predhpc import util, plot_util
@@ -37,6 +40,8 @@ class TwoCompLayer:
         "soma_to_dend_weight": 0.5,
         "dend_to_soma_weight": 0.5,
         "dend_first": False,
+        "soma_color": "C0",
+        "dend_color": "C1",
         "inhibit_dend": True,
         "inhibit_color": None,
         "inhibit_weight": 0.5,  # multiplied by -1 identity matrix
@@ -219,4 +224,103 @@ class TwoCompLayer:
 
         return
 
-    ##### write a plot_rate_map and a plot_rate_timeseries that shows both compartments
+    def plot_rate_map(
+        self,
+        fig: mpl_figure.Figure | None = None,
+        axes: plt.Axes | None = None,
+        no_legend: bool = False,
+        autosave: bool | None = None,
+        **kwargs,
+    ) -> tuple[mpl_figure.Figure, np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]]:
+        """Plot the rate map of the soma and dendritic layers, overlayed, ensuring no
+        more than 20 columns are plotted.
+
+        Args:
+            fig (mpl_figure.Figure, optional): Figure object. Defaults to None.
+            axes (plt.Axes, optional): Axes object. Defaults to None.
+            no_legend (bool, optional): Whether to remove the legend. Defaults to False.
+            autosave (bool, optional): Whether to autosave the figure. Defaults to None.
+
+        Returns:
+            mpl_figure.Figure: Figure object.
+            plt.Axes: Axes object.
+        """
+
+        fig, axes = self.SomaCompartment.plot_rate_map(
+            fig=fig,
+            axes=axes,
+            autosave=False,
+            no_legend=no_legend,
+            **kwargs,
+        )
+
+        self.DendriteCompartment.plot_rate_map(
+            fig=fig,
+            axes=axes,
+            autosave=False,
+            no_legend=no_legend,
+            **kwargs,
+        )
+
+        if not no_legend:
+            if self.Agent.Environment.dimensionality == "1D":
+                sub_ax = axes
+            else:
+                sub_ax = axes.ravel()[0]
+            sub_ax.plot([], [], color=self.SomaCompartment.color, label="soma")
+            sub_ax.plot([], [], color=self.DendriteCompartment.color, label="dend")
+            sub_ax.legend()
+
+        util.save_figure(fig, f"{self.name}_ratemaps", save=autosave)  # type: ignore[attr-defined]
+
+        return fig, axes
+
+    def plot_rate_timeseries(
+        self,
+        fig: mpl_figure.Figure | None = None,
+        ax: plt.Axes | None = None,
+        soma_color: str | None = None,
+        dend_color: str | None = None,
+        autosave: bool | None = None,
+        **kwargs,
+    ) -> tuple[mpl_figure.Figure, np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]]:
+        """Plot a timeseries of the firing rate of the soma and dendritic layers of a
+        neuron, overlayed.
+
+        Args:
+            fig (mpl_figure.Figure, optional): Figure object. Defaults to None.
+            axes (plt.Axes, optional): Axes object. Defaults to None.
+            soma_color (str, optional): Color for soma compartment. Defaults to None.
+            dend_color (str, optional): Color for dendrite compartment. Defaults to None.
+            autosave (bool, optional): Whether to autosave the figure. Defaults to None.
+
+        Returns:
+            mpl_figure.Figure: Figure object.
+            plt.Axes: Axes object.
+        """
+
+        soma_color = soma_color or self.SomaCompartment.color
+        fig, ax = self.SomaCompartment.plot_rate_timeseries(
+            fig=fig,
+            ax=ax,
+            color=soma_color,
+            autosave=False,
+            **kwargs,
+        )
+
+        dend_color = dend_color or self.DendriteCompartment.color
+        self.DendriteCompartment.plot_rate_timeseries(
+            fig=fig,
+            ax=ax,
+            color=dend_color,
+            autosave=False,
+            **kwargs,
+        )
+
+        ax.plot([], [], color=soma_color, label="soma")
+        ax.plot([], [], color=dend_color, label="dend")
+        ax.legend()
+
+        util.save_figure(fig, f"{self.name}_firingrate", save=autosave)  # type: ignore[attr-defined]
+
+        return fig, axes
