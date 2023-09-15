@@ -266,10 +266,10 @@ class TwoCompLayer:
             if self.Agent.Environment.dimensionality == "1D":
                 sub_ax = axes
             else:
-                sub_ax = axes.ravel()[0]
+                sub_ax = axes.ravel()[-1]
             sub_ax.plot([], [], color=self.SomaCompartment.color, label="soma")
             sub_ax.plot([], [], color=self.DendriteCompartment.color, label="dend")
-            sub_ax.legend()
+            sub_ax.legend(loc="lower right")
 
         util.save_figure(fig, f"{self.name}_ratemaps", save=autosave)  # type: ignore[attr-defined]
 
@@ -323,4 +323,4 @@ class TwoCompLayer:
 
         util.save_figure(fig, f"{self.name}_firingrate", save=autosave)  # type: ignore[attr-defined]
 
-        return fig, axes
+        return fig, ax

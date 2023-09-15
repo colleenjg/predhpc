@@ -237,7 +237,7 @@ def plot_time_series_with_btsp_events(
             y_hei,
             marker=markers.MarkerStyle("x"),
             s=8,
-            color="k",
+            color=(CA1s.color or "k"),
             alpha=0.7,
         )
 
@@ -253,7 +253,7 @@ def plot_time_series_with_btsp_events(
             y_hei,
             marker=markers.MarkerStyle("o"),
             s=6,
-            color="k",
+            color=(CA1s.color or "k"),
             alpha=0.7,
         )
 
@@ -557,17 +557,7 @@ def plot_1D_time_info(
         autosave=False,
     )
     axes_flat[2].set_title("CA1 rate timeseries")
-    lo, hi = axes_flat[2].get_ylim()
-    for t in CA1s.history["btsp_events"]:
-        y_hei = lo + (hi - lo) * 0.95
-        axes_flat[2].scatter(
-            CA1s.history["t"][t] / 60,
-            y_hei,
-            marker=markers.MarkerStyle("x"),
-            s=8,
-            color="k",
-            alpha=0.7,
-        )
+
     for end_point, ls in [
         ("reset", "dashed"),
         ("target", "dotted"),
