@@ -9,6 +9,7 @@ import numpy as np
 
 from ratinabox.Neurons import Neurons, FeedForwardLayer  # type: ignore[import]
 from ratinabox import utils as rutils  # type: ignore[import]
+from ratinabox import MOUNTAIN_PLOT_OVERLAP, MOUNTAIN_PLOT_SHIFT_MM  # type: ignore[import]
 
 from predhpc import util, plot_util
 
@@ -874,16 +875,16 @@ class BTSPLayer(HebbianLayer):
         _, startid, _ = self.get_plotting_times(t_start=t_start)
 
         btsp_events = np.asarray(self.history["btsp_events"]) - startid
-        btsp_targets = np.asarray(self.history["btsp_targets"])
+        btsp_targets = self.history["btsp_targets"]
         btsp_mask = (btsp_events >= 0) & (btsp_events < len(t))
 
         miny, maxy = ax.get_ylim()
 
         flat_btsp_events = list()  # type: list[int]
         flat_btsp_targets = list()  # type: list[int]
-        for ev, targ in zip(btsp_events[btsp_mask], btsp_targets[btsp_mask]):
-            flat_btsp_targets.extend(targ)
-            flat_btsp_events.extend([ev for _ in range(len(targ))])
+        for ev, targs in zip(btsp_events[btsp_mask], btsp_targets[btsp_mask]):
+            flat_btsp_targets.extend(targs)
+            flat_btsp_events.extend([ev for _ in range(len(targs))])
 
         flat_btsp_events_arr = np.array(flat_btsp_events)
         flat_btsp_targets_arr = np.array(flat_btsp_targets)  # type: ignore[arg-type]
@@ -944,191 +945,46 @@ class BTSPLayer(HebbianLayer):
 
         if mark_btsp:
             chosen_neurons = self.return_list_of_neurons(chosen_neurons=chosen_neurons)  # type: ignore[arg-type]
+            num_neurons = len(chosen_neurons)
+
             t, startid, _ = self.get_plotting_times(t_start=t_start, t_end=t_end)
 
             btsp_events = np.asarray(self.history["btsp_events"]) - startid
-            btsp_targets = np.asarray(self.history["btsp_targets"])
+            btsp_targets = self.history["btsp_targets"]
 
-            for event, target in zip(btsp_events, btsp_targets):
-                if event >= len(t):
-                    continue
-                elif event < 0:
-                    alpha = 0.4
-                else:
-                    alpha = 0.8
+            for event, targets in zip(btsp_events, btsp_targets):
+                for target in targets:
+                    if event >= len(t):
+                        continue
+                    elif event < 0:
+                        alpha = 0.4
+                    else:
+                        alpha = 0.8
 
-                if target not in chosen_neurons:
-                    continue
+                    if target not in chosen_neurons:
+                        continue
 
-                i = chosen_neurons.index(target)
+                    i = chosen_neurons.index(target)
 
-                pos = self.Agent.history["pos"][event + startid]
-                if self.Agent.Environment.dimensionality == "1D":
-                    sub_ax = axes
-                    pos = np.asarray(pos + [sub_ax.get_ylim()[0]])
-                else:
-                    sub_ax = axes.ravel()[
-                        i
-                    ]  ### WILL THIS WORK? ARE THERE MULTIPLE AXES?
-                sub_ax.scatter(
-                    *pos,
-                    color="k",
-                    alpha=alpha,
-                    marker=markers.MarkerStyle("x"),
-                    s=10,
-                )
+                    pos = self.Agent.history["pos"][event + startid]
+                    if self.Agent.Environment.dimensionality == "1D":
+                        sub_ax = axes
+                        line_sep = (sub_ax.get_ylim()[1] - 1) / num_neurons
+                        y_pos = 1 + line_sep * i + line_sep * 0.7
+                        pos = pos + [y_pos]
+                    else:
+                        sub_ax = axes.ravel()[i]
+                    sub_ax.scatter(
+                        *pos,
+                        color="k",
+                        alpha=alpha,
+                        marker=markers.MarkerStyle("x"),
+                        s=10,
+                    )
 
         util.save_figure(fig, f"{self.name}_ratemaps", save=autosave)  # type: ignore[attr-defined]
 
         return fig, axes
-
-
-class NMDALayer(BTSPLayer):
-    """This trained class defines a population of neurons that tune their activity
-    through Hebbian learning with BTSP and NMDA receptors.
-    This class is a subclass of Neurons() and inherits its properties/plotting
-    functions.
-
-    Must be initialised with an Agent, and a "params" dictionary, including input
-    layers.
-
-    List of functions:
-        • get_state()
-        • set_freeze()
-        • set_learn()
-        • add_input()
-        • update()
-        • plot_rate_map()
-        • plot_loss()
-    """
-
-    default_params = {
-        "n": 10,
-        "name": "NMDALayer",
-        "NMDA_activation_threshold": 0.8,
-        "BTSP_induction_threshold": 0.8,
-        "BTSP_plateau_length": 0.1,  # seconds
-    }
-
-    ignored_param_keys = list()
-    ignored_params = {key: None for key in ignored_param_keys}
-
-    fixed_params = dict()
-
-    def __init__(self, Agent: "ratinabox.Agent", params: dict[str, Any] = dict()):
-        """Initialise HebbianLayer(), takes as input a parameter
-        dictionary. Any values not provided by the params dictionary are
-        taken from a default dictionary below.
-
-        Args:
-            params (dict, optional). Defaults to dict().
-        """
-
-        self.Agent = Agent
-
-        self.check_if_ignored_params(params)
-
-        self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
-        self.params.update(params)
-
-        super().__init__(Agent, self.params)
-
-        self._add_NMDA_current()
-
-        self.ramp_to_btsp = np.zeros(self.n).astype(float)  # type: ignore[attr-defined]
-
-        return
-
-    def _add_NMDA_current(self):
-        """Set the NMDA intermediate layer."""
-
-        self.NMDACurrent = NMDACurrent(
-            self,
-            name="NMDACurrent",
-            NMDA_activation_threshold=self.NMDA_activation_threshold,  # type: ignore[attr-defined]
-            color=self.color,  # type: ignore[attr-defined]
-            save_history=self.save_history,  # type: ignore[attr-defined]
-        )
-
-        self.add_input(self.NMDACurrent, w=np.eye(self.n))  # type: ignore[attr-defined]
-
-        return self.NMDACurrent
-
-    def get_incoming_firingrates(self, evaluate_at="last", **kwargs):
-        """Returns the firing rates coming into each neuron. By default this layer uses
-        the last saved firingrate from its input layers. Alternatively evaluate_at and
-        kwargs can be set to be anything else which will just be passed to the input
-        layer for evaluation.
-
-        Once the firing rate of the input layers is established these are multiplied by
-        a normalized weight matrix of 1s.
-
-        NOTE: This means that pre-synaptic plasticity is ignored, and all input neurons
-        are equipotent. May have to be rethought.
-
-        Args:
-            evaluate_at (str, optional). Defaults to 'last'.
-        Returns:
-            firingrate: array of firing rates
-        """
-
-        n = int(self.n)  # type: ignore[attr-defined]
-
-        if evaluate_at == "last":
-            V = np.zeros(n)
-        elif evaluate_at == "all":
-            V = np.zeros((n, self.Agent.Environment.flattened_discrete_coords.shape[0]))
-        else:
-            V = np.zeros((n, kwargs["pos"].shape[0]))
-
-        for name, inputlayer in self.inputs.items():
-            if name == self.NMDACurrent.name:
-                continue
-            w_ones = np.ones_like(inputlayer["w"])
-            if evaluate_at == "last":
-                I = inputlayer["layer"].firingrate
-            else:  # kick can down the road let input layer decide how to evaluate the firingrate. this is core to feedforward layer as this recursive call will backprop through the upstraem layers until it reaches a "core" (e.g. place cells) layer which will then evaluate the firingrate.
-                I = inputlayer["layer"].get_state(evaluate_at, **kwargs)
-            inputlayer["I_temp"] = I
-            V += np.matmul(w_ones, I)
-
-        return V
-
-    def update(self):
-        filter_tau, btsp_tau = self.filter_tau, self.btsp_tau  # type: ignore[attr-defined]
-        self.update_filtered_inputs(filter_tau, filter_key="filtered_inputs")
-        self.update_filtered_inputs(btsp_tau, filter_key="btsp_filtered_inputs")
-
-        self.NMDACurrent.update()
-        super().update()
-
-        above_threshold = self.firingrate > self.BTSP_induction_threshold  # type: ignore[attr-defined]
-        self.ramp_to_btsp[~above_threshold] = 0
-        self.ramp_to_btsp[above_threshold] += self.Agent.dt / self.BTSP_plateau_length  # type: ignore[attr-defined]
-
-        btsp_targets = np.where(self.ramp_to_btsp >= 1)[0]
-        if self.btsp_learn and len(btsp_targets):
-            if self.btsp_single:
-                keep_btsp_targets = np.asarray(
-                    [targ for targ in btsp_targets if self.btsp_to_date[targ] == 0]
-                )
-                if len(keep_btsp_targets) == 0:
-                    return
-                btsp_targets = keep_btsp_targets
-
-            n, btsp_fr = self.n, self.btsp_fr  # type: ignore[attr-defined]
-            O = np.zeros(n)
-            O[np.asarray(btsp_targets)] = btsp_fr
-
-            self.btsp_to_date[np.asarray(btsp_targets)] += +1
-
-            self.update_weights(filter_key="btsp_filtered_inputs")
-            self.history["btsp_events"].append(
-                self.num_steps_total - 1
-            )  # recorded after update
-            self.history["btsp_targets"].append(btsp_targets)
-
-        return
 
 
 class NMDACurrent:
@@ -1437,3 +1293,151 @@ class NMDACurrent:
         util.save_figure(fig, f"{self.name}_NMDA_current_traces", save=autosave)  # type: ignore[attr-defined]
 
         return fig, axes
+
+
+class NMDALayer(BTSPLayer):
+    """This trained class defines a population of neurons that tune their activity
+    through Hebbian learning with BTSP and NMDA receptors.
+    This class is a subclass of Neurons() and inherits its properties/plotting
+    functions.
+
+    Must be initialised with an Agent, and a "params" dictionary, including input
+    layers.
+
+    List of functions:
+        • get_state()
+        • set_freeze()
+        • set_learn()
+        • add_input()
+        • update()
+        • plot_rate_map()
+        • plot_loss()
+    """
+
+    default_params = {
+        "n": 10,
+        "name": "NMDALayer",
+        "NMDA_activation_threshold": 0.8,
+        "BTSP_induction_threshold": 0.8,
+        "BTSP_plateau_length": 0.1,  # seconds
+    }
+
+    ignored_param_keys = list()
+    ignored_params = {key: None for key in ignored_param_keys}
+
+    fixed_params = dict()
+
+    def __init__(self, Agent: "ratinabox.Agent", params: dict[str, Any] = dict()):
+        """Initialise HebbianLayer(), takes as input a parameter
+        dictionary. Any values not provided by the params dictionary are
+        taken from a default dictionary below.
+
+        Args:
+            params (dict, optional). Defaults to dict().
+        """
+
+        self.Agent = Agent
+
+        self.check_if_ignored_params(params)
+
+        self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
+        self.params.update(params)
+
+        super().__init__(Agent, self.params)
+
+        self._add_NMDA_current()
+
+        self.ramp_to_btsp = np.zeros(self.n).astype(float)  # type: ignore[attr-defined]
+
+        return
+
+    def _add_NMDA_current(self):
+        """Set the NMDA intermediate layer."""
+
+        self.NMDACurrent = NMDACurrent(
+            self,
+            name="NMDACurrent",
+            NMDA_activation_threshold=self.NMDA_activation_threshold,  # type: ignore[attr-defined]
+            color=self.color,  # type: ignore[attr-defined]
+            save_history=self.save_history,  # type: ignore[attr-defined]
+        )
+
+        self.add_input(self.NMDACurrent, w=np.eye(self.n))  # type: ignore[attr-defined]
+
+        return self.NMDACurrent
+
+    def get_incoming_firingrates(self, evaluate_at="last", **kwargs):
+        """Returns the firing rates coming into each neuron. By default this layer uses
+        the last saved firingrate from its input layers. Alternatively evaluate_at and
+        kwargs can be set to be anything else which will just be passed to the input
+        layer for evaluation.
+
+        Once the firing rate of the input layers is established these are multiplied by
+        a normalized weight matrix of 1s.
+
+        NOTE: This means that pre-synaptic plasticity is ignored, and all input neurons
+        are equipotent. May have to be rethought.
+
+        Args:
+            evaluate_at (str, optional). Defaults to 'last'.
+        Returns:
+            firingrate: array of firing rates
+        """
+
+        n = int(self.n)  # type: ignore[attr-defined]
+
+        if evaluate_at == "last":
+            V = np.zeros(n)
+        elif evaluate_at == "all":
+            V = np.zeros((n, self.Agent.Environment.flattened_discrete_coords.shape[0]))
+        else:
+            V = np.zeros((n, kwargs["pos"].shape[0]))
+
+        for name, inputlayer in self.inputs.items():
+            if name == self.NMDACurrent.name:
+                continue
+            w_ones = np.ones_like(inputlayer["w"])
+            if evaluate_at == "last":
+                I = inputlayer["layer"].firingrate
+            else:  # kick can down the road let input layer decide how to evaluate the firingrate. this is core to feedforward layer as this recursive call will backprop through the upstraem layers until it reaches a "core" (e.g. place cells) layer which will then evaluate the firingrate.
+                I = inputlayer["layer"].get_state(evaluate_at, **kwargs)
+            inputlayer["I_temp"] = I
+            V += np.matmul(w_ones, I)
+
+        return V
+
+    def update(self):
+        filter_tau, btsp_tau = self.filter_tau, self.btsp_tau  # type: ignore[attr-defined]
+        self.update_filtered_inputs(filter_tau, filter_key="filtered_inputs")
+        self.update_filtered_inputs(btsp_tau, filter_key="btsp_filtered_inputs")
+
+        self.NMDACurrent.update()
+        super().update()
+
+        above_threshold = self.firingrate > self.BTSP_induction_threshold  # type: ignore[attr-defined]
+        self.ramp_to_btsp[~above_threshold] = 0
+        self.ramp_to_btsp[above_threshold] += self.Agent.dt / self.BTSP_plateau_length  # type: ignore[attr-defined]
+
+        btsp_targets = np.where(self.ramp_to_btsp >= 1)[0]
+        if self.btsp_learn and len(btsp_targets):
+            if self.btsp_single:
+                keep_btsp_targets = np.asarray(
+                    [targ for targ in btsp_targets if self.btsp_to_date[targ] == 0]
+                )
+                if len(keep_btsp_targets) == 0:
+                    return
+                btsp_targets = keep_btsp_targets
+
+            n, btsp_fr = self.n, self.btsp_fr  # type: ignore[attr-defined]
+            O = np.zeros(n)
+            O[np.asarray(btsp_targets)] = btsp_fr
+
+            self.btsp_to_date[np.asarray(btsp_targets)] += +1
+
+            self.update_weights(filter_key="btsp_filtered_inputs")
+            self.history["btsp_events"].append(
+                self.num_steps_total - 1
+            )  # recorded after update
+            self.history["btsp_targets"].append(btsp_targets.tolist())
+
+        return
