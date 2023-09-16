@@ -526,7 +526,7 @@ def plot_1D_time_info(
     """
 
     # 3 plots
-    height_ratios = [1.5, 1, 1]
+    height_ratios = [1.5, 1, 1.1**CA1s.n]
     gridspec_kw = {"height_ratios": height_ratios}
     figsize = plot_util.get_figsize(sum(height_ratios), squat_height=True)
     fig, axes = plt.subplots(

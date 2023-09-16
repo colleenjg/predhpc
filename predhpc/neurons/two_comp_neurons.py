@@ -227,7 +227,7 @@ class TwoCompLayer:
     def plot_rate_map(
         self,
         fig: mpl_figure.Figure | None = None,
-        axes: plt.Axes | None = None,
+        ax: plt.Axes | None = None,
         no_legend: bool = False,
         autosave: bool | None = None,
         **kwargs,
@@ -237,7 +237,7 @@ class TwoCompLayer:
 
         Args:
             fig (mpl_figure.Figure, optional): Figure object. Defaults to None.
-            axes (plt.Axes, optional): Axes object. Defaults to None.
+            ax (plt.Axes, optional): Axes object. Defaults to None.
             no_legend (bool, optional): Whether to remove the legend. Defaults to False.
             autosave (bool, optional): Whether to autosave the figure. Defaults to None.
 
@@ -246,9 +246,9 @@ class TwoCompLayer:
             plt.Axes: Axes object.
         """
 
-        fig, axes = self.SomaCompartment.plot_rate_map(
+        fig, ax = self.SomaCompartment.plot_rate_map(
             fig=fig,
-            axes=axes,
+            ax=ax,
             autosave=False,
             no_legend=no_legend,
             **kwargs,
@@ -256,7 +256,7 @@ class TwoCompLayer:
 
         self.DendriteCompartment.plot_rate_map(
             fig=fig,
-            axes=axes,
+            ax=ax,
             autosave=False,
             no_legend=no_legend,
             **kwargs,
@@ -264,16 +264,16 @@ class TwoCompLayer:
 
         if not no_legend:
             if self.Agent.Environment.dimensionality == "1D":
-                sub_ax = axes
+                sub_ax = ax
             else:
-                sub_ax = axes.ravel()[-1]
+                sub_ax = ax.ravel()[-1]
             sub_ax.plot([], [], color=self.SomaCompartment.color, label="soma")
             sub_ax.plot([], [], color=self.DendriteCompartment.color, label="dend")
             sub_ax.legend(loc="lower right")
 
         util.save_figure(fig, f"{self.name}_ratemaps", save=autosave)  # type: ignore[attr-defined]
 
-        return fig, axes
+        return fig, ax
 
     def plot_rate_timeseries(
         self,

@@ -924,7 +924,6 @@ class BTSPLayer(HebbianLayer):
 
     def _add_btsp_to_mountain_plots(
         self,
-        fig: mpl_figure.Figure,
         axes: np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]] | plt.Axes,
         t_start: float | None = None,
         t_end: float | None = None,
@@ -1042,7 +1041,6 @@ class BTSPLayer(HebbianLayer):
 
         if mark_btsp:
             self._add_btsp_to_mountain_plots(
-                fig,
                 axes,
                 t_start=t_start,
                 t_end=t_end,
@@ -1103,7 +1101,6 @@ class BTSPLayer(HebbianLayer):
 
         if mark_btsp:
             self._add_btsp_to_mountain_plots(
-                fig,
                 ax,
                 t_start=t_start,
                 t_end=t_end,
