@@ -422,7 +422,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         """
 
         num_novel, num_reward, num_teleport = 0, 0, 0
-        for object_type in self.object_types:  # type: ignore[attr-defined]
+        for object_type in self.objects["object_types"]:  # type: ignore[attr-defined]
             object_name = self.object_type_num_to_name_dict[object_type]
             if object_name == "novel":
                 num_novel += 1

@@ -219,9 +219,14 @@ class LearnLayer(FeedForwardLayer, util.ParamsManagerMixin):
         prop_each: float = 0.4,
         normalize_together: bool = True,
         title: str | None = None,
+        chosen_neurons: str
+        | int
+        | list[int]
+        | np.ndarray[tuple[int], np.dtype[np.int64]] = "all",
         fig: mpl_figure.Figure | None = None,
         axes: np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]] | None = None,
         autosave: bool | None = None,
+        **kwargs,
     ):
         """Plot the rate maps of the layer across learning.
 
@@ -232,24 +237,58 @@ class LearnLayer(FeedForwardLayer, util.ParamsManagerMixin):
             normalize_together (bool, optional): Whether to normalize the maps
                 together. Defaults to True.
             title (str, optional): Title of the plot. Defaults to None.
+            chosen_neurons (str or array, optional): Neurons to plot. Defaults to "all".
             fig (mpl_figure.Figure, optional): Figure object. Defaults to None.
             axes (np.ndarray, optional): Axes object. Defaults to None.
             autosave (bool, optional): Whether to save the figure. Defaults to None.
+
+        Keyword Args:
+            **kwargs: Keyword arguments for the plot_rate_map() function.
 
         Returns:
             fig, axes: Figure and axes objects.
         """
 
+        chosen_neurons = self.return_list_of_neurons(chosen_neurons=chosen_neurons)  # type: ignore[arg-type, attr-defined]
+
+        # initialize axes
         if fig is None or axes is None:
-            fig, axes = plt.subplots(ncols=num_maps, figsize=(num_maps * 3, 3))
-
-        flat_axes = np.asarray(axes).reshape(-1)
-
-        if len(flat_axes) != num_maps:
-            raise ValueError(
-                f"Number of axes ({len(flat_axes)}) does not match number of "
-                f"maps ({num_maps})."
+            if len(chosen_neurons) == 1:
+                ncols = num_maps
+                nrows = len(chosen_neurons)
+                row = "chosen_neurons"
+            else:
+                ncols = len(chosen_neurons)
+                nrows = num_maps
+                row = "num_maps"
+            fig, axes = plt.subplots(
+                ncols=ncols,
+                nrows=nrows,
+                figsize=(ncols * 3, nrows * 3),
+                squeeze=False,
             )
+        else:
+            axes = axes.reshape(len(axes), -1)
+            nrows, ncols = axes.shape
+            if len(chosen_neurons) >= num_maps:
+                row = "chosen_neurons" if nrows >= ncols else ncols
+            else:
+                row = "num_maps" if nrows >= ncols else ncols
+
+            rows_needed = len(chosen_neurons) if row == "chosen_neurons" else num_maps
+            cols_needed = num_maps if row == "chosen_neurons" else len(chosen_neurons)
+
+            if len(axes) < len(rows_needed):
+                row_str = "neurons" if row == "chosen_neurons" else "maps"
+                raise ValueError(
+                    f"Insufficient number of rows for number of {row_str}."
+                )
+
+            if len(axes) < len(cols_needed):
+                col_str = "maps" if row == "chosen_neurons" else "neurons"
+                raise ValueError(
+                    f"Insufficient number of columns for number of {col_str}."
+                )
 
         t = self.history["t"]
         n_pts = int(prop_each * len(t))
@@ -257,18 +296,21 @@ class LearnLayer(FeedForwardLayer, util.ParamsManagerMixin):
 
         subplots = []
         for i, start in enumerate(start_pts):
+            map_axes = axes[i] if row == "num_maps" else axes[:, i]
             t_start = t[start]
             stop = min([len(t) - 1, start + n_pts])
             t_end = t[stop]
-            flat_axes[i].set_title(f"From {t_start / 60:.2f} to {t_end / 60:.2f} min.")
+            map_axes[0].set_title(f"From {t_start / 60:.2f} to {t_end / 60:.2f} min.")
 
-            _, map_axes = self.plot_rate_map(
+            self.plot_rate_map(
                 fig=fig,
-                ax=flat_axes[i],
+                ax=map_axes,
                 t_start=t_start,
                 t_end=t_end,
                 method="history",
                 colorbar=False,
+                chosen_neurons=chosen_neurons,
+                autosave=False,
             )
 
             subplots.append(map_axes.reshape(-1)[0])
@@ -716,6 +758,7 @@ class BTSPLayer(HebbianLayer):
         "btsp_tau": 3,
         "btsp_fr": 1,
         "btsp_single": False,
+        "btsp_distance_prop": 10,
     }
 
     ignored_param_keys = list()
@@ -745,6 +788,8 @@ class BTSPLayer(HebbianLayer):
         self.history["btsp_targets"] = list()
 
         self.num_btsp_to_date = np.zeros(self.n)  # type: ignore[attr-defined]
+        self.last_btsp_step = np.full(self.n, np.nan)  # type: ignore[attr-defined]
+        self.last_btsp_pos = [None for _ in range(self.n)]  # type: ignore[attr-defined]
 
         if self.use_targets:  # type: ignore[attr-defined]
             raise ValueError("BTSPLayer does not support targets.")
@@ -821,15 +866,37 @@ class BTSPLayer(HebbianLayer):
                 keep_btsp_targets = np.asarray(
                     [targ for targ in btsp_targets if self.num_btsp_to_date[targ] == 0]
                 )
-                if len(keep_btsp_targets) == 0:
-                    return
-                btsp_targets = keep_btsp_targets
+
+            else:
+                keep_btsp_targets = list()
+                for targ in btsp_targets:
+                    closest_recent_btsp_event = self.last_btsp_pos[targ]
+                    if closest_recent_btsp_event is None:
+                        keep_btsp_targets.append(targ)
+                    else:
+                        dist = np.sqrt(
+                            np.sum(
+                                (self.Agent.pos - closest_recent_btsp_event) ** 2,
+                                axis=-1,
+                            )
+                        )
+                        if dist > self.btsp_distance_prop * self.Agent.dt:
+                            keep_btsp_targets.append(targ)
+
+                keep_btsp_targets = np.asarray(keep_btsp_targets)
+
+            if len(keep_btsp_targets) == 0:
+                return
+            btsp_targets = keep_btsp_targets
 
             n, btsp_fr = self.n, self.btsp_fr  # type: ignore[attr-defined]
             O = np.zeros(n)
             O[np.asarray(btsp_targets)] = btsp_fr
 
             self.num_btsp_to_date[np.asarray(btsp_targets)] += +1
+            self.last_btsp_step[np.asarray(btsp_targets)] = self.num_steps_total - 1
+            for targ in btsp_targets:
+                self.last_btsp_pos[targ] = self.Agent.pos
 
             self.update_weights(filter_key="btsp_filtered_inputs", O=O)
             self.history["btsp_events"].append(
@@ -959,7 +1026,7 @@ class BTSPLayer(HebbianLayer):
         chosen_neurons = self.return_list_of_neurons(chosen_neurons=chosen_neurons)  # type: ignore[arg-type]
         num_neurons = len(chosen_neurons)
 
-        t, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
+        t, startid, _ = self.get_plotting_times(t_start=t_start, t_end=t_end)
 
         btsp_events = np.asarray(self.history["btsp_events"]) - startid
         btsp_targets = self.history["btsp_targets"]
@@ -1554,15 +1621,37 @@ class NMDALayer(BTSPLayer):
                 keep_btsp_targets = np.asarray(
                     [targ for targ in btsp_targets if self.num_btsp_to_date[targ] == 0]
                 )
-                if len(keep_btsp_targets) == 0:
-                    return
-                btsp_targets = keep_btsp_targets
+
+            else:
+                keep_btsp_targets = list()
+                for targ in btsp_targets:
+                    closest_recent_btsp_event = self.last_btsp_pos[targ]
+                    if closest_recent_btsp_event is None:
+                        keep_btsp_targets.append(targ)
+                    else:
+                        dist = np.sqrt(
+                            np.sum(
+                                (self.Agent.pos - closest_recent_btsp_event) ** 2,
+                                axis=-1,
+                            )
+                        )
+                        if dist > self.btsp_distance_prop * self.Agent.dt:
+                            keep_btsp_targets.append(targ)
+
+                keep_btsp_targets = np.asarray(keep_btsp_targets)
+
+            if len(keep_btsp_targets) == 0:
+                return
+            btsp_targets = keep_btsp_targets
 
             n, btsp_fr = self.n, self.btsp_fr  # type: ignore[attr-defined]
             O = np.zeros(n)
             O[np.asarray(btsp_targets)] = btsp_fr
 
             self.num_btsp_to_date[np.asarray(btsp_targets)] += +1
+            self.last_btsp_step[np.asarray(btsp_targets)] = self.num_steps_total - 1
+            for targ in btsp_targets:
+                self.last_btsp_pos[targ] = self.Agent.pos
 
             self.update_weights(filter_key="btsp_filtered_inputs")
             self.history["btsp_events"].append(

@@ -9,10 +9,10 @@ from matplotlib import markers
 from matplotlib import figure as mpl_figure
 import numpy as np
 from tqdm import tqdm  # type: ignore[import]
-from ratinabox import Environment, PlaceCells, ObjectVectorCells  # type: ignore[import]
+from ratinabox import Environment, PlaceCells  # type: ignore[import]
 
 from predhpc import agent, env, plot_util, util
-from predhpc.neurons import learning_neurons, two_comp_neurons
+from predhpc.neurons import learning_neurons, two_comp_neurons, object_neurons
 
 
 SCALE = 1.0
@@ -37,11 +37,14 @@ AGENT_PARAMS_T_MAZE = {
 }
 
 EC_PARAMS_T_MAZE = {
-    "name": "EC_grid",
-    "n": 10,
-    "pref_object_dist": DT * 2,
-    "angle_spread_degrees": 30,
-    "max_fr": 10,
+    "name": "LEC",
+    # "n": 10,
+    # "pref_object_dist": DT * 2,
+    # "angle_spread_degrees": 30,
+    "description": "gaussian",
+    "widths": DT * 4,
+    "activation_params": {"activation": "sigmoid", "min_fr": 0, "max_fr": 10},
+    "color": "#22772E",
 }
 
 CA3_PC_PARAMS_T_MAZE = {
@@ -52,8 +55,9 @@ CA3_PC_PARAMS_T_MAZE = {
     "min_fr": 0,
     "max_fr": 10,
     "color": "C5",
-    "widths": DT * 8,
+    "widths": DT * 4,
     "wall_geometry": "line_of_sight",  # due to environment shape
+    "color": "#99193A",
 }
 
 CA1_PARAMS_T_MAZE = {
@@ -70,23 +74,26 @@ CA1_PARAMS_T_MAZE = {
 }
 
 CA1_TWO_COMP_PARAMS = {
-    "n": 1,
+    "n": 8,
     "name": "CA1_TwoComp",
     "biases": None,
     "lr": 1e-4,
-    "apply_Ojas_rule": True,
+    "apply_Ojas_rule": False,
+    "normalize_weights": True,
+    "btsp_single": True,
     "dend_init_weights_zero": False,
     "dend_w_init_loc": 0.03,
     "dend_w_init_scale": 0.01,  # fairly narrow distribution
     "soma_init_weights_zero": True,
-    "soma_to_dend_weight": 0.3,
-    "dend_to_soma_weight": 0.2,
+    "soma_to_dend_weight": 0.5,
+    "soma_w_init_scale": 0.2,  # fairly narrow distribution
+    "inhibit_dend": True,
     "inhibit_weight": 0.5,
-    "soma_btsp_tau": DT * 15,
-    "soma_btsp_fr": 80,
-    "soma_color": "C2",
-    "dend_color": "C3",
     "inhibit_color": "C3",
+    "soma_btsp_tau": DT * 15,
+    "soma_btsp_fr": 30,
+    "soma_color": "#3D3D79",
+    "dend_color": "#8787C9",
 }
 
 ### 1D (LINEAR TRACK) PARAMETERS ###
@@ -110,6 +117,14 @@ AGENT_PARAMS_1D = {
     "wait_between_targets": 30,
 }
 
+EC_PARAMS_1D = {
+    "name": "LEC",
+    "description": "gaussian",
+    "widths": DT * 4,
+    "activation_params": {"activation": "sigmoid", "min_fr": 0, "max_fr": 10},
+    "color": "#22772E",
+}
+
 CA3_PC_PARAMS_1D = {
     "name": "CA3_PCs",
     "n": 16,
@@ -119,6 +134,7 @@ CA3_PC_PARAMS_1D = {
     "max_fr": 10,
     "color": "C5",
     "widths": DT * 5,
+    "color": "#99193A",
 }
 
 CA1_PARAMS_1D = {
@@ -139,7 +155,7 @@ CA1_PARAMS_1D = {
 def plot_T_maze(
     Ag: agent.TAgent,
     CA3_PCs: PlaceCells,
-    CA1s_or_ECs: learning_neurons.BTSPLayer | ObjectVectorCells,
+    CA1s_or_ECs: learning_neurons.BTSPLayer | object_neurons.ObjectCells,
     method: str = "groundtruth",
     autosave: bool | None = None,
 ):
@@ -226,20 +242,20 @@ def plot_time_series_with_btsp_events(
     """
 
     if fig is None or ax is None:
-        fig, ax = plt.subplots(figsize=(5, 1))
+        fig, ax = plt.subplots(figsize=(6, 1.2**CA1s.n))
 
     CA1s.plot_rate_timeseries(chosen_neurons="all", spikes=True, fig=fig, ax=ax)
     lo, hi = ax.get_ylim()
-    for t in CA1s.history["btsp_events"]:
-        y_hei = lo + (hi - lo) * 0.95
-        ax.scatter(
-            CA1s.history["t"][t] / 60,
-            y_hei,
-            marker=markers.MarkerStyle("x"),
-            s=8,
-            color=(CA1s.color or "k"),
-            alpha=0.7,
-        )
+    # for t in CA1s.history["btsp_events"]:
+    #     y_hei = lo + (hi - lo) * 0.95
+    #     ax.scatter(
+    #         CA1s.history["t"][t] / 60,
+    #         y_hei,
+    #         marker=markers.MarkerStyle("x"),
+    #         s=8,
+    #         color=(CA1s.color or "k"),
+    #         alpha=0.7,
+    #     )
 
     target_reached_step = CA1s.Agent.target_df["reached_step"].to_numpy()  # type: ignore[attr-defined]
     if np.isnan(target_reached_step[-1]):
@@ -253,7 +269,7 @@ def plot_time_series_with_btsp_events(
             y_hei,
             marker=markers.MarkerStyle("o"),
             s=6,
-            color=(CA1s.color or "k"),
+            color="k",
             alpha=0.7,
         )
 
@@ -288,7 +304,7 @@ def learn_T_maze_btsp(
 ) -> tuple[
     Environment,
     agent.ResetableAgent,
-    ObjectVectorCells | None,
+    object_neurons.ObjectCells | None,
     PlaceCells,
     learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer,
 ]:
@@ -330,7 +346,7 @@ def learn_T_maze_btsp(
     if two_compartment:
         if EC_params is None:
             EC_params = EC_PARAMS_T_MAZE
-        ECs = ObjectVectorCells(Ag, params=EC_params)
+        ECs = object_neurons.ObjectCells(Ag, params=EC_params)
         CA1_params["dend_input_layers"] = [ECs]  # type: ignore[assignment]
         CA1_params["soma_input_layers"] = [CA3_PCs]  # type: ignore[assignment]
     else:
@@ -343,7 +359,7 @@ def learn_T_maze_btsp(
         CA1s = two_comp_neurons.TwoCompLayer(Ag, params=CA1_params)
         CA1s.set_btsp_learn(soma=True, dend=False)
         CA1s.set_btsp_freeze(soma=False, dend=True)
-        CA1s.set_freeze(inhibit=True)
+        CA1s.set_freeze(soma=False, dend=False, inhibit=True)
         CA1s_for_weights = CA1s.SomaCompartment
     else:
         CA1s = learning_neurons.BTSPLayer(Ag, params=CA1_params)
@@ -366,19 +382,26 @@ def learn_T_maze_btsp(
         CA3_PCs.update()
 
         # check whether a restart BTSP signal should go out
-        btsp_targets = []
-        if restarted and CA1s.n > 1:  # type: ignore[attr-defined]
-            btsp_targets = [CA1s.n - 1]  # type: ignore[attr-defined]
+        if not two_compartment:
+            btsp_targets = []
+            if restarted and CA1s.n > 1:  # type: ignore[attr-defined]
+                btsp_targets = [CA1s.n - 1]  # type: ignore[attr-defined]
 
-        # check whether a target BTSP signal should go out
-        if Ag.reached_target and len(Ag.target_df) == btsp_after_num_target_reaches + 1:
-            btsp_targets = [0]
+            # check whether a target BTSP signal should go out
+            if (
+                Ag.reached_target
+                and len(Ag.target_df) == btsp_after_num_target_reaches + 1
+            ):
+                btsp_targets = [0]
 
         # check for restart
         restarted = Ag.reached_end
 
         # run update
-        CA1s.update(btsp_targets=btsp_targets)
+        if two_compartment:
+            CA1s.update()
+        else:
+            CA1s.update(btsp_targets=btsp_targets)
         if not i % weight_recording_freq:
             CA1_weights.append(CA1s_for_weights.inputs[CA3_PCs.name]["w"].copy())  # type: ignore[attr-defined]
 
@@ -404,21 +427,9 @@ def learn_T_maze_btsp(
     else:
         plot_T_maze(Ag, CA3_PCs, CA1s, autosave=autosave, method="groundtruth")  # type: ignore[arg-type]
 
-    if two_compartment:
-        fig, _ = CA1s.DendriteCompartment.plot_rate_maps_across_learning()  # type: ignore[attr-defined]
-        fig.suptitle("Rate maps across learning (dendrites)", y=0.90)
-        fig, _ = CA1s.SomaCompartment.plot_rate_maps_across_learning()  # type: ignore[attr-defined]
-        fig.suptitle("Rate maps across learning (somata)", y=0.90)
-    else:
-        CA1s.plot_rate_maps_across_learning()  # type: ignore[attr-defined]
+    CA1s.plot_rate_maps_across_learning()  # type: ignore[attr-defined]
 
-    if two_compartment:
-        _, ax = plot_time_series_with_btsp_events(CA1s.DendriteCompartment)  # type: ignore[attr-defined]
-        ax.set_title("Time series with BTSP events and proximity to target (dendrites)")
-        _, ax = plot_time_series_with_btsp_events(CA1s.SomaCompartment)  # type: ignore[attr-defined]
-        ax.set_title("Time series with BTSP events and proximity to target (somata)")
-    else:
-        plot_time_series_with_btsp_events(CA1s)  # type: ignore[arg-type]
+    plot_time_series_with_btsp_events(CA1s)  # type: ignore[arg-type]
 
     return Env, Ag, ECs, CA3_PCs, CA1s
 
@@ -600,6 +611,7 @@ def learn_1D_btsp(
     weight_recording_freq: int = 100,
     use_Hebbian: bool = False,
     btsp_after_num_target_reaches: int = 5,
+    two_compartment: bool = False,
     autosave: bool | None = None,
 ) -> tuple[Environment, agent.ResetableAgent, PlaceCells, learning_neurons.BTSPLayer]:
     """Run a 1D learning experiment with BTSP learning.
@@ -620,6 +632,8 @@ def learn_1D_btsp(
             Defaults to False.
         btsp_after_num_target_reaches (int, optional): Number of target reaches at which to
             apply BTSP event. Defaults to 5.
+        two_compartment (bool, optional): Whether to use two-compartment model.
+            Defaults to False.
         autosave (bool, optional): Whether to autosave the figure. Defaults to None.
 
     Returns:
@@ -633,7 +647,10 @@ def learn_1D_btsp(
 
     CA1_params = copy.copy(CA1_params)
     CA1_params["input_layers"] = [CA3_PCs]
-    CA1s = learning_neurons.BTSPLayer(Ag, params=CA1_params)
+    if two_compartment:
+        CA1s = two_comp_neurons.TwoCompLayer(Ag, params=CA1_params)
+    else:
+        CA1s = learning_neurons.BTSPLayer(Ag, params=CA1_params)
     if not use_Hebbian:
         CA1s.set_freeze()
     CA1s.set_btsp_learn()
@@ -649,20 +666,24 @@ def learn_1D_btsp(
         CA3_PCs.update()
 
         # check whether a restart BTSP signal should go out
-        btsp_targets = list()
-        if len(Ag.target_df) == btsp_after_num_target_reaches + 1:
-            if restarted and CA1s_n > 1:
-                btsp_targets = [CA1s_n - 1]
+        if not two_compartment:
+            btsp_targets = list()
+            if len(Ag.target_df) == btsp_after_num_target_reaches + 1:
+                if restarted and CA1s_n > 1:
+                    btsp_targets = [CA1s_n - 1]
 
-            # check whether a target BTSP signal should go out
-            if Ag.reached_target:
-                btsp_targets = [0]
+                # check whether a target BTSP signal should go out
+                if Ag.reached_target:
+                    btsp_targets = [0]
 
         # check for restart
         restarted = Ag.reached_end
 
         # run update
-        CA1s.update(btsp_targets=btsp_targets)
+        if two_compartment:
+            CA1s.update()
+        else:
+            CA1s.update(btsp_targets=btsp_targets)
         if not i % weight_recording_freq:
             CA1_weights.append(CA1s.inputs[CA3_PCs_name]["w"].copy())
 

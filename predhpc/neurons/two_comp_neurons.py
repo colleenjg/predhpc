@@ -228,6 +228,7 @@ class TwoCompLayer:
         self,
         fig: mpl_figure.Figure | None = None,
         ax: plt.Axes | None = None,
+        compartment: str | None = None,
         no_legend: bool = False,
         autosave: bool | None = None,
         **kwargs,
@@ -238,6 +239,9 @@ class TwoCompLayer:
         Args:
             fig (mpl_figure.Figure, optional): Figure object. Defaults to None.
             ax (plt.Axes, optional): Axes object. Defaults to None.
+            compartment (str, optional): Which compartment to plot, if environment is
+                2D ("soma", "dend" or "both"). Defaults to None
+                (i.e., "soma" if environment is 2D, and "both" otherwise).
             no_legend (bool, optional): Whether to remove the legend. Defaults to False.
             autosave (bool, optional): Whether to autosave the figure. Defaults to None.
 
@@ -246,27 +250,43 @@ class TwoCompLayer:
             plt.Axes: Axes object.
         """
 
-        fig, ax = self.SomaCompartment.plot_rate_map(
-            fig=fig,
-            ax=ax,
-            autosave=False,
-            no_legend=no_legend,
-            **kwargs,
-        )
-
-        self.DendriteCompartment.plot_rate_map(
-            fig=fig,
-            ax=ax,
-            autosave=False,
-            no_legend=no_legend,
-            **kwargs,
-        )
-
-        if not no_legend:
+        if compartment is None:
             if self.Agent.Environment.dimensionality == "1D":
-                sub_ax = ax
+                compartment = "both"
             else:
-                sub_ax = ax.ravel()[-1]
+                compartment = "soma"
+
+        if self.Agent.Environment.dimensionality == "2D" and compartment == "both":
+            warnings.warn(
+                "Plotting rate maps for both compartments in a 2D environment will "
+                "result in only the soma compartment appearing."
+            )
+
+        if compartment not in ["soma", "dend", "both"]:
+            raise ValueError(
+                f"compartment must be 'soma', 'dend' or 'both', not '{compartment}'."
+            )
+
+        if compartment in ["both", "dend"]:
+            self.DendriteCompartment.plot_rate_map(
+                fig=fig,
+                ax=ax,
+                autosave=False,
+                no_legend=no_legend,
+                **kwargs,
+            )
+
+        if compartment in ["both", "soma"]:
+            fig, ax = self.SomaCompartment.plot_rate_map(
+                fig=fig,
+                ax=ax,
+                autosave=False,
+                no_legend=no_legend,
+                **kwargs,
+            )
+
+        if not no_legend and self.Agent.Environment.dimensionality == "1D":
+            sub_ax = ax
             sub_ax.plot([], [], color=self.SomaCompartment.color, label="soma")
             sub_ax.plot([], [], color=self.DendriteCompartment.color, label="dend")
             sub_ax.legend(loc="lower right")
@@ -322,5 +342,93 @@ class TwoCompLayer:
         ax.legend()
 
         util.save_figure(fig, f"{self.name}_firingrate", save=autosave)  # type: ignore[attr-defined]
+
+        return fig, ax
+
+    def plot_rate_maps_across_learning(
+        self,
+        fig: mpl_figure.Figure | None = None,
+        ax: plt.Axes | None = None,
+        compartment: str | None = None,
+        no_legend: bool = False,
+        title: str | None = None,
+        autosave: bool | None = None,
+        **kwargs,
+    ) -> tuple[mpl_figure.Figure, np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]]:
+        """Plot the rate map of the soma and dendritic layers, overlayed, ensuring no
+        more than 20 columns are plotted.
+
+        Args:
+            fig (mpl_figure.Figure, optional): Figure object. Defaults to None.
+            ax (plt.Axes, optional): Axes object. Defaults to None.
+            compartment (str, optional): Which compartment to plot, if environment is
+                2D ("soma", "dend" or "both"). Defaults to None
+                (i.e., "soma" if environment is 2D, and "both" otherwise).
+            no_legend (bool, optional): Whether to remove the legend. Defaults to False.
+            title (str, optional): Title for the figure. Defaults to None.
+            autosave (bool, optional): Whether to autosave the figure. Defaults to None.
+
+        Keyword Args:
+            kwargs: Keyword arguments to pass to plot_rate_maps_across_learning.
+
+        Returns:
+            mpl_figure.Figure: Figure object.
+            plt.Axes: Axes object.
+        """
+
+        if compartment is None:
+            if self.Agent.Environment.dimensionality == "1D":
+                compartment = "both"
+            else:
+                compartment = "soma"
+
+        if self.Agent.Environment.dimensionality == "2D" and compartment == "both":
+            warnings.warn(
+                "Plotting rate maps across learning for both compartments in a 2D "
+                "environment will result in only the soma compartment appearing."
+            )
+
+        if compartment not in ["soma", "dend", "both"]:
+            raise ValueError(
+                f"compartment must be 'soma', 'dend' or 'both', not '{compartment}'."
+            )
+
+        if compartment in ["both", "dend"]:
+            self.DendriteCompartment.plot_rate_maps_across_learning(
+                fig=fig,
+                ax=ax,
+                autosave=False,
+                no_legend=no_legend,
+                **kwargs,
+            )
+
+        if compartment in ["both", "soma"]:
+            fig, ax = self.SomaCompartment.plot_rate_maps_across_learning(
+                fig=fig,
+                ax=ax,
+                autosave=False,
+                no_legend=no_legend,
+                **kwargs,
+            )
+
+        if not no_legend and self.Agent.Environment.dimensionality == "1D":
+            sub_ax = ax
+            sub_ax.plot([], [], color=self.SomaCompartment.color, label="soma")
+            sub_ax.plot([], [], color=self.DendriteCompartment.color, label="dend")
+            sub_ax.legend(loc="lower right")
+
+        if title is None:
+            if compartment == "both":
+                title_start = "Rate maps"
+            elif compartment == "soma":
+                title_start = "Soma rate maps"
+            else:
+                title_start = "Dendrite rate maps"
+
+            title = f"{title_start} across learning"
+
+        fig.suptitle(title, y=0.90)
+
+        util.save_figure(fig, f"{self.name}_rate_maps_across_learning", save=autosave)  # type: ignore[attr-defined]
 
         return fig, ax
