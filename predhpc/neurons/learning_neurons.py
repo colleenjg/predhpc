@@ -16,17 +16,6 @@ if TYPE_CHECKING:
     import ratinabox  # type: ignore[import]
 
 
-BETA_1_WIDTH_X = 2 * np.log(19)  # so that the sigmoid beta value is 1
-
-STANDARD_SIGMOID_PARAMS = {
-    "activation": "sigmoid",
-    "min_fr": 0.0,
-    "max_fr": 1.0,
-    "width_x": BETA_1_WIDTH_X,
-    "mid_x": 0,
-}
-
-
 class LearnLayer(FeedForwardLayer, util.ParamsManagerMixin):
     """This trained class defines a population of neurons that tune their
     activity through Hebbian learning.
@@ -37,7 +26,6 @@ class LearnLayer(FeedForwardLayer, util.ParamsManagerMixin):
 
     List of functions:
         • get_state()
-        • set_freeze()
         • set_learn()
         • add_input()
         • update()
@@ -451,7 +439,6 @@ class HebbianLayer(LearnLayer):
 
     List of functions:
         • get_state()
-        • set_freeze()
         • set_learn()
         • add_input()
         • update()
@@ -497,7 +484,7 @@ class HebbianLayer(LearnLayer):
 
         super().__init__(Agent, self.params)
 
-        self.set_learn()
+        self.set_learn(True)
 
         if self.apply_Ojas_rule and self.normalize_weights:  # type: ignore[attr-defined]
             raise ValueError("Can only set 'oja' or 'norm' to True, not both.")
@@ -514,17 +501,13 @@ class HebbianLayer(LearnLayer):
 
         return self._learn
 
-    def set_freeze(self):
-        """Set the layer to not learn."""
-
-        self._learn = False
-        return
-
-    def set_learn(self):
+    def set_learn(self, learn=None):
         """Set the layer to learn."""
 
-        self._learn = True
-        return
+        if learn is None:
+            pass
+        else:
+            self._learn = learn
 
     def get_filter_tau(self, filter_tau: float | None = None) -> float:
         """Returns an exponential filter time constant parameter." """
@@ -548,9 +531,12 @@ class HebbianLayer(LearnLayer):
         else:
             return list()
 
-    @input_layers_with_no_learning.setter
-    def input_layers_with_no_learning(self, input_layers) -> None:
-        self._input_layers_with_no_learning = input_layers
+    def add_input_layers_with_no_learning(self, input_layers) -> None:
+        if not hasattr(self, "_input_layers_with_no_learning"):
+            self._input_layers_with_no_learning = list()
+        if not isinstance(input_layers, list):
+            input_layers = [input_layers]
+        self._input_layers_with_no_learning.extend(input_layers)
 
     def add_input(self, input_layer: Neurons, **kwargs):
         super().add_input(input_layer, **kwargs)
@@ -744,7 +730,6 @@ class BTSPLayer(HebbianLayer):
 
     List of functions:
         • get_state()
-        • set_freeze()
         • set_learn()
         • add_input()
         • update()
@@ -794,7 +779,7 @@ class BTSPLayer(HebbianLayer):
         if self.use_targets:  # type: ignore[attr-defined]
             raise ValueError("BTSPLayer does not support targets.")
 
-        self.set_btsp_learn()
+        self.set_btsp_learn(True)
 
         return
 
@@ -808,16 +793,15 @@ class BTSPLayer(HebbianLayer):
 
         return self._btsp_learn
 
-    def set_btsp_freeze(self):
-        """Set the layer to not learn using BTSP."""
-
-        self._btsp_learn = False
         return
 
-    def set_btsp_learn(self):
+    def set_btsp_learn(self, learn=None):
         """Set the layer to learn using BTSP."""
 
-        self._btsp_learn = True
+        if learn is None:
+            pass
+        else:
+            self._btsp_learn = learn
         return
 
     def add_input(self, input_layer: Neurons, **kwargs):
@@ -1193,7 +1177,7 @@ class NMDACurrent:
         NMDA_desensitization_decay_tau=0.3,  # seconds
         NMDA_activation_threshold=0.8,  # firing rate
         max_current=3.0,
-        start_desensitization=0.1,
+        start_desensitization=0.73,
         color="C5",
         save_history=True,
     ):
@@ -1218,7 +1202,7 @@ class NMDACurrent:
         self.NMDA_receptor_binding = np.zeros(self.n)
         self.NMDA_receptor_activation = np.zeros(self.n)
         self.NMDA_receptor_desensitization = (
-            np.zeros(self.n) * self.start_desensitization
+            np.ones(self.n) * self.start_desensitization
         )
 
         self.save_history = save_history
@@ -1256,11 +1240,8 @@ class NMDACurrent:
         return self._binding_params
 
     def plot_function(
-        self, param_type="binding", min_fr=-10, max_fr=10, fig=None, ax=None
+        self, param_type="binding", min_input_fr=-10, max_input_fr=10, fig=None, ax=None
     ):
-        if fig is None or ax is None:
-            fig, ax = plt.subplots(1, 1, figsize=(4, 2))
-
         if param_type == "binding":
             params = self.binding_params
         elif param_type == "activation":
@@ -1268,18 +1249,16 @@ class NMDACurrent:
         else:
             raise ValueError(f"Unknown param type {param_type}")
 
-        x = np.linspace(min_fr, max_fr, 1000)
-        y = rutils.activate(x, other_args=params)
+        fig, ax = plot_util.plot_activation_function(
+            params,
+            min_input_fr=min_input_fr,
+            max_input_fr=max_input_fr,
+            fig=fig,
+            ax=ax,
+            color=self.color,
+        )
 
-        ax.plot(x, y, color=self.color, lw=1.5)
-        ax.axhline(0, color="k", lw=1, ls="dashed")
-        ax.axvline(0, color="k", lw=1, ls="dashed")
-
-        ax.set_xlabel("Input firing rate")
-        ax.set_ylabel("Output value")
         ax.set_title(f"{param_type.capitalize()} function")
-
-        ax.spines[["right", "top"]].set_visible(False)
 
         return fig, ax
 
@@ -1503,7 +1482,6 @@ class NMDALayer(BTSPLayer):
 
     List of functions:
         • get_state()
-        • set_freeze()
         • set_learn()
         • add_input()
         • update()
@@ -1545,8 +1523,7 @@ class NMDALayer(BTSPLayer):
         self._add_NMDA_current()
 
         self.ramp_to_btsp = np.zeros(self.n).astype(float)  # type: ignore[attr-defined]
-
-        return
+        self.history["btsp_ramp"] = list()
 
     def _add_NMDA_current(self):
         """Set the NMDA intermediate layer."""
@@ -1560,8 +1537,20 @@ class NMDALayer(BTSPLayer):
         )
 
         self.add_input(self.NMDACurrent, w=np.eye(self.n))  # type: ignore[attr-defined]
+        self.add_input_layers_with_no_learning(self.NMDACurrent.name)
 
         return self.NMDACurrent
+
+    def save_to_history(self):
+        """Save the current state of the layer to the history, including the
+        loss, if applicable.
+        """
+
+        super().save_to_history()
+
+        self.history["btsp_ramp"].append(self.ramp_to_btsp.tolist())
+
+        return
 
     def get_incoming_firingrates(self, evaluate_at="last", **kwargs):
         """Returns the firing rates coming into each neuron. By default this layer uses
@@ -1653,7 +1642,7 @@ class NMDALayer(BTSPLayer):
             for targ in btsp_targets:
                 self.last_btsp_pos[targ] = self.Agent.pos
 
-            self.update_weights(filter_key="btsp_filtered_inputs")
+            self.update_weights(filter_key="btsp_filtered_inputs", O=O)
             self.history["btsp_events"].append(
                 self.num_steps_total - 1
             )  # recorded after update

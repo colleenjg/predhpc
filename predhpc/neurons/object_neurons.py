@@ -19,7 +19,8 @@ class ObjectCells(FeedForwardLayer):
         "description": "gaussian",  # input place cells
         "widths": 0.20,  # input place cells
         "wall_geometry": "line_of_sight",  # input place cells
-        "activation_params": {"activation": "sigmoid", "min_fr": 0, "max_fr": 1},
+        "min_fr": 0,
+        "max_fr": 1,
     }
 
     ignored_param_keys = list()
@@ -52,7 +53,7 @@ class ObjectCells(FeedForwardLayer):
 
         # retrieve place cell keys and prepare place cell params
         self.place_params = dict()
-        for key in ["description", "widths", "wall_geometry"]:
+        for key in ["description", "widths", "wall_geometry", "min_fr", "max_fr"]:
             self.place_params[key] = self.params[key]
 
         self._set_place_inputs()

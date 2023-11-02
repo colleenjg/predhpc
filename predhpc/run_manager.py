@@ -121,7 +121,8 @@ EC_PARAMS_1D = {
     "name": "LEC",
     "description": "gaussian",
     "widths": DT * 4,
-    "activation_params": {"activation": "sigmoid", "min_fr": 0, "max_fr": 10},
+    "min_fr": 0,
+    "max_fr": 10,
     "color": "#22772E",
 }
 
@@ -358,16 +359,13 @@ def learn_T_maze_btsp(
     if two_compartment:
         CA1s = two_comp_neurons.TwoCompLayer(Ag, params=CA1_params)
         CA1s.set_btsp_learn(soma=True, dend=False)
-        CA1s.set_btsp_freeze(soma=False, dend=True)
-        CA1s.set_freeze(soma=False, dend=False, inhibit=True)
         CA1s_for_weights = CA1s.SomaCompartment
+        CA1s.set_learn(soma=use_Hebbian, dend=False, inhibit=False)
     else:
         CA1s = learning_neurons.BTSPLayer(Ag, params=CA1_params)
         CA1s.set_btsp_learn()
         CA1s_for_weights = CA1s
-
-    if not use_Hebbian:
-        CA1s.set_freeze()
+        CA1s.set_learn(use_Hebbian)
 
     # run learning
     restarted = False
@@ -569,29 +567,7 @@ def plot_1D_time_info(
     )
     axes_flat[2].set_title("CA1 rate timeseries")
 
-    for end_point, ls in [
-        ("reset", "dashed"),
-        ("target", "dotted"),
-    ]:
-        if end_point == "reset":
-            positions = Ag.trajectory_df["stop_step"].to_numpy()
-        elif end_point == "target":
-            positions = Ag.target_df["reached_step"].to_numpy()
-        else:
-            raise ValueError(f"Unknown end point: {end_point}")
-        if np.isnan(positions[-1]):
-            positions = positions[:-1]
-        positions = positions.astype(int)
-
-        for t in positions:
-            axes_flat[2].axvline(
-                CA1s.Agent.history["t"][t] / 60,
-                alpha=0.7,
-                zorder=-1,
-                lw=1,
-                ls=ls,
-                color="k",
-            )
+    plot_util.add_target_reset_points(Ag, CA1s, axes_flat[2])
 
     for ax in axes_flat[:-1]:
         ax.set_xlabel("")
@@ -651,8 +627,7 @@ def learn_1D_btsp(
         CA1s = two_comp_neurons.TwoCompLayer(Ag, params=CA1_params)
     else:
         CA1s = learning_neurons.BTSPLayer(Ag, params=CA1_params)
-    if not use_Hebbian:
-        CA1s.set_freeze()
+    CA1s.set_learn(use_Hebbian)
     CA1s.set_btsp_learn()
 
     # run learning

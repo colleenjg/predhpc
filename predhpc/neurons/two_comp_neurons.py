@@ -43,9 +43,10 @@ class TwoCompLayer:
         "soma_color": "C0",
         "dend_color": "C1",
         "inhibit_dend": True,
-        "inhibit_color": None,
+        "inhibit_color": "k",
         "inhibit_weight": 0.5,  # multiplied by -1 identity matrix
-        "inhibit_activation_params": learning_neurons.STANDARD_SIGMOID_PARAMS,
+        "inhibit_activation_params": util.get_standard_sigmoid_params(center_0=False),
+        "inhibit_filter_tau": 0.1,
     }
 
     ignored_param_keys = list()  # type: list[str]
@@ -70,6 +71,8 @@ class TwoCompLayer:
 
         self.organize_params(params)
         self.create_compartments()
+
+        self.set_learn(soma=True, dend=True, inhibit=False)
 
     def organize_params(self, params: dict[str, Any]):
         self.soma_params = {"name": "soma"}
@@ -145,15 +148,11 @@ class TwoCompLayer:
 
         dend_to_soma_weight = np.eye(self.n) * self.dend_to_soma_weight  # type: ignore[attr-defined]
         self.SomaCompartment.add_input(self.DendriteCompartment, w=dend_to_soma_weight)
-        self.SomaCompartment.input_layers_with_no_learning = (
-            self.DendriteCompartment.name  # type: ignore[attr-defined]
-        )
+        self.SomaCompartment.add_input_layers_with_no_learning(self.DendriteCompartment.name)  # type: ignore[attr-defined]
 
         soma_to_dend_weight = np.eye(self.n) * self.soma_to_dend_weight  # type: ignore[attr-defined]
         self.DendriteCompartment.add_input(self.SomaCompartment, w=soma_to_dend_weight)
-        self.DendriteCompartment.input_layers_with_no_learning = (
-            self.SomaCompartment.name  # type: ignore[attr-defined]
-        )
+        self.DendriteCompartment.add_input_layers_with_no_learning(self.SomaCompartment.name)  # type: ignore[attr-defined]
 
         if self.inhibit_dend:  # type: ignore[attr-defined]
             inhibit_params = {
@@ -161,6 +160,7 @@ class TwoCompLayer:
                 "n": self.n,
                 "activation_params": self.inhibit_activation_params,  # type: ignore[attr-defined]
                 "color": self.inhibit_color,  # type: ignore[attr-defined]
+                "filter_tau": self.inhibit_filter_tau,  # type: ignore[attr-defined]
             }
 
             with warnings.catch_warnings():
@@ -168,6 +168,7 @@ class TwoCompLayer:
                 self.DendriteInhibition = learning_neurons.HebbianLayer(
                     self.Agent, params=inhibit_params
                 )
+
             soma_input = np.eye(self.n) * self.inhibit_weight  # type: ignore[attr-defined]
             self.DendriteInhibition.add_input(self.SomaCompartment, w=soma_input)
 
@@ -176,33 +177,26 @@ class TwoCompLayer:
                 self.DendriteInhibition, w=dend_inhibition
             )
 
-    def set_learn(self, soma=True, dend=True, inhibit=False):
-        if soma:
-            self.SomaCompartment.set_learn()
-        if dend:
-            self.DendriteCompartment.set_learn()
-        if inhibit and self.inhibit_dend:  # type: ignore[attr-defined]
-            self.DendriteInhibition.set_learn()
+            self.DendriteCompartment.add_input_layers_with_no_learning(self.DendriteInhibition.name)  # type: ignore[attr-defined]
 
-    def set_btsp_learn(self, soma=True, dend=True):
-        if soma:
-            self.SomaCompartment.set_btsp_learn()
-        if dend:
-            self.DendriteCompartment.set_btsp_learn()
+    def set_learn(self, learn=None, soma=None, dend=None, inhibit=None):
+        if learn is not None:
+            soma = learn if soma is None else soma
+            dend = learn if dend is None else dend
+            inhibit = learn if inhibit is None else inhibit
 
-    def set_freeze(self, soma=True, dend=True, inhibit=False):
-        if soma:
-            self.SomaCompartment.set_freeze()
-        if dend:
-            self.DendriteCompartment.set_freeze()
-        if inhibit and self.inhibit_dend:  # type: ignore[attr-defined]
-            self.DendriteInhibition.set_freeze()
+        self.SomaCompartment.set_learn(soma)
+        self.DendriteCompartment.set_learn(dend)
+        if self.inhibit_dend:  # type: ignore[attr-defined]
+            self.DendriteInhibition.set_learn(inhibit)
 
-    def set_btsp_freeze(self, soma=True, dend=True):
-        if soma:
-            self.SomaCompartment.set_btsp_freeze()
-        if dend:
-            self.DendriteCompartment.set_btsp_freeze()
+    def set_btsp_learn(self, learn=None, soma=None, dend=None):
+        if learn is not None:
+            soma = learn if soma is None else soma
+            dend = learn if dend is None else dend
+
+        self.SomaCompartment.set_btsp_learn(soma)
+        self.DendriteCompartment.set_btsp_learn(dend)
 
     def update(
         self,
@@ -252,22 +246,36 @@ class TwoCompLayer:
 
         if compartment is None:
             if self.Agent.Environment.dimensionality == "1D":
-                compartment = "both"
+                compartment = "all"
             else:
                 compartment = "soma"
 
-        if self.Agent.Environment.dimensionality == "2D" and compartment == "both":
+        if self.Agent.Environment.dimensionality == "2D" and compartment == "all":
             warnings.warn(
-                "Plotting rate maps for both compartments in a 2D environment will "
+                "Plotting rate maps for all compartments in a 2D environment will "
                 "result in only the soma compartment appearing."
             )
 
-        if compartment not in ["soma", "dend", "both"]:
+        if compartment not in ["soma", "dend", "inhibit", "all"]:
             raise ValueError(
-                f"compartment must be 'soma', 'dend' or 'both', not '{compartment}'."
+                f"compartment must be 'soma', 'dend', 'inhibit' or 'all', not '{compartment}'."
             )
 
-        if compartment in ["both", "dend"]:
+        if compartment == "inhibit" and not self.inhibit_dend:  # type: ignore[attr-defined]
+            raise ValueError(
+                "Cannot plot inhibition rate maps, as inhibition is not enabled."
+            )
+
+        if self.inhibit_dend and compartment in ["all", "inhibit"]:
+            fig, ax = self.DendriteInhibition.plot_rate_map(
+                fig=fig,
+                ax=ax,
+                autosave=False,
+                no_legend=no_legend,
+                **kwargs,
+            )
+
+        if compartment in ["all", "dend"]:
             self.DendriteCompartment.plot_rate_map(
                 fig=fig,
                 ax=ax,
@@ -276,7 +284,7 @@ class TwoCompLayer:
                 **kwargs,
             )
 
-        if compartment in ["both", "soma"]:
+        if compartment in ["all", "soma"]:
             fig, ax = self.SomaCompartment.plot_rate_map(
                 fig=fig,
                 ax=ax,
@@ -287,8 +295,12 @@ class TwoCompLayer:
 
         if not no_legend and self.Agent.Environment.dimensionality == "1D":
             sub_ax = ax
-            sub_ax.plot([], [], color=self.SomaCompartment.color, label="soma")
-            sub_ax.plot([], [], color=self.DendriteCompartment.color, label="dend")
+            if compartment in ["all", "soma"]:
+                sub_ax.plot([], [], color=self.SomaCompartment.color, label="soma")
+            if compartment in ["all", "dend"]:
+                sub_ax.plot([], [], color=self.DendriteCompartment.color, label="dend")
+            if self.inhibit_dend and compartment in ["all", "inhibit"]:
+                sub_ax.plot([], [], color=self.DendriteInhibition.color, label="inhib.")
             sub_ax.legend(loc="lower right")
 
         util.save_figure(fig, f"{self.name}_ratemaps", save=autosave)  # type: ignore[attr-defined]
@@ -301,6 +313,7 @@ class TwoCompLayer:
         ax: plt.Axes | None = None,
         soma_color: str | None = None,
         dend_color: str | None = None,
+        inhibit_color: str | None = None,
         autosave: bool | None = None,
         **kwargs,
     ) -> tuple[mpl_figure.Figure, np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]]:
@@ -337,8 +350,20 @@ class TwoCompLayer:
             **kwargs,
         )
 
+        if self.inhibit_dend:
+            inhibit_color = inhibit_color or self.DendriteInhibition.color
+            self.DendriteInhibition.plot_rate_timeseries(
+                fig=fig,
+                ax=ax,
+                color=inhibit_color,
+                autosave=False,
+                **kwargs,
+            )
+
         ax.plot([], [], color=soma_color, label="soma")
         ax.plot([], [], color=dend_color, label="dend")
+        if self.inhibit_dend:
+            ax.plot([], [], color=inhibit_color, label="inhib.")
         ax.legend()
 
         util.save_figure(fig, f"{self.name}_firingrate", save=autosave)  # type: ignore[attr-defined]
@@ -362,7 +387,7 @@ class TwoCompLayer:
             fig (mpl_figure.Figure, optional): Figure object. Defaults to None.
             ax (plt.Axes, optional): Axes object. Defaults to None.
             compartment (str, optional): Which compartment to plot, if environment is
-                2D ("soma", "dend" or "both"). Defaults to None
+                2D ("soma", "dend", "inhibit" or "both"). Defaults to None
                 (i.e., "soma" if environment is 2D, and "both" otherwise).
             no_legend (bool, optional): Whether to remove the legend. Defaults to False.
             title (str, optional): Title for the figure. Defaults to None.
@@ -378,7 +403,7 @@ class TwoCompLayer:
 
         if compartment is None:
             if self.Agent.Environment.dimensionality == "1D":
-                compartment = "both"
+                compartment = "all"
             else:
                 compartment = "soma"
 
@@ -388,12 +413,26 @@ class TwoCompLayer:
                 "environment will result in only the soma compartment appearing."
             )
 
-        if compartment not in ["soma", "dend", "both"]:
+        if compartment not in ["soma", "dend", "inhibit", "all"]:
             raise ValueError(
-                f"compartment must be 'soma', 'dend' or 'both', not '{compartment}'."
+                f"compartment must be 'soma', 'dend', 'inhibit' or 'all', not '{compartment}'."
             )
 
-        if compartment in ["both", "dend"]:
+        if compartment == "inhibit" and not self.inhibit_dend:  # type: ignore[attr-defined]
+            raise ValueError(
+                "Cannot plot inhibition rate maps, as inhibition is not enabled."
+            )
+
+        if self.inhibit_dend and compartment in ["all", "inhibit"]:
+            fig, ax = self.DendriteInhibition.plot_rate_maps_across_learning(
+                fig=fig,
+                ax=ax,
+                autosave=False,
+                no_legend=no_legend,
+                **kwargs,
+            )
+
+        if compartment in ["all", "dend"]:
             self.DendriteCompartment.plot_rate_maps_across_learning(
                 fig=fig,
                 ax=ax,
@@ -402,7 +441,7 @@ class TwoCompLayer:
                 **kwargs,
             )
 
-        if compartment in ["both", "soma"]:
+        if compartment in ["all", "soma"]:
             fig, ax = self.SomaCompartment.plot_rate_maps_across_learning(
                 fig=fig,
                 ax=ax,
@@ -413,8 +452,13 @@ class TwoCompLayer:
 
         if not no_legend and self.Agent.Environment.dimensionality == "1D":
             sub_ax = ax
-            sub_ax.plot([], [], color=self.SomaCompartment.color, label="soma")
-            sub_ax.plot([], [], color=self.DendriteCompartment.color, label="dend")
+
+            if compartment in ["all", "soma"]:
+                sub_ax.plot([], [], color=self.SomaCompartment.color, label="soma")
+            if compartment in ["all", "dend"]:
+                sub_ax.plot([], [], color=self.DendriteCompartment.color, label="dend")
+            if self.inhibit_dend and compartment in ["all", "inhibit"]:
+                sub_ax.plot([], [], color=self.DendriteInhibition.color, label="inhib.")
             sub_ax.legend(loc="lower right")
 
         if title is None:
@@ -422,6 +466,8 @@ class TwoCompLayer:
                 title_start = "Rate maps"
             elif compartment == "soma":
                 title_start = "Soma rate maps"
+            elif compartment == "inhibit":
+                title_start = "Inhibition rate maps"
             else:
                 title_start = "Dendrite rate maps"
 

@@ -224,7 +224,7 @@ class TorchLayer(learning_neurons.LearnLayer):
     ignored_params = {key: None for key in ignored_param_keys}
 
     fixed_params = {
-        "activation_params": learning_neurons.STANDARD_SIGMOID_PARAMS,
+        "activation_params": util.get_standard_sigmoid_params(),
     }
 
     def __init__(self, Agent: "ratinabox.Agent", params: dict[str, Any] = dict()):
