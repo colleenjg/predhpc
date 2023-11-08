@@ -46,7 +46,7 @@ class TwoCompLayer:
         "inhibit_color": "k",
         "inhibit_weight": 0.5,  # multiplied by -1 identity matrix
         "inhibit_activation_params": util.get_standard_sigmoid_params(center_0=False),
-        "inhibit_filter_tau": 0.1,
+        "inhibit_input_filter_tau": 0.1,
     }
 
     ignored_param_keys = list()  # type: list[str]
@@ -160,7 +160,7 @@ class TwoCompLayer:
                 "n": self.n,
                 "activation_params": self.inhibit_activation_params,  # type: ignore[attr-defined]
                 "color": self.inhibit_color,  # type: ignore[attr-defined]
-                "filter_tau": self.inhibit_filter_tau,  # type: ignore[attr-defined]
+                "input_filter_tau": self.inhibit_input_filter_tau,  # type: ignore[attr-defined]
             }
 
             with warnings.catch_warnings():
@@ -315,6 +315,7 @@ class TwoCompLayer:
         dend_color: str | None = None,
         inhibit_color: str | None = None,
         autosave: bool | None = None,
+        separate_axes: bool = False,
         **kwargs,
     ) -> tuple[mpl_figure.Figure, np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]]:
         """Plot a timeseries of the firing rate of the soma and dendritic layers of a
@@ -332,19 +333,33 @@ class TwoCompLayer:
             plt.Axes: Axes object.
         """
 
+        if separate_axes:
+            num_rows = 2 + self.inhibit_dend  # type: ignore[attr-defined]
+            if ax is None:
+                fig, ax = plt.subplots(
+                    num_rows, 1, figsize=[6, 1.2 * num_rows], sharex=True, sharey=True
+                )
+            elif ax.shape != (num_rows,):
+                raise ValueError(
+                    f"ax must be a 1D array of length {num_rows}, not {ax.shape}."
+                )
+
         soma_color = soma_color or self.SomaCompartment.color
-        fig, ax = self.SomaCompartment.plot_rate_timeseries(
+        sub_ax = ax[0] if separate_axes else ax
+        fig, sub_ax = self.SomaCompartment.plot_rate_timeseries(
             fig=fig,
-            ax=ax,
+            ax=sub_ax,
             color=soma_color,
             autosave=False,
             **kwargs,
         )
+        ax = ax if separate_axes else sub_ax
 
         dend_color = dend_color or self.DendriteCompartment.color
+        sub_ax = ax[1] if separate_axes else ax
         self.DendriteCompartment.plot_rate_timeseries(
             fig=fig,
-            ax=ax,
+            ax=sub_ax,
             color=dend_color,
             autosave=False,
             **kwargs,
@@ -352,19 +367,28 @@ class TwoCompLayer:
 
         if self.inhibit_dend:
             inhibit_color = inhibit_color or self.DendriteInhibition.color
+            sub_ax = ax[2] if separate_axes else ax
             self.DendriteInhibition.plot_rate_timeseries(
                 fig=fig,
-                ax=ax,
+                ax=sub_ax,
                 color=inhibit_color,
                 autosave=False,
                 **kwargs,
             )
 
-        ax.plot([], [], color=soma_color, label="soma")
-        ax.plot([], [], color=dend_color, label="dend")
-        if self.inhibit_dend:
-            ax.plot([], [], color=inhibit_color, label="inhib.")
-        ax.legend()
+        if separate_axes:
+            titles = ["Soma compartment", "Dendrite compartment", "Interneuron"]
+            for s, sub_ax in enumerate(ax):
+                sub_ax.set_title(titles[s])
+                plot_util.add_target_reset_points(self.Agent, self, sub_ax)
+                if s != len(ax) - 1:
+                    sub_ax.set_xlabel("")
+        else:
+            ax.plot([], [], color=soma_color, label="soma")
+            ax.plot([], [], color=dend_color, label="dend")
+            if self.inhibit_dend:
+                ax.plot([], [], color=inhibit_color, label="inhib.")
+            ax.legend()
 
         util.save_figure(fig, f"{self.name}_firingrate", save=autosave)  # type: ignore[attr-defined]
 

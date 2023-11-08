@@ -68,7 +68,7 @@ CA1_PARAMS_T_MAZE = {
     "w_init_scale": 0.1,  # set fairly small
     "lr": 5e-5,
     "apply_Ojas_rule": True,
-    "btsp_tau": DT * 8,
+    "btsp_filter_tau": DT * 8,
     "btsp_fr": 20,
     "n": 1,
 }
@@ -90,7 +90,7 @@ CA1_TWO_COMP_PARAMS = {
     "inhibit_dend": True,
     "inhibit_weight": 0.5,
     "inhibit_color": "C3",
-    "soma_btsp_tau": DT * 15,
+    "soma_btsp_filter_tau": DT * 15,
     "soma_btsp_fr": 30,
     "soma_color": "#3D3D79",
     "dend_color": "#8787C9",
@@ -145,7 +145,7 @@ CA1_PARAMS_1D = {
     "init_weights_zero": False,
     "w_init_scale": 0.1,  # set fairly small
     "lr": 1e-4,
-    "btsp_tau": DT * 8,
+    "btsp_filter_tau": DT * 8,
     "btsp_fr": 10,
 }
 

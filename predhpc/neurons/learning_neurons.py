@@ -16,10 +16,264 @@ if TYPE_CHECKING:
     import ratinabox  # type: ignore[import]
 
 
-class LearnLayer(FeedForwardLayer, util.ParamsManagerMixin):
+class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
+    """This class defines a population of neurons that receive feedforward input that
+    is smoothed.
+    This class is a subclass of FeedForwardLayer() and inherits its properties/plotting functions.
+
+    Must be initialised with an Agent, and a "params" dictionary, including input
+    layers.
+
+    List of functions:
+        • get_state()
+        • set_learn()
+        • add_input()
+        • update()
+        • plot_rate_map()
+        • plot_loss()
+    """
+
+    default_params = {
+        "n": 10,
+        "activation_params": {"activation": "sigmoid"},
+        "name": "SmoothFeedForwardLayer",
+        "input_filter_tau": 0.1,  # in sec
+    }
+
+    ignored_param_keys = list()  # type: list[str]
+    ignored_params = {key: None for key in ignored_param_keys}
+
+    fixed_params = dict()  # type: dict[str, Any]
+
+    def __init__(self, Agent: "ratinabox.Agent", params: dict[str, Any] = dict()):
+        """Initialise HebbianLayer(), takes as input a parameter
+        dictionary. Any values not provided by the params dictionary are
+        taken from a default dictionary below.
+
+        Args:
+            params (dict, optional). Defaults to dict().
+        """
+
+        self.Agent = Agent
+
+        self.check_if_ignored_params(params)
+        params = self.add_fixed_params(params)
+
+        self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
+        self.params.update(params)
+
+        super().__init__(Agent, self.params)
+
+        return
+
+    def get_filter_tau(self, filter_tau: float | None = None) -> float:
+        """Returns an exponential filter time constant parameter." """
+
+        if filter_tau is None:
+            filter_tau = float(self.Agent.dt)
+
+        elif filter_tau < self.Agent.dt:
+            raise ValueError(
+                f"'filter_tau' ({filter_tau}) cannot be smaller than "
+                f"self.Agent.dt ({self.Agent.dt})."
+            )
+
+        return filter_tau
+
+    def add_input(self, input_layer: Neurons, **kwargs):
+        super().add_input(input_layer, **kwargs)
+
+        if self.input_filter_tau:  # type: ignore[attr-defined]
+            name_in, n_in = input_layer.name, input_layer.n  # type: ignore[attr-defined]
+            self.inputs[name_in]["filtered_inputs"] = np.zeros(n_in)
+
+            if "filtered_inputs" not in self.history.keys():
+                self.history["filtered_inputs"] = dict()
+            self.history["filtered_inputs"][name_in] = list()
+
+    def save_to_history(self):
+        """Save the current state of the layer to the history, including the
+        loss, if applicable.
+        """
+
+        super().save_to_history()
+
+        if self.input_filter_tau:  # type: ignore[attr-defined]
+            for name, input_layer in self.inputs.items():
+                self.history["filtered_inputs"][name].append(
+                    input_layer["filtered_inputs"].tolist()
+                )
+
+    def update_filtered_inputs(
+        self,
+        filter_tau: float | None = None,
+        filter_key: str = "filtered_inputs",
+    ):
+        """Update the filtered inputs of the layer."""
+
+        filter_tau = self.get_filter_tau(filter_tau)
+        effective_tau = filter_tau / self.Agent.dt
+
+        for input_layer in self.inputs.values():
+            X_t = input_layer[filter_key]
+            I_t1 = input_layer["layer"].firingrate
+            d_filt = (I_t1 - X_t) / effective_tau
+            input_layer[filter_key] += d_filt
+
+        return
+
+    def get_state(self, evaluate_at="last", **kwargs):
+        """Taken from FeedForward.get_state()
+
+        Args:
+            evaluate_at (str, optional). Defaults to 'last'.
+        Returns:
+            firingrate: array of firing rates
+        """
+        if evaluate_at == "last":
+            V = np.zeros(self.n)
+        elif evaluate_at == "all":
+            V = np.zeros(
+                (self.n, self.Agent.Environment.flattened_discrete_coords.shape[0])
+            )
+        else:
+            V = np.zeros((self.n, kwargs["pos"].shape[0]))
+
+        for inputlayer in self.inputs.values():
+            w = inputlayer["w"]
+            if evaluate_at == "last":
+                if self.input_filter_tau:
+                    I = inputlayer["filtered_inputs"]
+                else:
+                    I = inputlayer["layer"].firingrate
+            else:  # kick can down the road let input layer decide how to evaluate the firingrate. this is core to feedforward layer as this recursive call will backprop through the upstraem layers until it reaches a "core" (e.g. place cells) layer which will then evaluate the firingrate.
+                I = inputlayer["layer"].get_state(evaluate_at, **kwargs)
+            inputlayer["I_temp"] = I
+            V += np.matmul(w, I)
+
+        biases = self.biases
+        if biases.shape != V.shape:
+            biases = biases.reshape((-1, 1))
+        V += biases
+
+        firingrate = rutils.activate(V, other_args=self.activation_params)
+        # saves current copy of activation derivative at firing rate (useful for learning rules)
+        if (
+            evaluate_at == "last"
+        ):  # save copy of the firing rate through the dervative of the activation function
+            self.firingrate_prime = rutils.activate(
+                V, other_args=self.activation_params, deriv=True
+            )
+        return firingrate
+
+    def update(self):
+        """Update the layer, and filtered inputs"""
+
+        if self.input_filter_tau:
+            self.update_filtered_inputs(
+                self.input_filter_tau, filter_key="filtered_inputs"
+            )
+        super().update()
+
+    def plot_filtered(
+        self,
+        input_layer_name: str,
+        filter_key: str = "filtered_inputs",
+        t_start: float | None = None,
+        t_end: float | None = None,
+        title: str | None = None,
+        chosen_neurons: str
+        | int
+        | list[int]
+        | np.ndarray[tuple[int], np.dtype[np.int64]] = "all",
+        fig: mpl_figure.Figure | None = None,
+        ax: plt.Axes | None = None,
+        autosave: bool | None = None,
+    ) -> tuple[
+        mpl_figure.Figure,
+        plt.Axes,
+        np.ndarray[tuple[int], np.dtype[np.float64]],
+    ]:
+        """Plot the filtered inputs of the layer.
+
+        Args:
+            input_layer_name (str): Name of the input layer to plot.
+            filter_key (str, optional): Key of the filtered inputs to plot.
+                Defaults to "filtered_inputs_for_learning".
+            t_start (float, optional): Start time of the plot. Defaults to None.
+            t_end (float, optional): End time of the plot. Defaults to None.
+            title (str, optional): Title of the plot. Defaults to None.
+            chosen_neurons (str or array, optional): Neurons to plot. Defaults to "all".
+            fig (mpl_figure.Figure, optional): Figure to plot on.
+                Defaults to None.
+            ax (plt.Axes, optional): Axes to plot on. Defaults to None.
+            autosave (bool, optional): Whether to save the figure. Defaults to None.
+
+        Raises:
+            ValueError: If the input layer is not found.
+
+        Returns:
+            fig, ax: Figure and axes of the plot.
+        """
+
+        t, startid, endid = self.get_plotting_times(t_start, t_end)
+
+        if input_layer_name not in self.inputs.keys():
+            raise ValueError(
+                f"Input layer '{input_layer_name}' not found. Available input layers: "
+                f"{self.inputs.keys()}."
+            )
+
+        if filter_key not in self.history.keys():
+            raise ValueError(f"Filter key '{filter_key}' not found.")
+
+        input_layer = self.inputs[input_layer_name]["layer"]
+
+        chosen_neurons = np.asarray(
+            input_layer.return_list_of_neurons(chosen_neurons=chosen_neurons)  # type: ignore[arg-type, attr-defined]
+        )
+
+        unfiltered = np.asarray(input_layer.history["firingrate"])[  # type: ignore[attr-defined]
+            startid : endid + 1, chosen_neurons
+        ]
+        filtered = np.asarray(self.history[filter_key][input_layer_name])[
+            startid : endid + 1, chosen_neurons
+        ]
+
+        height = 0.6 * (unfiltered.max() - unfiltered.min())
+        shifts = np.arange(unfiltered.shape[1]).reshape(1, -1) * height
+
+        if fig is None or ax is None:
+            n = unfiltered.shape[1]
+            height = max([1, min(n / 12.0 + 5 / 3, 8)])
+            fig, ax = plt.subplots(figsize=[6, height])
+
+        color = self.color  # type: ignore[attr-defined]
+
+        ax.plot(t, unfiltered + shifts, ls=(0, (1, 1)), color=color, alpha=1.0)
+        ax.plot(t, filtered + shifts, alpha=0.8, color=color)
+        for i, shift in enumerate(shifts.T):
+            ax.fill_between(
+                t, shift, filtered[:, i] + shift, color=color, alpha=0.4, lw=0
+            )
+
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.set_ylabel("Firing rate")
+        ax.set_xlabel("Time (s)")
+
+        if title is None:
+            title = filter_key.replace("_", " ").capitalize()
+        ax.set_title(title)
+
+        util.save_figure(fig, f"{self.name}_{filter_key}", save=autosave)  # type: ignore[attr-defined]
+
+        return fig, ax, t
+
+
+class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
     """This trained class defines a population of neurons that tune their
     activity through Hebbian learning.
-    This class is a subclass of Neurons() and inherits its properties/plotting functions.
+    This class is a subclass of SmoothFeedForwardLayer() and inherits its properties/plotting functions.
 
     Must be initialised with an Agent, and a "params" dictionary, including input
     layers.
@@ -44,6 +298,7 @@ class LearnLayer(FeedForwardLayer, util.ParamsManagerMixin):
         "w_init_loc": 0,  # mean of the initial weights
         "w_init_scale": 1,  # scale of the initial weights
         "use_targets": False,  # whether to use targets
+        "input_filter_tau": 0,  # rise time constant
     }
 
     ignored_param_keys = list()  # type: list[str]
@@ -458,7 +713,8 @@ class HebbianLayer(LearnLayer):
         "use_targets": False,
         "init_weights_zero": False,  # whether to initialize weights to 0
         "w_init_scale": 1,  # scale of the initial weights
-        "filter_tau": None,
+        "learning_filter_tau": None,
+        "p": 2,  # power for normalization, if used
     }
 
     ignored_param_keys = list()
@@ -509,20 +765,6 @@ class HebbianLayer(LearnLayer):
         else:
             self._learn = learn
 
-    def get_filter_tau(self, filter_tau: float | None = None) -> float:
-        """Returns an exponential filter time constant parameter." """
-
-        if filter_tau is None:
-            filter_tau = float(self.Agent.dt)
-
-        elif filter_tau < self.Agent.dt:
-            raise ValueError(
-                f"'filter_tau' ({filter_tau}) cannot be smaller than "
-                f"self.Agent.dt ({self.Agent.dt})."
-            )
-
-        return filter_tau
-
     @property
     def input_layers_with_no_learning(self) -> list[str]:
         """Returns a list of input layer names that are not learning."""
@@ -542,11 +784,11 @@ class HebbianLayer(LearnLayer):
         super().add_input(input_layer, **kwargs)
 
         name_in, n_in = input_layer.name, input_layer.n  # type: ignore[attr-defined]
-        self.inputs[name_in]["filtered_inputs"] = np.zeros(n_in)
+        self.inputs[name_in]["filtered_inputs_for_learning"] = np.zeros(n_in)
 
-        if "filtered_inputs" not in self.history.keys():
-            self.history["filtered_inputs"] = dict()
-        self.history["filtered_inputs"][name_in] = list()
+        if "filtered_inputs_for_learning" not in self.history.keys():
+            self.history["filtered_inputs_for_learning"] = dict()
+        self.history["filtered_inputs_for_learning"][name_in] = list()
 
     def save_to_history(self):
         """Save the current state of the layer to the history, including the
@@ -556,36 +798,20 @@ class HebbianLayer(LearnLayer):
         super().save_to_history()
 
         for name, input_layer in self.inputs.items():
-            self.history["filtered_inputs"][name].append(
-                input_layer["filtered_inputs"].tolist()
+            self.history["filtered_inputs_for_learning"][name].append(
+                input_layer["filtered_inputs_for_learning"].tolist()
             )
-
-    def update_filtered_inputs(
-        self, filter_tau: float | None = None, filter_key: str = "filtered_inputs"
-    ):
-        """Update the filtered inputs of the layer."""
-
-        filter_tau = self.get_filter_tau(filter_tau)
-        effective_tau = filter_tau / self.Agent.dt
-
-        for input_layer in self.inputs.values():
-            X_t = input_layer[filter_key]
-            I_t1 = input_layer["layer"].firingrate
-            d_filt = (I_t1 - X_t) / effective_tau
-            input_layer[filter_key] += d_filt
-
-        return
 
     def update_weights(
         self,
-        filter_key: str = "filtered_inputs",
+        filter_key: str = "filtered_inputs_for_learning",
         O: np.ndarray[tuple[int], np.dtype[np.float64]] | None = None,
     ):
         """Update the weights of the layer.
 
         Args:
             filter_key (str, optional): Key of the input to use for the update.
-                Defaults to "filtered_inputs".
+                Defaults to "filtered_inputs_for_learning".
         """
 
         if O is None:
@@ -611,7 +837,7 @@ class HebbianLayer(LearnLayer):
         if self.apply_Ojas_rule:  # type: ignore[attr-defined]
             util.perform_Oja_update_(Is, ws, O, lr=lr, b=b)
         elif self.normalize_weights:  # type: ignore[attr-defined]
-            util.perform_normalized_Hebbian_update_(Is, ws, O, lr=lr, b=b)
+            util.perform_normalized_Hebbian_update_(Is, ws, O, lr=lr, b=b, p=self.p)
         else:
             util.perform_Hebbian_update_(Is, ws, O, lr=lr, b=b)
 
@@ -619,104 +845,15 @@ class HebbianLayer(LearnLayer):
         """Update the layer, i.e. calculate the new firing rates and update the
         weights and biases, if applicable."""
 
-        self.update_filtered_inputs(self.filter_tau, filter_key="filtered_inputs")  # type: ignore[attr-defined]
+        self.update_filtered_inputs(
+            self.learning_filter_tau, filter_key="filtered_inputs_for_learning"
+        )  # type: ignore[attr-defined]
         super().update()
 
         if self.learn:
-            self.update_weights(filter_key="filtered_inputs")
+            self.update_weights(filter_key="filtered_inputs_for_learning")
 
         return
-
-    def plot_filtered(
-        self,
-        input_layer_name: str,
-        filter_key: str = "filtered_inputs",
-        t_start: float | None = None,
-        t_end: float | None = None,
-        title: str | None = None,
-        chosen_neurons: str
-        | int
-        | list[int]
-        | np.ndarray[tuple[int], np.dtype[np.int64]] = "all",
-        fig: mpl_figure.Figure | None = None,
-        ax: plt.Axes | None = None,
-        autosave: bool | None = None,
-    ) -> tuple[
-        mpl_figure.Figure,
-        plt.Axes,
-        np.ndarray[tuple[int], np.dtype[np.float64]],
-    ]:
-        """Plot the filtered inputs of the layer.
-
-        Args:
-            input_layer_name (str): Name of the input layer to plot.
-            filter_key (str, optional): Key of the filtered inputs to plot.
-                Defaults to "filtered_inputs".
-            t_start (float, optional): Start time of the plot. Defaults to None.
-            t_end (float, optional): End time of the plot. Defaults to None.
-            title (str, optional): Title of the plot. Defaults to None.
-            chosen_neurons (str or array, optional): Neurons to plot. Defaults to "all".
-            fig (mpl_figure.Figure, optional): Figure to plot on.
-                Defaults to None.
-            ax (plt.Axes, optional): Axes to plot on. Defaults to None.
-            autosave (bool, optional): Whether to save the figure. Defaults to None.
-
-        Raises:
-            ValueError: If the input layer is not found.
-
-        Returns:
-            fig, ax: Figure and axes of the plot.
-        """
-
-        t, startid, endid = self.get_plotting_times(t_start, t_end)
-
-        if input_layer_name not in self.inputs.keys():
-            raise ValueError(
-                f"Input layer '{input_layer_name}' not found. Available input layers: "
-                f"{self.inputs.keys()}."
-            )
-
-        input_layer = self.inputs[input_layer_name]["layer"]
-
-        chosen_neurons = np.asarray(
-            input_layer.return_list_of_neurons(chosen_neurons=chosen_neurons)  # type: ignore[arg-type, attr-defined]
-        )
-
-        unfiltered = np.asarray(input_layer.history["firingrate"])[  # type: ignore[attr-defined]
-            startid : endid + 1, chosen_neurons
-        ]
-        filtered = np.asarray(self.history[filter_key][input_layer_name])[
-            startid : endid + 1, chosen_neurons
-        ]
-
-        height = 0.6 * (unfiltered.max() - unfiltered.min())
-        shifts = np.arange(unfiltered.shape[1]).reshape(1, -1) * height
-
-        if fig is None or ax is None:
-            n = unfiltered.shape[1]
-            height = max([1, min(n / 12.0 + 5 / 3, 8)])
-            fig, ax = plt.subplots(figsize=[6, height])
-
-        color = self.color  # type: ignore[attr-defined]
-
-        ax.plot(t, unfiltered + shifts, ls=(0, (1, 1)), color=color, alpha=1.0)
-        ax.plot(t, filtered + shifts, alpha=0.8, color=color)
-        for i, shift in enumerate(shifts.T):
-            ax.fill_between(
-                t, shift, filtered[:, i] + shift, color=color, alpha=0.4, lw=0
-            )
-
-        ax.spines[["top", "right"]].set_visible(False)
-        ax.set_ylabel("Firing rate")
-        ax.set_xlabel("Time (s)")
-
-        if title is None:
-            title = "Filtered inputs"
-        ax.set_title(title)
-
-        util.save_figure(fig, f"{self.name}_filtered_inputs", save=autosave)  # type: ignore[attr-defined]
-
-        return fig, ax, t
 
 
 class BTSPLayer(HebbianLayer):
@@ -740,7 +877,7 @@ class BTSPLayer(HebbianLayer):
     default_params = {
         "n": 10,
         "name": "BTSPLayer",
-        "btsp_tau": 3,
+        "btsp_filter_tau": 3,
         "btsp_fr": 1,
         "btsp_single": False,
         "btsp_distance_prop": 10,
@@ -810,11 +947,11 @@ class BTSPLayer(HebbianLayer):
         super().add_input(input_layer, **kwargs)
 
         name_in, n_in = input_layer.name, input_layer.n  # type: ignore[attr-defined]
-        self.inputs[name_in]["btsp_filtered_inputs"] = np.zeros(n_in)
+        self.inputs[name_in]["filtered_inputs_for_btsp"] = np.zeros(n_in)
 
-        if "btsp_filtered_inputs" not in self.history.keys():
-            self.history["btsp_filtered_inputs"] = dict()
-        self.history["btsp_filtered_inputs"][name_in] = list()
+        if "filtered_inputs_for_btsp" not in self.history.keys():
+            self.history["filtered_inputs_for_btsp"] = dict()
+        self.history["filtered_inputs_for_btsp"][name_in] = list()
 
     def save_to_history(self):
         """Save the current state of the layer to the history, including the
@@ -824,8 +961,8 @@ class BTSPLayer(HebbianLayer):
         super().save_to_history()
 
         for name, input_layer in self.inputs.items():
-            self.history["btsp_filtered_inputs"][name].append(
-                input_layer["btsp_filtered_inputs"].tolist()
+            self.history["filtered_inputs_for_btsp"][name].append(
+                input_layer["filtered_inputs_for_btsp"].tolist()
             )
 
     def update(
@@ -839,9 +976,13 @@ class BTSPLayer(HebbianLayer):
                 Defaults to [].
         """
 
-        filter_tau, btsp_tau = self.filter_tau, self.btsp_tau  # type: ignore[attr-defined]
-        self.update_filtered_inputs(filter_tau, filter_key="filtered_inputs")
-        self.update_filtered_inputs(btsp_tau, filter_key="btsp_filtered_inputs")
+        learning_filter_tau, btsp_filter_tau = self.learning_filter_tau, self.btsp_filter_tau  # type: ignore[attr-defined]
+        self.update_filtered_inputs(
+            learning_filter_tau, filter_key="filtered_inputs_for_learning"
+        )
+        self.update_filtered_inputs(
+            btsp_filter_tau, filter_key="filtered_inputs_for_btsp"
+        )
 
         super().update()
 
@@ -882,7 +1023,7 @@ class BTSPLayer(HebbianLayer):
             for targ in btsp_targets:
                 self.last_btsp_pos[targ] = self.Agent.pos
 
-            self.update_weights(filter_key="btsp_filtered_inputs", O=O)
+            self.update_weights(filter_key="filtered_inputs_for_btsp", O=O)
             self.history["btsp_events"].append(
                 self.num_steps_total - 1
             )  # recorded after update
@@ -890,7 +1031,7 @@ class BTSPLayer(HebbianLayer):
 
         return
 
-    def plot_btsp_filtered(
+    def plot_filtered_for_btsp(
         self,
         input_layer_name: str,
         t_start: float | None = None,
@@ -916,7 +1057,7 @@ class BTSPLayer(HebbianLayer):
         """
 
         if title is None:
-            title = "BTSP filtered inputs"
+            title = "Inputs filtered for BTSP"
 
         input_layer = self.inputs[input_layer_name]["layer"]
         chosen_neurons = np.asarray(
@@ -925,7 +1066,7 @@ class BTSPLayer(HebbianLayer):
 
         fig, ax, t = super().plot_filtered(
             input_layer_name,
-            filter_key="btsp_filtered_inputs",
+            filter_key="filtered_inputs_for_btsp",
             t_start=t_start,
             title=title,
             chosen_neurons=chosen_neurons,
@@ -969,7 +1110,7 @@ class BTSPLayer(HebbianLayer):
                 s=10,
             )
 
-        util.save_figure(fig, f"{self.name}_btsp_filtered_inputs", save=autosave)  # type: ignore[attr-defined]
+        util.save_figure(fig, f"{self.name}_filtered_inputs_for_btsp", save=autosave)  # type: ignore[attr-defined]
 
         return fig, ax
 
@@ -1303,11 +1444,12 @@ class NMDACurrent:
             np.ndarray: State of the NMDA current.
         """
 
-        receptor_binding = rutils.activate(
-            self.InputLayer.get_incoming_firingrates(), other_args=self.binding_params
-        )  # rethink how to measure receptor binding (considering weights / biases)
-
         if evaluate_at == "last":
+            receptor_binding = rutils.activate(
+                self.InputLayer.get_incoming_firingrates(),
+                other_args=self.binding_params,
+            )  # rethink how to measure receptor binding (considering weights / biases)
+
             # biexponential decay: loss of activation and desensitization
             receptor_activation = self.NMDA_receptor_activation * self.get_decay(
                 "activation", dt=dt
@@ -1411,10 +1553,10 @@ class NMDACurrent:
             title = "NMDA current traces"
 
         all_datatypes = [
-            "current",
             "receptor_binding",
-            "receptor_activation",
             "receptor_desensitization",
+            "current",
+            "receptor_activation",
         ]
         if isinstance(datatypes, str):
             if datatypes == "all":
@@ -1593,9 +1735,13 @@ class NMDALayer(BTSPLayer):
         return V
 
     def update(self):
-        filter_tau, btsp_tau = self.filter_tau, self.btsp_tau  # type: ignore[attr-defined]
-        self.update_filtered_inputs(filter_tau, filter_key="filtered_inputs")
-        self.update_filtered_inputs(btsp_tau, filter_key="btsp_filtered_inputs")
+        learning_filter_tau, btsp_filter_tau = self.learning_filter_tau, self.btsp_filter_tau  # type: ignore[attr-defined]
+        self.update_filtered_inputs(
+            learning_filter_tau, filter_key="filtered_inputs_for_learning"
+        )
+        self.update_filtered_inputs(
+            btsp_filter_tau, filter_key="filtered_inputs_for_btsp"
+        )
 
         self.NMDACurrent.update()
         super().update()
@@ -1642,7 +1788,7 @@ class NMDALayer(BTSPLayer):
             for targ in btsp_targets:
                 self.last_btsp_pos[targ] = self.Agent.pos
 
-            self.update_weights(filter_key="btsp_filtered_inputs", O=O)
+            self.update_weights(filter_key="filtered_inputs_for_btsp", O=O)
             self.history["btsp_events"].append(
                 self.num_steps_total - 1
             )  # recorded after update
