@@ -38,6 +38,7 @@ class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
         "activation_params": {"activation": "sigmoid"},
         "name": "SmoothFeedForwardLayer",
         "input_filter_tau": 0.1,  # in sec
+        "input_trend_tau": None,  # in sec
     }
 
     ignored_param_keys = list()  # type: list[str]
@@ -83,13 +84,15 @@ class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
     def add_input(self, input_layer: Neurons, **kwargs):
         super().add_input(input_layer, **kwargs)
 
-        if self.input_filter_tau:  # type: ignore[attr-defined]
+        if self.input_filter_tau or self.input_trend_tau:  # type: ignore[attr-defined]
             name_in, n_in = input_layer.name, input_layer.n  # type: ignore[attr-defined]
-            self.inputs[name_in]["filtered_inputs"] = np.zeros(n_in)
+            self.inputs[name_in]["filtered_inputs"] = np.full(n_in, np.nan)
+            self.inputs[name_in]["filtered_trends"] = np.zeros(n_in)
 
-            if "filtered_inputs" not in self.history.keys():
-                self.history["filtered_inputs"] = dict()
-            self.history["filtered_inputs"][name_in] = list()
+            for key in ["inputs", "trends"]:
+                if f"filtered_{key}_for_learning" not in self.history.keys():
+                    self.history[f"filtered_{key}"] = dict()
+                self.history[f"filtered_{key}"][name_in] = list()
 
     def save_to_history(self):
         """Save the current state of the layer to the history, including the
@@ -100,25 +103,43 @@ class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
 
         if self.input_filter_tau:  # type: ignore[attr-defined]
             for name, input_layer in self.inputs.items():
-                self.history["filtered_inputs"][name].append(
-                    input_layer["filtered_inputs"].tolist()
-                )
+                for key in ["inputs", "trends"]:
+                    self.history[f"filtered_{key}"][name].append(
+                        input_layer[f"filtered_{key}"].tolist()
+                    )
 
     def update_filtered_inputs(
         self,
         filter_tau: float | None = None,
+        trend_tau: float | None = None,
         filter_key: str = "filtered_inputs",
     ):
         """Update the filtered inputs of the layer."""
 
         filter_tau = self.get_filter_tau(filter_tau)
-        effective_tau = filter_tau / self.Agent.dt
+        effective_filter_tau = filter_tau / self.Agent.dt
+        filter_alpha = 1 - np.exp(-1 / effective_filter_tau)
+
+        trend_key = filter_key.replace("_inputs", "_trends")
+        trend_tau = self.get_filter_tau(trend_tau)
+        effective_trend_tau = trend_tau / self.Agent.dt
+        trend_alpha = 1 - np.exp(-1 / effective_trend_tau)
 
         for input_layer in self.inputs.values():
-            X_t = input_layer[filter_key]
             I_t1 = input_layer["layer"].firingrate
-            d_filt = (I_t1 - X_t) / effective_tau
-            input_layer[filter_key] += d_filt
+            X_t = input_layer[filter_key]
+            if not np.isfinite(X_t).all():
+                X_t = I_t1
+            T_t = input_layer[trend_key]
+
+            input_layer[filter_key] = filter_alpha * I_t1 + (1 - filter_alpha) * (
+                X_t + T_t
+            )
+            if trend_tau > self.Agent.dt:
+                input_layer[trend_key] = (
+                    trend_alpha * (input_layer[filter_key] - X_t)
+                    + (1 - trend_alpha) * T_t
+                )
 
         return
 
@@ -142,8 +163,10 @@ class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
         for inputlayer in self.inputs.values():
             w = inputlayer["w"]
             if evaluate_at == "last":
-                if self.input_filter_tau:
+                if self.input_filter_tau or self.input_trend_tau:
                     I = inputlayer["filtered_inputs"]
+                    if not np.isfinite(I).all():
+                        I = inputlayer["layer"].firingrate
                 else:
                     I = inputlayer["layer"].firingrate
             else:  # kick can down the road let input layer decide how to evaluate the firingrate. this is core to feedforward layer as this recursive call will backprop through the upstraem layers until it reaches a "core" (e.g. place cells) layer which will then evaluate the firingrate.
@@ -169,9 +192,11 @@ class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
     def update(self):
         """Update the layer, and filtered inputs"""
 
-        if self.input_filter_tau:
+        if self.input_filter_tau or self.input_trend_tau:
             self.update_filtered_inputs(
-                self.input_filter_tau, filter_key="filtered_inputs"
+                self.input_filter_tau,
+                self.input_trend_tau,
+                filter_key="filtered_inputs",
             )
         super().update()
 
@@ -298,7 +323,8 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
         "w_init_loc": 0,  # mean of the initial weights
         "w_init_scale": 1,  # scale of the initial weights
         "use_targets": False,  # whether to use targets
-        "input_filter_tau": 0,  # rise time constant
+        "input_filter_tau": None,  # rise time constant
+        "input_trend_tau": None,  # decay time constant
     }
 
     ignored_param_keys = list()  # type: list[str]
@@ -708,12 +734,13 @@ class HebbianLayer(LearnLayer):
         "name": "HebbianLayer",
         "lr": 1e-4,  # learning rate
         "biases": None,
-        "normalize_weights": False,
+        "normalize_weights_divisely": False,
         "apply_Ojas_rule": False,
         "use_targets": False,
         "init_weights_zero": False,  # whether to initialize weights to 0
         "w_init_scale": 1,  # scale of the initial weights
         "learning_filter_tau": None,
+        "learning_trend_tau": None,
         "p": 2,  # power for normalization, if used
     }
 
@@ -742,7 +769,7 @@ class HebbianLayer(LearnLayer):
 
         self.set_learn(True)
 
-        if self.apply_Ojas_rule and self.normalize_weights:  # type: ignore[attr-defined]
+        if self.apply_Ojas_rule and self.normalize_weights_divisely:  # type: ignore[attr-defined]
             raise ValueError("Can only set 'oja' or 'norm' to True, not both.")
 
         return
@@ -784,11 +811,13 @@ class HebbianLayer(LearnLayer):
         super().add_input(input_layer, **kwargs)
 
         name_in, n_in = input_layer.name, input_layer.n  # type: ignore[attr-defined]
-        self.inputs[name_in]["filtered_inputs_for_learning"] = np.zeros(n_in)
+        self.inputs[name_in]["filtered_inputs_for_learning"] = np.full(n_in, np.nan)
+        self.inputs[name_in]["filtered_trends_for_learning"] = np.zeros(n_in)
 
-        if "filtered_inputs_for_learning" not in self.history.keys():
-            self.history["filtered_inputs_for_learning"] = dict()
-        self.history["filtered_inputs_for_learning"][name_in] = list()
+        for key in ["inputs", "trends"]:
+            if f"filtered_{key}_for_learning" not in self.history.keys():
+                self.history[f"filtered_{key}_for_learning"] = dict()
+            self.history[f"filtered_{key}_for_learning"][name_in] = list()
 
     def save_to_history(self):
         """Save the current state of the layer to the history, including the
@@ -798,14 +827,16 @@ class HebbianLayer(LearnLayer):
         super().save_to_history()
 
         for name, input_layer in self.inputs.items():
-            self.history["filtered_inputs_for_learning"][name].append(
-                input_layer["filtered_inputs_for_learning"].tolist()
-            )
+            for key in ["inputs", "trends"]:
+                self.history[f"filtered_{key}_for_learning"][name].append(
+                    input_layer[f"filtered_{key}_for_learning"].tolist()
+                )
 
     def update_weights(
         self,
         filter_key: str = "filtered_inputs_for_learning",
         O: np.ndarray[tuple[int], np.dtype[np.float64]] | None = None,
+        lr: np.ndarray[tuple[int], np.dtype[np.float64]] | float | None = None,
     ):
         """Update the weights of the layer.
 
@@ -832,12 +863,15 @@ class HebbianLayer(LearnLayer):
             if name not in self.input_layers_with_no_learning
         ]
         b = self.biases if self.trainable_biases else None
-        lr = self.lr  # type: ignore[attr-defined]
+        if lr is None:
+            lr = self.lr  # type: ignore[attr-defined]
 
         if self.apply_Ojas_rule:  # type: ignore[attr-defined]
             util.perform_Oja_update_(Is, ws, O, lr=lr, b=b)
-        elif self.normalize_weights:  # type: ignore[attr-defined]
-            util.perform_normalized_Hebbian_update_(Is, ws, O, lr=lr, b=b, p=self.p)
+        elif self.normalize_weights_divisely:  # type: ignore[attr-defined]
+            util.perform_divisively_normalized_Hebbian_update_(
+                Is, ws, O, lr=lr, b=b, p=self.p
+            )
         else:
             util.perform_Hebbian_update_(Is, ws, O, lr=lr, b=b)
 
@@ -846,8 +880,11 @@ class HebbianLayer(LearnLayer):
         weights and biases, if applicable."""
 
         self.update_filtered_inputs(
-            self.learning_filter_tau, filter_key="filtered_inputs_for_learning"
+            self.learning_filter_tau,
+            self.learning_trend_tau,
+            filter_key="filtered_inputs_for_learning",
         )  # type: ignore[attr-defined]
+
         super().update()
 
         if self.learn:
@@ -877,10 +914,11 @@ class BTSPLayer(HebbianLayer):
     default_params = {
         "n": 10,
         "name": "BTSPLayer",
-        "btsp_filter_tau": 3,
-        "btsp_fr": 1,
-        "btsp_single": False,
-        "btsp_distance_prop": 10,
+        "BTSP_filter_tau": 4,
+        "BTSP_trend_tau": None,
+        "BTSP_lr_fact": 200,
+        "single_BTSP": False,
+        "BTSP_distance_prop": 10,  # None to remove constraint
     }
 
     ignored_param_keys = list()
@@ -906,39 +944,39 @@ class BTSPLayer(HebbianLayer):
 
         super().__init__(Agent, self.params)
 
-        self.history["btsp_events"] = list()
-        self.history["btsp_targets"] = list()
+        self.history["BTSP_events"] = list()
+        self.history["BTSP_targets"] = list()
 
-        self.num_btsp_to_date = np.zeros(self.n)  # type: ignore[attr-defined]
-        self.last_btsp_step = np.full(self.n, np.nan)  # type: ignore[attr-defined]
-        self.last_btsp_pos = [None for _ in range(self.n)]  # type: ignore[attr-defined]
+        self.num_BTSP_to_date = np.zeros(self.n)  # type: ignore[attr-defined]
+        self.last_BTSP_step = np.full(self.n, np.nan)  # type: ignore[attr-defined]
+        self.last_BTSP_pos = [None for _ in range(self.n)]  # type: ignore[attr-defined]
 
         if self.use_targets:  # type: ignore[attr-defined]
             raise ValueError("BTSPLayer does not support targets.")
 
-        self.set_btsp_learn(True)
+        self.set_BTSP_learn(True)
 
         return
 
     @property
-    def btsp_learn(self) -> bool:
+    def BTSP_learn(self) -> bool:
         """Returns the BTSP learning state of the layer.
 
         Returns:
             bool: BTSP learning state.
         """
 
-        return self._btsp_learn
+        return self._BTSP_learn
 
         return
 
-    def set_btsp_learn(self, learn=None):
+    def set_BTSP_learn(self, learn=None):
         """Set the layer to learn using BTSP."""
 
         if learn is None:
             pass
         else:
-            self._btsp_learn = learn
+            self._BTSP_learn = learn
         return
 
     def add_input(self, input_layer: Neurons, **kwargs):
@@ -947,11 +985,14 @@ class BTSPLayer(HebbianLayer):
         super().add_input(input_layer, **kwargs)
 
         name_in, n_in = input_layer.name, input_layer.n  # type: ignore[attr-defined]
-        self.inputs[name_in]["filtered_inputs_for_btsp"] = np.zeros(n_in)
 
-        if "filtered_inputs_for_btsp" not in self.history.keys():
-            self.history["filtered_inputs_for_btsp"] = dict()
-        self.history["filtered_inputs_for_btsp"][name_in] = list()
+        self.inputs[name_in]["filtered_inputs_for_BTSP"] = np.full(n_in, np.nan)
+        self.inputs[name_in]["filtered_trends_for_BTSP"] = np.zeros(n_in)
+
+        for key in ["inputs", "trends"]:
+            if f"filtered_{key}_for_BTSP" not in self.history.keys():
+                self.history[f"filtered_{key}_for_BTSP"] = dict()
+            self.history[f"filtered_{key}_for_BTSP"][name_in] = list()
 
     def save_to_history(self):
         """Save the current state of the layer to the history, including the
@@ -961,77 +1002,83 @@ class BTSPLayer(HebbianLayer):
         super().save_to_history()
 
         for name, input_layer in self.inputs.items():
-            self.history["filtered_inputs_for_btsp"][name].append(
-                input_layer["filtered_inputs_for_btsp"].tolist()
-            )
+            for key in ["inputs", "trends"]:
+                self.history[f"filtered_{key}_for_BTSP"][name].append(
+                    input_layer[f"filtered_{key}_for_BTSP"].tolist()
+                )
 
     def update(
-        self, btsp_targets: list | np.ndarray[tuple[int], np.dtype[np.int64]] = list()
+        self, BTSP_targets: list | np.ndarray[tuple[int], np.dtype[np.int64]] = list()
     ):
         """Update the layer, i.e. calculate the new firing rates and update the
         weights and biases, if applicable.
 
         Args:
-            btsp_targets (list or 1D array, optional): List of BTSP targets.
+            BTSP_targets (list or 1D array, optional): List of BTSP targets.
                 Defaults to [].
         """
 
-        learning_filter_tau, btsp_filter_tau = self.learning_filter_tau, self.btsp_filter_tau  # type: ignore[attr-defined]
         self.update_filtered_inputs(
-            learning_filter_tau, filter_key="filtered_inputs_for_learning"
+            self.learning_filter_tau,
+            self.learning_trend_tau,
+            filter_key="filtered_inputs_for_learning",
         )
         self.update_filtered_inputs(
-            btsp_filter_tau, filter_key="filtered_inputs_for_btsp"
+            self.BTSP_filter_tau,
+            self.BTSP_trend_tau,
+            filter_key="filtered_inputs_for_BTSP",
         )
 
         super().update()
 
-        if self.btsp_learn and btsp_targets is not None and len(btsp_targets):
-            if self.btsp_single:  # type: ignore[attr-defined]
-                keep_btsp_targets = np.asarray(
-                    [targ for targ in btsp_targets if self.num_btsp_to_date[targ] == 0]
+        if self.BTSP_learn and BTSP_targets is not None and len(BTSP_targets):
+            if self.single_BTSP:  # type: ignore[attr-defined]
+                keep_BTSP_targets = np.asarray(
+                    [targ for targ in BTSP_targets if self.num_BTSP_to_date[targ] == 0]
                 )
 
-            else:
-                keep_btsp_targets = list()
-                for targ in btsp_targets:
-                    closest_recent_btsp_event = self.last_btsp_pos[targ]
-                    if closest_recent_btsp_event is None:
-                        keep_btsp_targets.append(targ)
+            elif self.BTSP_distance_prop is not None:
+                keep_BTSP_targets = list()
+                for targ in BTSP_targets:
+                    closest_recent_BTSP_event = self.last_BTSP_pos[targ]
+                    if closest_recent_BTSP_event is None:
+                        keep_BTSP_targets.append(targ)
                     else:
                         dist = np.sqrt(
                             np.sum(
-                                (self.Agent.pos - closest_recent_btsp_event) ** 2,
+                                (self.Agent.pos - closest_recent_BTSP_event) ** 2,
                                 axis=-1,
                             )
                         )
-                        if dist > self.btsp_distance_prop * self.Agent.dt:
-                            keep_btsp_targets.append(targ)
+                        if dist > self.BTSP_distance_prop * self.Agent.dt:
+                            keep_BTSP_targets.append(targ)
 
-                keep_btsp_targets = np.asarray(keep_btsp_targets)
+                keep_BTSP_targets = np.asarray(keep_BTSP_targets)
 
-            if len(keep_btsp_targets) == 0:
+            else:
+                keep_BTSP_targets = np.asarray(BTSP_targets)
+
+            if len(keep_BTSP_targets) == 0:
                 return
-            btsp_targets = keep_btsp_targets
+            BTSP_targets = keep_BTSP_targets
 
-            n, btsp_fr = self.n, self.btsp_fr  # type: ignore[attr-defined]
-            O = np.zeros(n)
-            O[np.asarray(btsp_targets)] = btsp_fr
+            lr = np.full(self.n, self.lr)  # type: ignore[attr-defined]
+            lr[np.asarray(BTSP_targets)] *= self.BTSP_lr_fact  # type: ignore[attr-defined]
 
-            self.num_btsp_to_date[np.asarray(btsp_targets)] += +1
-            self.last_btsp_step[np.asarray(btsp_targets)] = self.num_steps_total - 1
-            for targ in btsp_targets:
-                self.last_btsp_pos[targ] = self.Agent.pos
+            self.num_BTSP_to_date[np.asarray(BTSP_targets)] += +1
+            self.last_BTSP_step[np.asarray(BTSP_targets)] = self.num_steps_total - 1
+            for targ in BTSP_targets:
+                self.last_BTSP_pos[targ] = self.Agent.pos
 
-            self.update_weights(filter_key="filtered_inputs_for_btsp", O=O)
-            self.history["btsp_events"].append(
+            self.update_weights(filter_key="filtered_inputs_for_BTSP", lr=lr)
+            self.history["BTSP_events"].append(
                 self.num_steps_total - 1
             )  # recorded after update
-            self.history["btsp_targets"].append(btsp_targets)
+            self.history["BTSP_targets"].append(BTSP_targets)
 
         return
 
-    def plot_filtered_for_btsp(
+    def plot_filtered_for_BTSP(
         self,
         input_layer_name: str,
         t_start: float | None = None,
@@ -1066,7 +1113,7 @@ class BTSPLayer(HebbianLayer):
 
         fig, ax, t = super().plot_filtered(
             input_layer_name,
-            filter_key="filtered_inputs_for_btsp",
+            filter_key="filtered_inputs_for_BTSP",
             t_start=t_start,
             title=title,
             chosen_neurons=chosen_neurons,
@@ -1076,33 +1123,33 @@ class BTSPLayer(HebbianLayer):
 
         _, startid, _ = self.get_plotting_times(t_start=t_start)
 
-        btsp_events = np.asarray(self.history["btsp_events"]) - startid
-        btsp_targets = self.history["btsp_targets"]
-        btsp_mask = (btsp_events >= 0) & (btsp_events < len(t))
+        BTSP_events = np.asarray(self.history["BTSP_events"]) - startid
+        BTSP_targets = self.history["BTSP_targets"]
+        BTSP_mask = (BTSP_events >= 0) & (BTSP_events < len(t))
 
-        flat_btsp_events = list()  # type: list[int]
-        flat_btsp_targets = list()  # type: list[int]
-        for btsp_idx in np.where(btsp_mask)[0]:
-            ev = btsp_events[btsp_idx]
-            targs = btsp_targets[btsp_idx]
-            flat_btsp_events.extend([ev for _ in range(len(targs))])
-            flat_btsp_targets.extend(targs)
+        flat_BTSP_events = list()  # type: list[int]
+        flat_BTSP_targets = list()  # type: list[int]
+        for BTSP_idx in np.where(BTSP_mask)[0]:
+            ev = BTSP_events[BTSP_idx]
+            targs = BTSP_targets[BTSP_idx]
+            flat_BTSP_events.extend([ev for _ in range(len(targs))])
+            flat_BTSP_targets.extend(targs)
 
         n = len(chosen_neurons)
         shift = np.diff(ax.get_ylim())[0] / (n + 0.4)
         heights = (np.arange(n + 1)[1:] - 0.35) * shift
 
-        plot_btsp_events, plot_btsp_targets, plot_heights = list(), list(), list()
-        for ev, targ in zip(flat_btsp_events, flat_btsp_targets):
+        plot_BTSP_events, plot_BTSP_targets, plot_heights = list(), list(), list()
+        for ev, targ in zip(flat_BTSP_events, flat_BTSP_targets):
             if targ in chosen_neurons:
                 idx = chosen_neurons.tolist().index(targ)
-                plot_btsp_events.append(ev)
-                plot_btsp_targets.append(targ)
+                plot_BTSP_events.append(ev)
+                plot_BTSP_targets.append(targ)
                 plot_heights.append(heights[idx])
 
-        if len(plot_btsp_events):
+        if len(plot_BTSP_events):
             ax.scatter(
-                t[np.asarray(plot_btsp_events)],
+                t[np.asarray(plot_BTSP_events)],
                 plot_heights,
                 color=(self.color or "k"),
                 alpha=0.8,
@@ -1110,11 +1157,11 @@ class BTSPLayer(HebbianLayer):
                 s=10,
             )
 
-        util.save_figure(fig, f"{self.name}_filtered_inputs_for_btsp", save=autosave)  # type: ignore[attr-defined]
+        util.save_figure(fig, f"{self.name}_filtered_inputs_for_BTSP", save=autosave)  # type: ignore[attr-defined]
 
         return fig, ax
 
-    def _add_btsp_to_mountain_plots(
+    def _add_BTSP_to_mountain_plots(
         self,
         axes: np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]] | plt.Axes,
         t_start: float | None = None,
@@ -1153,10 +1200,10 @@ class BTSPLayer(HebbianLayer):
 
         t, startid, _ = self.get_plotting_times(t_start=t_start, t_end=t_end)
 
-        btsp_events = np.asarray(self.history["btsp_events"]) - startid
-        btsp_targets = self.history["btsp_targets"]
+        BTSP_events = np.asarray(self.history["BTSP_events"]) - startid
+        BTSP_targets = self.history["BTSP_targets"]
 
-        for event, targets in zip(btsp_events, btsp_targets):
+        for event, targets in zip(BTSP_events, BTSP_targets):
             for target in targets:
                 if event >= len(t):
                     continue
@@ -1202,7 +1249,7 @@ class BTSPLayer(HebbianLayer):
         | int
         | list[int]
         | np.ndarray[tuple[int], np.dtype[np.int64]] = "all",
-        mark_btsp: bool = True,
+        mark_BTSP: bool = True,
         autosave: bool | None = None,
         **kwargs,
     ) -> tuple[mpl_figure.Figure, np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]]:
@@ -1215,7 +1262,7 @@ class BTSPLayer(HebbianLayer):
             t_start (float, optional): Start time of the plot. Defaults to None.
             t_end (float, optional): End time. Defaults to None.
             chosen_neurons (list, optional): List of neurons to plot. Defaults to "all".
-            mark_btsp (bool, optional): Whether to include BTSP markers
+            mark_BTSP (bool, optional): Whether to include BTSP markers
             autosave (bool, optional): Whether to autosave the figure. Defaults to None.
 
         Returns:
@@ -1231,8 +1278,8 @@ class BTSPLayer(HebbianLayer):
             **kwargs,
         )
 
-        if mark_btsp:
-            self._add_btsp_to_mountain_plots(
+        if mark_BTSP:
+            self._add_BTSP_to_mountain_plots(
                 axes,
                 t_start=t_start,
                 t_end=t_end,
@@ -1254,7 +1301,7 @@ class BTSPLayer(HebbianLayer):
         | np.ndarray[tuple[int], np.dtype[np.int64]] = "all",
         xlim: tuple[float, float] | None = None,
         color: str | None = None,
-        mark_btsp: bool = True,
+        mark_BTSP: bool = True,
         autosave=None,
         **kwargs,
     ) -> tuple[mpl_figure.Figure, np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]]:
@@ -1268,7 +1315,7 @@ class BTSPLayer(HebbianLayer):
             chosen_neurons (list, optional): List of neurons to plot. Defaults to "all".
             xlim (tuple[float, float], optional): The x limits of the plot. Defaults to None.
             color (str, optional): The color of the plot. Defaults to None.
-            mark_btsp (bool, optional): Whether to include BTSP markers
+            mark_BTSP (bool, optional): Whether to include BTSP markers
             autosave (bool, optional): Whether to autosave the figure. Defaults to None.
 
         Returns:
@@ -1291,8 +1338,8 @@ class BTSPLayer(HebbianLayer):
         if xlim is not None:
             xlim = ax.get_xlim()
 
-        if mark_btsp:
-            self._add_btsp_to_mountain_plots(
+        if mark_BTSP:
+            self._add_BTSP_to_mountain_plots(
                 ax,
                 t_start=t_start,
                 t_end=t_end,
@@ -1308,6 +1355,76 @@ class BTSPLayer(HebbianLayer):
 
         return fig, ax
 
+    def plot_BTSP_ramp(self, fig=None, ax=None, autosave=None):
+        """Plot the BTSP ramp of the layer.
+
+        Args:
+            fig (mpl_figure.Figure): Figure object. Defaults to None.
+            ax (plt.Axes): Axes object. Defaults to None.
+            autosave (bool, optional): Whether to autosave the figure. Defaults to None.
+
+        Returns:
+            mpl_figure.Figure: Figure object.
+            plt.Axes: Axes object.
+        """
+
+        if ax is None:
+            fig, ax = plt.subplots(2, 1, figsize=[9, 5], sharex=True)
+        elif ax.shape != (2,):
+            raise ValueError("ax must have shape (2,).")
+
+        t = np.asarray(self.history["t"])
+        ax[0].plot(t, self.history["BTSP_ramp"], lw=1.2, color=self.color)
+        ax[0].set_ylabel("Prop. of BTSP\nthreshold reached")
+        ax[0].spines[["top", "right"]].set_visible(False)
+        ax[0].axhline(1, ls="dashed")
+
+        ax[1].plot(t, self.history["firingrate"], lw=1.2, color=self.color)
+        ax[1].axhline(self.BTSP_induction_threshold, ls="dashed", color=self.color)
+        ax[1].set_xlabel("Time (s)")
+        ax[1].set_ylabel("Firingrates")
+        ax[1].spines[["top", "right"]].set_visible(False)
+
+        i = 0
+        BTSP_ramp = np.asarray(self.history["BTSP_ramp"])
+        num_steps_for_plateau = int(np.ceil(self.BTSP_plateau_length / self.Agent.dt))
+        labels = ["BTSP event", "insufficient"]
+        while i < len(BTSP_ramp):
+            next_BTSP_possible = np.where(BTSP_ramp[i : i + num_steps_for_plateau] > 0)[
+                0
+            ]
+            if len(next_BTSP_possible):
+                next_BTSP_possible = next_BTSP_possible[0] + i
+                BTSP_slice = slice(
+                    next_BTSP_possible, next_BTSP_possible + num_steps_for_plateau + 1
+                )
+                i = next_BTSP_possible + num_steps_for_plateau + 1
+                if (BTSP_ramp[BTSP_slice] >= 1).any():
+                    alpha, l = 0.5, 0
+                    i += 1
+                else:
+                    alpha, l = 0.2, 1
+
+                start = max(0, next_BTSP_possible - 1)
+                end = min(len(t) - 1, next_BTSP_possible + num_steps_for_plateau)
+                ax[1].axvspan(
+                    t[start],
+                    t[end],
+                    alpha=alpha,
+                    lw=0,
+                    label=labels[l],
+                    color=self.color,
+                )
+
+                labels[l] = None
+            else:
+                i += num_steps_for_plateau
+        ax[1].legend()
+
+        util.save_figure(fig, f"{self.name}_BTSP_ramp", save=autosave)  # type: ignore[attr-defined]
+
+        return fig, ax
+
 
 class NMDACurrent:
     def __init__(
@@ -1318,7 +1435,7 @@ class NMDACurrent:
         NMDA_desensitization_decay_tau=0.3,  # seconds
         NMDA_activation_threshold=0.8,  # firing rate
         max_current=3.0,
-        start_desensitization=0.73,
+        start_desensitization=0,
         color="C5",
         save_history=True,
     ):
@@ -1664,8 +1781,8 @@ class NMDALayer(BTSPLayer):
 
         self._add_NMDA_current()
 
-        self.ramp_to_btsp = np.zeros(self.n).astype(float)  # type: ignore[attr-defined]
-        self.history["btsp_ramp"] = list()
+        self.ramp_to_BTSP = np.zeros(self.n).astype(float)  # type: ignore[attr-defined]
+        self.history["BTSP_ramp"] = list()
 
     def _add_NMDA_current(self):
         """Set the NMDA intermediate layer."""
@@ -1690,7 +1807,7 @@ class NMDALayer(BTSPLayer):
 
         super().save_to_history()
 
-        self.history["btsp_ramp"].append(self.ramp_to_btsp.tolist())
+        self.history["BTSP_ramp"].append(self.ramp_to_BTSP.tolist())
 
         return
 
@@ -1735,63 +1852,103 @@ class NMDALayer(BTSPLayer):
         return V
 
     def update(self):
-        learning_filter_tau, btsp_filter_tau = self.learning_filter_tau, self.btsp_filter_tau  # type: ignore[attr-defined]
         self.update_filtered_inputs(
-            learning_filter_tau, filter_key="filtered_inputs_for_learning"
+            self.learning_filter_tau,
+            self.learning_trend_tau,
+            filter_key="filtered_inputs_for_learning",
         )
         self.update_filtered_inputs(
-            btsp_filter_tau, filter_key="filtered_inputs_for_btsp"
+            self.BTSP_filter_tau,
+            self.BTSP_trend_tau,
+            filter_key="filtered_inputs_for_BTSP",
         )
 
         self.NMDACurrent.update()
         super().update()
 
         above_threshold = self.firingrate > self.BTSP_induction_threshold  # type: ignore[attr-defined]
-        self.ramp_to_btsp[~above_threshold] = 0
-        self.ramp_to_btsp[above_threshold] += self.Agent.dt / self.BTSP_plateau_length  # type: ignore[attr-defined]
+        self.ramp_to_BTSP[~above_threshold] = 0
+        self.ramp_to_BTSP[above_threshold] += self.Agent.dt / self.BTSP_plateau_length  # type: ignore[attr-defined]
 
-        btsp_targets = np.where(self.ramp_to_btsp >= 1)[0]
-        if self.btsp_learn and len(btsp_targets):
-            if self.btsp_single:
-                keep_btsp_targets = np.asarray(
-                    [targ for targ in btsp_targets if self.num_btsp_to_date[targ] == 0]
+        BTSP_targets = np.where(self.ramp_to_BTSP >= 1)[0]
+        if self.BTSP_learn and len(BTSP_targets):
+            if self.single_BTSP:
+                keep_BTSP_targets = np.asarray(
+                    [targ for targ in BTSP_targets if self.num_BTSP_to_date[targ] == 0]
                 )
 
             else:
-                keep_btsp_targets = list()
-                for targ in btsp_targets:
-                    closest_recent_btsp_event = self.last_btsp_pos[targ]
-                    if closest_recent_btsp_event is None:
-                        keep_btsp_targets.append(targ)
+                keep_BTSP_targets = list()
+                for targ in BTSP_targets:
+                    closest_recent_BTSP_event = self.last_BTSP_pos[targ]
+                    if (
+                        self.BTSP_distance_prop is None
+                        or closest_recent_BTSP_event is None
+                    ):
+                        keep_BTSP_targets.append(targ)
                     else:
                         dist = np.sqrt(
                             np.sum(
-                                (self.Agent.pos - closest_recent_btsp_event) ** 2,
+                                (self.Agent.pos - closest_recent_BTSP_event) ** 2,
                                 axis=-1,
                             )
                         )
-                        if dist > self.btsp_distance_prop * self.Agent.dt:
-                            keep_btsp_targets.append(targ)
+                        if dist > self.BTSP_distance_prop * self.Agent.dt:
+                            keep_BTSP_targets.append(targ)
 
-                keep_btsp_targets = np.asarray(keep_btsp_targets)
+                keep_BTSP_targets = np.asarray(keep_BTSP_targets)
 
-            if len(keep_btsp_targets) == 0:
+            if len(keep_BTSP_targets) == 0:
                 return
-            btsp_targets = keep_btsp_targets
+            BTSP_targets = keep_BTSP_targets
 
-            n, btsp_fr = self.n, self.btsp_fr  # type: ignore[attr-defined]
-            O = np.zeros(n)
-            O[np.asarray(btsp_targets)] = btsp_fr
+            lr = np.full(self.n, self.lr)  # type: ignore[attr-defined]
+            lr[np.asarray(BTSP_targets)] *= self.BTSP_lr_fact  # type: ignore[attr-defined]
 
-            self.num_btsp_to_date[np.asarray(btsp_targets)] += +1
-            self.last_btsp_step[np.asarray(btsp_targets)] = self.num_steps_total - 1
-            for targ in btsp_targets:
-                self.last_btsp_pos[targ] = self.Agent.pos
+            self.num_BTSP_to_date[np.asarray(BTSP_targets)] += +1
+            self.last_BTSP_step[np.asarray(BTSP_targets)] = self.num_steps_total - 1
+            for targ in BTSP_targets:
+                self.last_BTSP_pos[targ] = self.Agent.pos
 
-            self.update_weights(filter_key="filtered_inputs_for_btsp", O=O)
-            self.history["btsp_events"].append(
+            self.update_weights(filter_key="filtered_inputs_for_BTSP", lr=lr)
+            self.history["BTSP_events"].append(
                 self.num_steps_total - 1
             )  # recorded after update
-            self.history["btsp_targets"].append(btsp_targets.tolist())
+            self.history["BTSP_targets"].append(BTSP_targets.tolist())
 
         return
+
+    def plot_BTSP_ramp(self, fig=None, ax=None, autosave=None):
+        """Plot the BTSP ramp of the layer.
+
+        Args:
+            fig (mpl_figure.Figure): Figure object. Defaults to None.
+            ax (plt.Axes): Axes object. Defaults to None.
+            autosave (bool, optional): Whether to autosave the figure. Defaults to None.
+
+        Returns:
+            mpl_figure.Figure: Figure object.
+            plt.Axes: Axes object.
+        """
+
+        if ax is None:
+            fig, ax = plt.subplots(3, 1, figsize=[9, 7], sharex=True)
+        elif ax.shape != (3,):
+            raise ValueError("ax must have shape (3,).")
+
+        super().plot_BTSP_ramp(fig, ax[:2], autosave=False)
+
+        ax[2].plot(
+            self.history["t"],
+            self.inputs["NMDACurrent"]["layer"].history["current"],
+            lw=1.2,
+            color=self.color,
+        )
+        ax[1].set_xlabel("")
+        ax[2].set_xlabel("Time (s)")
+        ax[2].set_ylabel("CA1 NMDA current")
+        ax[2].spines[["top", "right"]].set_visible(False)
+
+        util.save_figure(fig, f"{self.name}_BTSP_ramp", save=autosave)  # type: ignore[attr-defined]
+
+        return fig, ax

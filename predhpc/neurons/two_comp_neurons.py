@@ -47,6 +47,7 @@ class TwoCompLayer:
         "inhibit_weight": 0.5,  # multiplied by -1 identity matrix
         "inhibit_activation_params": util.get_standard_sigmoid_params(center_0=False),
         "inhibit_input_filter_tau": 0.1,
+        "inhibit_input_trend_tau": 0.1,
     }
 
     ignored_param_keys = list()  # type: list[str]
@@ -161,6 +162,7 @@ class TwoCompLayer:
                 "activation_params": self.inhibit_activation_params,  # type: ignore[attr-defined]
                 "color": self.inhibit_color,  # type: ignore[attr-defined]
                 "input_filter_tau": self.inhibit_input_filter_tau,  # type: ignore[attr-defined]
+                "input_trend_tau": self.inhibit_input_trend_tau,  # type: ignore[attr-defined]
             }
 
             with warnings.catch_warnings():
@@ -190,17 +192,17 @@ class TwoCompLayer:
         if self.inhibit_dend:  # type: ignore[attr-defined]
             self.DendriteInhibition.set_learn(inhibit)
 
-    def set_btsp_learn(self, learn=None, soma=None, dend=None):
+    def set_BTSP_learn(self, learn=None, soma=None, dend=None):
         if learn is not None:
             soma = learn if soma is None else soma
             dend = learn if dend is None else dend
 
-        self.SomaCompartment.set_btsp_learn(soma)
-        self.DendriteCompartment.set_btsp_learn(dend)
+        self.SomaCompartment.set_BTSP_learn(soma)
+        self.DendriteCompartment.set_BTSP_learn(dend)
 
     def update(
         self,
-        # btsp_targets: list | np.ndarray[tuple[int], np.dtype[np.int64]] = list(),
+        # BTSP_targets: list | np.ndarray[tuple[int], np.dtype[np.int64]] = list(),
         dend_first: bool | None = None,
     ):
         if self.inhibit_dend:  # type: ignore[attr-defined]

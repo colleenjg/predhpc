@@ -66,10 +66,10 @@ CA1_PARAMS_T_MAZE = {
     "biases": None,
     "init_weights_zero": True,
     "w_init_scale": 0.1,  # set fairly small
-    "lr": 5e-5,
     "apply_Ojas_rule": True,
-    "btsp_filter_tau": DT * 8,
-    "btsp_fr": 20,
+    "BTSP_filter_tau": DT * 8,
+    "lr": 5e-5,
+    "BTSP_lr_fact": 300,
     "n": 1,
 }
 
@@ -77,23 +77,37 @@ CA1_TWO_COMP_PARAMS = {
     "n": 8,
     "name": "CA1_TwoComp",
     "biases": None,
-    "lr": 1e-4,
-    "apply_Ojas_rule": False,
-    "normalize_weights": True,
-    "btsp_single": True,
     "dend_init_weights_zero": False,
-    "dend_w_init_loc": 0.03,
-    "dend_w_init_scale": 0.01,  # fairly narrow distribution
-    "soma_init_weights_zero": True,
-    "soma_to_dend_weight": 0.5,
-    "soma_w_init_scale": 0.2,  # fairly narrow distribution
-    "inhibit_dend": True,
-    "inhibit_weight": 0.5,
-    "inhibit_color": "C3",
-    "soma_btsp_filter_tau": DT * 15,
-    "soma_btsp_fr": 30,
+    "soma_init_weights_zero": False,
+    "soma_activation_params": util.get_standard_sigmoid_params(
+        max_fr=10, center_0=False
+    ),
+    "dend_activation_params": util.get_standard_sigmoid_params(
+        max_fr=10, center_0=False, width_x=3.0
+    ),
+    "inhibit_activation_params": util.get_standard_sigmoid_params(
+        max_fr=10, center_0=False
+    ),
+    "apply_Ojas_rule": False,  # doesn't work with high clamping
     "soma_color": "#3D3D79",
     "dend_color": "#8787C9",
+    "inhibit_dend": True,
+    "single_BTSP": False,
+    "dend_w_init_loc": 0.4,
+    "soma_w_init_loc": 0.02,
+    "dend_w_init_scale": 0,
+    "soma_w_init_scale": 0,
+    "soma_to_dend_weight": 0,
+    "dend_to_soma_weight": 1,
+    "normalize_weights_divisely": True,
+    "p": 1,
+    "lr": 1e-4,  # BTSP learning rate
+    "BTSP_lr_fact": 300,  # BTSP clamp
+    "BTSP_induction_threshold": 7,  # sustained firingrate required for BTSP
+    "soma_BTSP_plateau_length": 0.1,  # plateau length required for BTSP
+    "soma_BTSP_filter_tau": DT * 15,  # BTSP kernel tau
+    "inhibit_weight": 0.9,  # strength of dendritic inhibition from soma
+    "inhibit_input_filter_tau": DT * 15,
 }
 
 ### 1D (LINEAR TRACK) PARAMETERS ###
@@ -145,8 +159,8 @@ CA1_PARAMS_1D = {
     "init_weights_zero": False,
     "w_init_scale": 0.1,  # set fairly small
     "lr": 1e-4,
-    "btsp_filter_tau": DT * 8,
-    "btsp_fr": 10,
+    "BTSP_lr_fact": 100,
+    "BTSP_filter_tau": DT * 8,
 }
 
 
@@ -226,7 +240,7 @@ def plot_T_maze(
     return fig, axes
 
 
-def plot_time_series_with_btsp_events(
+def plot_time_series_with_BTSP_events(
     CA1s: learning_neurons.BTSPLayer,
     fig: mpl_figure.Figure | None = None,
     ax: plt.Axes | None = None,
@@ -247,7 +261,7 @@ def plot_time_series_with_btsp_events(
 
     CA1s.plot_rate_timeseries(chosen_neurons="all", spikes=True, fig=fig, ax=ax)
     lo, hi = ax.get_ylim()
-    # for t in CA1s.history["btsp_events"]:
+    # for t in CA1s.history["BTSP_events"]:
     #     y_hei = lo + (hi - lo) * 0.95
     #     ax.scatter(
     #         CA1s.history["t"][t] / 60,
@@ -289,7 +303,7 @@ def plot_time_series_with_btsp_events(
     return fig, ax
 
 
-def learn_T_maze_btsp(
+def learn_T_maze_BTSP(
     env_params: dict[str, Any] = ENV_PARAMS_T_MAZE,
     agent_params: dict[str, Any] = AGENT_PARAMS_T_MAZE,
     CA3_PC_params: dict[str, Any] = CA3_PC_PARAMS_T_MAZE,
@@ -299,7 +313,7 @@ def learn_T_maze_btsp(
     max_num_steps: int = 10000,
     weight_recording_freq: int = 100,
     use_Hebbian: bool = False,
-    btsp_after_num_target_reaches: int = 2,
+    BTSP_after_num_target_reaches: int = 2,
     two_compartment: bool = True,
     autosave: bool | None = None,
 ) -> tuple[
@@ -322,7 +336,7 @@ def learn_T_maze_btsp(
         weight_recording_freq (int, optional): Frequency at which to record weights.
             Defaults to 100.
         use_Hebbian (bool, optional): Whether to use Hebbian learning. Defaults to False.
-        btsp_after_num_target_reaches (int, optional): Number of times to reach target before
+        BTSP_after_num_target_reaches (int, optional): Number of times to reach target before
             enabling BTSP learning. Defaults to 2.
         autosave (bool, optional): Whether to autosave. Defaults to None.
 
@@ -358,12 +372,12 @@ def learn_T_maze_btsp(
 
     if two_compartment:
         CA1s = two_comp_neurons.TwoCompLayer(Ag, params=CA1_params)
-        CA1s.set_btsp_learn(soma=True, dend=False)
+        CA1s.set_BTSP_learn(soma=True, dend=False)
         CA1s_for_weights = CA1s.SomaCompartment
         CA1s.set_learn(soma=use_Hebbian, dend=False, inhibit=False)
     else:
         CA1s = learning_neurons.BTSPLayer(Ag, params=CA1_params)
-        CA1s.set_btsp_learn()
+        CA1s.set_BTSP_learn()
         CA1s_for_weights = CA1s
         CA1s.set_learn(use_Hebbian)
 
@@ -381,16 +395,16 @@ def learn_T_maze_btsp(
 
         # check whether a restart BTSP signal should go out
         if not two_compartment:
-            btsp_targets = []
+            BTSP_targets = []
             if restarted and CA1s.n > 1:  # type: ignore[attr-defined]
-                btsp_targets = [CA1s.n - 1]  # type: ignore[attr-defined]
+                BTSP_targets = [CA1s.n - 1]  # type: ignore[attr-defined]
 
             # check whether a target BTSP signal should go out
             if (
                 Ag.reached_target
-                and len(Ag.target_df) == btsp_after_num_target_reaches + 1
+                and len(Ag.target_df) == BTSP_after_num_target_reaches + 1
             ):
-                btsp_targets = [0]
+                BTSP_targets = [0]
 
         # check for restart
         restarted = Ag.reached_end
@@ -399,7 +413,7 @@ def learn_T_maze_btsp(
         if two_compartment:
             CA1s.update()
         else:
-            CA1s.update(btsp_targets=btsp_targets)
+            CA1s.update(BTSP_targets=BTSP_targets)
         if not i % weight_recording_freq:
             CA1_weights.append(CA1s_for_weights.inputs[CA3_PCs.name]["w"].copy())  # type: ignore[attr-defined]
 
@@ -427,7 +441,7 @@ def learn_T_maze_btsp(
 
     CA1s.plot_rate_maps_across_learning()  # type: ignore[attr-defined]
 
-    plot_time_series_with_btsp_events(CA1s)  # type: ignore[arg-type]
+    plot_time_series_with_BTSP_events(CA1s)  # type: ignore[arg-type]
 
     return Env, Ag, ECs, CA3_PCs, CA1s
 
@@ -577,7 +591,7 @@ def plot_1D_time_info(
     return fig, axes
 
 
-def learn_1D_btsp(
+def learn_1D_BTSP(
     env_params: dict[str, Any] = ENV_PARAMS_1D,
     agent_params: dict[str, Any] = AGENT_PARAMS_1D,
     CA3_PC_params: dict[str, Any] = CA3_PC_PARAMS_1D,
@@ -586,7 +600,7 @@ def learn_1D_btsp(
     max_num_steps: int = 5000,
     weight_recording_freq: int = 100,
     use_Hebbian: bool = False,
-    btsp_after_num_target_reaches: int = 5,
+    BTSP_after_num_target_reaches: int = 5,
     two_compartment: bool = False,
     autosave: bool | None = None,
 ) -> tuple[Environment, agent.ResetableAgent, PlaceCells, learning_neurons.BTSPLayer]:
@@ -606,7 +620,7 @@ def learn_1D_btsp(
             Defaults to 100.
         use_Hebbian (bool, optional): Whether to use Hebbian learning.
             Defaults to False.
-        btsp_after_num_target_reaches (int, optional): Number of target reaches at which to
+        BTSP_after_num_target_reaches (int, optional): Number of target reaches at which to
             apply BTSP event. Defaults to 5.
         two_compartment (bool, optional): Whether to use two-compartment model.
             Defaults to False.
@@ -628,7 +642,7 @@ def learn_1D_btsp(
     else:
         CA1s = learning_neurons.BTSPLayer(Ag, params=CA1_params)
     CA1s.set_learn(use_Hebbian)
-    CA1s.set_btsp_learn()
+    CA1s.set_BTSP_learn()
 
     # run learning
     restarted = False
@@ -642,14 +656,14 @@ def learn_1D_btsp(
 
         # check whether a restart BTSP signal should go out
         if not two_compartment:
-            btsp_targets = list()
-            if len(Ag.target_df) == btsp_after_num_target_reaches + 1:
+            BTSP_targets = list()
+            if len(Ag.target_df) == BTSP_after_num_target_reaches + 1:
                 if restarted and CA1s_n > 1:
-                    btsp_targets = [CA1s_n - 1]
+                    BTSP_targets = [CA1s_n - 1]
 
                 # check whether a target BTSP signal should go out
                 if Ag.reached_target:
-                    btsp_targets = [0]
+                    BTSP_targets = [0]
 
         # check for restart
         restarted = Ag.reached_end
@@ -658,7 +672,7 @@ def learn_1D_btsp(
         if two_compartment:
             CA1s.update()
         else:
-            CA1s.update(btsp_targets=btsp_targets)
+            CA1s.update(BTSP_targets=BTSP_targets)
         if not i % weight_recording_freq:
             CA1_weights.append(CA1s.inputs[CA3_PCs_name]["w"].copy())
 
@@ -687,7 +701,7 @@ def learn_1D_btsp(
 
 
 if __name__ == "__main__":
-    Env, Ag, CA3_PCs, CA1s = learn_1D_btsp(
+    Env, Ag, CA3_PCs, CA1s = learn_1D_BTSP(
         ENV_PARAMS_1D, AGENT_PARAMS_1D, CA3_PC_PARAMS_1D, CA1_PARAMS_1D
     )
 
