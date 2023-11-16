@@ -151,6 +151,7 @@ class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
         Returns:
             firingrate: array of firing rates
         """
+
         if evaluate_at == "last":
             V = np.zeros(self.n)
         elif evaluate_at == "all":
@@ -171,6 +172,7 @@ class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
                     I = inputlayer["layer"].firingrate
             else:  # kick can down the road let input layer decide how to evaluate the firingrate. this is core to feedforward layer as this recursive call will backprop through the upstraem layers until it reaches a "core" (e.g. place cells) layer which will then evaluate the firingrate.
                 I = inputlayer["layer"].get_state(evaluate_at, **kwargs)
+
             inputlayer["I_temp"] = I
             V += np.matmul(w, I)
 
@@ -734,7 +736,7 @@ class HebbianLayer(LearnLayer):
         "name": "HebbianLayer",
         "lr": 1e-4,  # learning rate
         "biases": None,
-        "normalize_weights_divisely": False,
+        "normalize_weights_divisively": False,
         "apply_Ojas_rule": False,
         "use_targets": False,
         "init_weights_zero": False,  # whether to initialize weights to 0
@@ -769,7 +771,7 @@ class HebbianLayer(LearnLayer):
 
         self.set_learn(True)
 
-        if self.apply_Ojas_rule and self.normalize_weights_divisely:  # type: ignore[attr-defined]
+        if self.apply_Ojas_rule and self.normalize_weights_divisively:  # type: ignore[attr-defined]
             raise ValueError("Can only set 'oja' or 'norm' to True, not both.")
 
         return
@@ -868,7 +870,7 @@ class HebbianLayer(LearnLayer):
 
         if self.apply_Ojas_rule:  # type: ignore[attr-defined]
             util.perform_Oja_update_(Is, ws, O, lr=lr, b=b)
-        elif self.normalize_weights_divisely:  # type: ignore[attr-defined]
+        elif self.normalize_weights_divisively:  # type: ignore[attr-defined]
             util.perform_divisively_normalized_Hebbian_update_(
                 Is, ws, O, lr=lr, b=b, p=self.p
             )

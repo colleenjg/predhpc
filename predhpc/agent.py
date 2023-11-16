@@ -741,7 +741,7 @@ class ResetableAgent(Agent):
         ax: plt.Axes | None = None,
         alpha: float = 0.6,
         color: str = "k",
-        ms: int | float = 50,
+        ms: int | float = 45,
         plot_targets: bool = True,
         autosave: bool | None = None,
     ) -> tuple[mpl_figure.Figure, plt.Axes]:
@@ -812,7 +812,7 @@ class ResetableAgent(Agent):
                 alpha=alpha,
                 marker=markers.MarkerStyle("."),
                 color=color,
-                s=ms / 10,
+                s=ms / 8,
             )
 
             if len(reached_reset_position):
@@ -826,10 +826,10 @@ class ResetableAgent(Agent):
                     ax.scatter(
                         x_start,
                         y_start,
-                        marker=markers.MarkerStyle("."),
-                        color="blue",
+                        marker=markers.MarkerStyle("^"),
+                        color="gold",
                         alpha=alpha_pts,
-                        s=ms,
+                        s=ms / 3,
                     )
 
                 if self.reset_position is not None:
@@ -845,7 +845,7 @@ class ResetableAgent(Agent):
                         marker=markers.MarkerStyle("x"),
                         color="red",
                         alpha=alpha_pts,
-                        s=ms / 3,
+                        s=ms / 2.5,
                     )
 
             if plot_targets and self.target_position is not None:
@@ -863,10 +863,10 @@ class ResetableAgent(Agent):
                     ax.scatter(
                         x_targ,
                         y_targ,
-                        marker=markers.MarkerStyle("d"),
-                        color="gold",
+                        marker=markers.MarkerStyle("."),
+                        color="blue",
                         alpha=alpha_pts,
-                        s=ms / 5,
+                        s=ms,
                     )
 
         ax.set_xlabel("Time / min")
@@ -1012,12 +1012,10 @@ class ResetableAgent(Agent):
             if plot_target and self.target_position is not None:
                 ax.scatter(
                     *self.target_position,
-                    marker=markers.MarkerStyle("d"),
-                    color="gold",
-                    s=20,
+                    marker=".",
+                    color="blue",
+                    s=18,
                     zorder=5,
-                    edgecolors="darkgoldenrod",
-                    linewidth=0.5,
                     alpha=target_alpha,
                     label="target",
                 )
@@ -1147,12 +1145,12 @@ class ResetableAgent(Agent):
             )
 
         for c, traj_idx, marker in [
-            (start_c, traj_starts, "x"),
-            (end_c, traj_ends, "o"),
+            (start_c, traj_starts, "^"),
+            (end_c, traj_ends, "x"),
         ]:
             if c is None or traj_idx is None:
                 continue
-            lw = 2 if marker == "x" else 0
+            lw = 2 if marker == "x" else 1
             traj_idx = traj_idx[(traj_idx >= startid) & (traj_idx <= endid)]
             trajectory = pos[traj_idx]
             time = t[traj_idx]
@@ -1167,12 +1165,10 @@ class ResetableAgent(Agent):
                 if self.target_position is not None:
                     ax.scatter(
                         *self.target_position,
-                        marker=markers.MarkerStyle("d"),
+                        marker=markers.MarkerStyle("^"),
                         color="gold",
                         s=20,
                         zorder=5,
-                        edgecolors="black",
-                        linewidth=0.5,
                     )
 
                 s = 15 * np.ones_like(time)
@@ -1449,8 +1445,8 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
         return self.check_if_reset_position_reached(position="right")
 
 
-class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
-    """Extend the reset agent so that it operates in an exploration box"""
+class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
+    """Extend the reset agent so that it operates in an open field"""
 
     default_params = {
         "reward_factor": 5,  # factor for setting a reward object as a target for a trajectory
@@ -1474,7 +1470,7 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
 
     fixed_params = dict()  # type: dict[str, Any]
 
-    def __init__(self, Env: env.ExploreBox, params: dict[str, Any] = dict()):
+    def __init__(self, Env: env.OpenField, params: dict[str, Any] = dict()):
         """Initialise the agent.
 
         Args:
@@ -1490,8 +1486,8 @@ class BoxAgent(ResetableAgent, util.ParamsManagerMixin):
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
 
-        if not isinstance(Env, env.ExploreBox):
-            raise TypeError("Env must be an ExploreBox object.")
+        if not isinstance(Env, env.OpenField):
+            raise TypeError("Env must be an OpenField object.")
 
         super().__init__(Env, self.params)
 

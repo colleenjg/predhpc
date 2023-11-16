@@ -151,25 +151,38 @@ class TEnv(Environment, util.ParamsManagerMixin):
     ) -> tuple[mpl_figure.Figure, plt.Axes]:
         """Plot the environment."""
 
-        # with DontPlotObjects(self):
-        fig, ax = super().plot_environment(fig=fig, ax=ax, autosave=False, **kwargs)
+        fig, ax = super().plot_environment(
+            fig=fig, ax=ax, autosave=False, plot_objects=False, **kwargs
+        )
 
         if fig is None or ax is None:
             raise RuntimeError("fig or ax is None.")
 
         ax.scatter(
             *self.T_start,
-            marker=markers.MarkerStyle("o"),
-            color="blue",
+            marker=markers.MarkerStyle("^"),
+            color="gold",
             s=20,
             zorder=5,
             label="start",
         )
+
+        if len(self.objects):
+            for object_coords in self.objects["objects"]:
+                ax.scatter(
+                    *object_coords,
+                    marker=markers.MarkerStyle("o"),
+                    color="blue",
+                    s=18,
+                    zorder=5,
+                    label="target",
+                )
+
         ax.scatter(
             *self.left_T_end,
             marker=markers.MarkerStyle("x"),
             color="red",
-            s=20,
+            s=18,
             zorder=5,
             label="reset",
         )
@@ -177,7 +190,7 @@ class TEnv(Environment, util.ParamsManagerMixin):
             *self.right_T_end,
             marker=markers.MarkerStyle("x"),
             color="red",
-            s=20,
+            s=18,
             zorder=5,
         )
         ax.legend(loc="lower right", frameon=False)
@@ -187,8 +200,8 @@ class TEnv(Environment, util.ParamsManagerMixin):
         return fig, ax
 
 
-class ExploreBox(Environment, util.ParamsManagerMixin):
-    """Box-shaped environment to explore."""
+class OpenField(Environment, util.ParamsManagerMixin):
+    """Open field environment to explore."""
 
     default_params = {
         "init_random_reward_obj": 1,
@@ -864,6 +877,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         self,
         fig: mpl_figure.Figure | None = None,
         ax: plt.Axes | None = None,
+        plot_objects: bool = True,
         no_legend: bool = False,
         autosave: bool | None = None,
         **kwargs,
@@ -873,6 +887,7 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
         Args:
             fig (matplotlib figure, optional): figure to plot on. Defaults to None.
             ax (matplotlib axis, optional): axis to plot on. Defaults to None.
+            plot_objects (bool, optional): whether to plot objects. Defaults to True.
             no_legend (bool, optional): whether to remove legend. Defaults to False.
             autosave (bool, optional): whether to save the plot. Defaults to None.
 
@@ -881,33 +896,23 @@ class ExploreBox(Environment, util.ParamsManagerMixin):
             ax (matplotlib axis): axis with environment plotted.
         """
 
-        class DontPlotObjects:
-            def __init__(self, env):
-                self.env = env
-                self.plot_objects = env.plot_objects
-
-            def __enter__(self):
-                self.env.plot_objects = False
-
-            def __exit__(self, type, value, traceback):
-                self.env.plot_objects = self.plot_objects
-
         if fig is None or ax is None:
             env_width = self.extent[1] - self.extent[0]
             add_x = 0
-            if self.plot_objects:
+            if plot_objects:
                 add_x = 3 * env_width  # for legend and labels
             fig, ax = plt.subplots(
                 figsize=(3 * env_width + add_x, 3 * (self.extent[3] - self.extent[2]))
             )
 
-        with DontPlotObjects(self):
-            fig, ax = super().plot_environment(fig=fig, ax=ax, autosave=False, **kwargs)
+        fig, ax = super().plot_environment(
+            fig=fig, ax=ax, autosave=False, plot_objects=False, **kwargs
+        )
 
         if fig is None or ax is None:
             raise RuntimeError("fig or ax is None.")
 
-        if self.plot_objects:
+        if plot_objects:
             type_num_to_plot_params_dict = copy.deepcopy(
                 self.type_num_to_plot_params_dict
             )

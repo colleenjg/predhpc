@@ -121,7 +121,7 @@ class FixedObjectCells(ObjectCells):
     dictionary below.
 
     See ObjectCells for details. FixedObjectCells are initialised with a
-    fixed number of cells per object type. They are only compatible with ExploreBox
+    fixed number of cells per object type. They are only compatible with OpenField
     environments.
 
     default_params = {
@@ -142,10 +142,8 @@ class FixedObjectCells(ObjectCells):
     def __init__(self, Agent: "ratinabox.Agent", params: dict[str, Any] = dict()):
         self.Agent = Agent
 
-        if not isinstance(self.Agent.Environment, env.ExploreBox):
-            raise ValueError(
-                "Environment must be an ExploreBox to use FixedObjectCells"
-            )
+        if not isinstance(self.Agent.Environment, env.OpenField):
+            raise ValueError("Environment must be an OpenField to use FixedObjectCells")
 
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
@@ -223,7 +221,7 @@ class WeightedObjectCells(ObjectCells):
 
     See ObjectCells for details. WeightedObjectCells are initialised with a random
     number of cells per object type, based on a weighted distribution per object type.
-    They are only compatible with ExploreBox environments.
+    They are only compatible with OpenField environments.
 
     default_params = {
         "n": 10, #each will be randomly assigned an object type, tuning angle and tuning distance
@@ -244,9 +242,9 @@ class WeightedObjectCells(ObjectCells):
     def __init__(self, Agent: "ratinabox.Agent", params: dict[str, Any] = dict()):
         self.Agent = Agent
 
-        if not isinstance(self.Agent.Environment, env.ExploreBox):
+        if not isinstance(self.Agent.Environment, env.OpenField):
             raise ValueError(
-                "Environment must be an ExploreBox to use WeightedObjectCells"
+                "Environment must be an OpenField to use WeightedObjectCells"
             )
 
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
@@ -325,7 +323,7 @@ class FixedObjectVectorCells(ObjectVectorCells):
     dictionary below.
 
     See ObjectVectorCells for details. FixedObjectVectorCells are initialised with a
-    fixed number of cells per object type. They are only compatible with ExploreBox
+    fixed number of cells per object type. They are only compatible with OpenField
     environments.
 
     Reference frame can be allocentric or egocentric. In the latter case the tuning
@@ -351,9 +349,9 @@ class FixedObjectVectorCells(ObjectVectorCells):
     def __init__(self, Agent: "ratinabox.Agent", params: dict[str, Any] = dict()):
         self.Agent = Agent
 
-        if not isinstance(self.Agent.Environment, env.ExploreBox):
+        if not isinstance(self.Agent.Environment, env.OpenField):
             raise ValueError(
-                "Environment must be an ExploreBox to use FixedObjectVectorCells"
+                "Environment must be an OpenField to use FixedObjectVectorCells"
             )
 
         (
@@ -405,7 +403,7 @@ class WeightedObjectVectorCells(ObjectVectorCells):
     """Initialises WeightedObjectVectorCells(), takes as input a parameter dictionary. Any values not provided by the params dictionary are taken from a default dictionary below.
 
     See ObjectVectorCells for details. WeightedObjectVectorCells are initialised with a random number of cells per object type, based on a weighted distribution per object type.
-    They are only compatible with ExploreBox environments.
+    They are only compatible with OpenField environments.
 
     Reference frame can be allocentric or egocentric. In the latter case the tuning angle is relative to the heading direction of the agent.
 
@@ -429,9 +427,9 @@ class WeightedObjectVectorCells(ObjectVectorCells):
     def __init__(self, Agent: "ratinabox.Agent", params: dict[str, Any] = dict()):
         self.Agent = Agent
 
-        if not isinstance(self.Agent.Environment, env.ExploreBox):
+        if not isinstance(self.Agent.Environment, env.OpenField):
             raise ValueError(
-                "Environment must be an ExploreBox to use WeightedObjectVectorCells"
+                "Environment must be an OpenField to use WeightedObjectVectorCells"
             )
 
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 from typing import Any, Sequence
-import copy
 import warnings
 
 from matplotlib import pyplot as plt  # type: ignore[import]
@@ -11,160 +10,8 @@ import numpy as np
 from tqdm import tqdm  # type: ignore[import]
 from ratinabox import Environment, PlaceCells  # type: ignore[import]
 
-from predhpc import agent, env, plot_util, util
+from predhpc import agent, env, plot_util, util, params_util
 from predhpc.neurons import learning_neurons, two_comp_neurons, object_neurons
-
-
-SCALE = 1.0
-DT = 0.02
-
-
-### T-MAZE PARAMETERS ###
-
-ENV_PARAMS_T_MAZE = {
-    "prop_env": 0.1,
-}
-
-AGENT_PARAMS_T_MAZE = {
-    "dt": DT,
-    "head_direction_smoothing_timescale": DT * 2,
-    "thigmotaxis": 0.5,
-    "speed_mean": 0.16,
-    "speed_std": 0.16,
-    "reset_reached_within_tolerance_prop_to_dt": 1,
-    "target_reached_within_tolerance_prop_to_dt": 3,
-    "left_arm_prop": 0.5,
-}
-
-EC_PARAMS_T_MAZE = {
-    "name": "LEC",
-    # "n": 10,
-    # "pref_object_dist": DT * 2,
-    # "angle_spread_degrees": 30,
-    "description": "gaussian",
-    "widths": DT * 4,
-    "activation_params": {"activation": "sigmoid", "min_fr": 0, "max_fr": 10},
-    "color": "#22772E",
-}
-
-CA3_PC_PARAMS_T_MAZE = {
-    "name": "CA3_PCs",
-    "n": 40,
-    "description": "gaussian_threshold",
-    "place_cell_centres": "uniform",
-    "min_fr": 0,
-    "max_fr": 10,
-    "color": "C5",
-    "widths": DT * 4,
-    "wall_geometry": "line_of_sight",  # due to environment shape
-    "color": "#99193A",
-}
-
-CA1_PARAMS_T_MAZE = {
-    "name": "CA1_BTSP",
-    "color": "C2",
-    "biases": None,
-    "init_weights_zero": True,
-    "w_init_scale": 0.1,  # set fairly small
-    "apply_Ojas_rule": True,
-    "BTSP_filter_tau": DT * 8,
-    "lr": 5e-5,
-    "BTSP_lr_fact": 300,
-    "n": 1,
-}
-
-CA1_TWO_COMP_PARAMS = {
-    "n": 8,
-    "name": "CA1_TwoComp",
-    "biases": None,
-    "dend_init_weights_zero": False,
-    "soma_init_weights_zero": False,
-    "soma_activation_params": util.get_standard_sigmoid_params(
-        max_fr=10, center_0=False
-    ),
-    "dend_activation_params": util.get_standard_sigmoid_params(
-        max_fr=10, center_0=False, width_x=3.0
-    ),
-    "inhibit_activation_params": util.get_standard_sigmoid_params(
-        max_fr=10, center_0=False
-    ),
-    "apply_Ojas_rule": False,  # doesn't work with high clamping
-    "soma_color": "#3D3D79",
-    "dend_color": "#8787C9",
-    "inhibit_dend": True,
-    "single_BTSP": False,
-    "dend_w_init_loc": 0.4,
-    "soma_w_init_loc": 0.02,
-    "dend_w_init_scale": 0,
-    "soma_w_init_scale": 0,
-    "soma_to_dend_weight": 0,
-    "dend_to_soma_weight": 1,
-    "normalize_weights_divisely": True,
-    "p": 1,
-    "lr": 1e-4,  # BTSP learning rate
-    "BTSP_lr_fact": 300,  # BTSP clamp
-    "BTSP_induction_threshold": 7,  # sustained firingrate required for BTSP
-    "soma_BTSP_plateau_length": 0.1,  # plateau length required for BTSP
-    "soma_BTSP_filter_tau": DT * 15,  # BTSP kernel tau
-    "inhibit_weight": 0.9,  # strength of dendritic inhibition from soma
-    "inhibit_input_filter_tau": DT * 15,
-}
-
-### 1D (LINEAR TRACK) PARAMETERS ###
-
-ENV_PARAMS_1D = {
-    "dimensionality": "1D",
-    "scale": SCALE,
-}
-
-AGENT_PARAMS_1D = {
-    "dt": DT,
-    "head_direction_smoothing_timescale": DT * 2,
-    "reset_reached_within_tolerance_prop_to_dt": 0.8,
-    "target_reached_within_tolerance_prop_to_dt": 3,
-    "speed_mean": 1,  # sets directionality
-    "speed_std": 0.5,
-    "start_position": 0 + DT,
-    "reset_position": SCALE - DT,
-    "target_position": SCALE - DT * 8,
-    "fixed_direction": True,
-    "wait_between_targets": 30,
-}
-
-EC_PARAMS_1D = {
-    "name": "LEC",
-    "description": "gaussian",
-    "widths": DT * 4,
-    "min_fr": 0,
-    "max_fr": 10,
-    "color": "#22772E",
-}
-
-CA3_PC_PARAMS_1D = {
-    "name": "CA3_PCs",
-    "n": 16,
-    "description": "gaussian_threshold",
-    "place_cell_centres": "uniform",
-    "min_fr": 0,
-    "max_fr": 10,
-    "color": "C5",
-    "widths": DT * 5,
-    "color": "#99193A",
-}
-
-CA1_PARAMS_1D = {
-    "name": "CA1_BTSP",
-    "color": "C2",
-    "biases": None,
-    "init_weights_zero": False,
-    "w_init_scale": 0.1,  # set fairly small
-    "lr": 1e-4,
-    "BTSP_lr_fact": 100,
-    "BTSP_filter_tau": DT * 8,
-}
-
-
-### T-MAZE FUNCTIONS ###
 
 
 def plot_T_maze(
@@ -174,7 +21,8 @@ def plot_T_maze(
     method: str = "groundtruth",
     autosave: bool | None = None,
 ):
-    """Plot the T-maze environment, agent trajectory, CA3 place cell locations and CA1 rate map.
+    """Plot the T-maze environment, agent trajectory, CA3 place cell locations and
+    CA1 rate map.
 
     Args:
         Ag (agent.Agent): Agent.
@@ -201,12 +49,10 @@ def plot_T_maze(
     CA3_PCs.plot_place_cell_locations(fig=fig, ax=axes_flat[1])
     axes_flat[1].scatter(
         *Ag.target_position,
-        marker="d",
-        color="gold",
-        s=20,
+        marker=".",
+        color="blue",
+        s=18,
         zorder=5,
-        edgecolors="darkgoldenrod",
-        linewidth=0.5,
     )
     axes_flat[1].set_title("CA3 rate maps")
 
@@ -226,12 +72,10 @@ def plot_T_maze(
         title = "EC rate map"
     axes_flat[2].scatter(
         *Ag.target_position,
-        marker="d",
-        color="gold",
-        s=20,
+        marker=".",
+        color="blue",
+        s=18,
         zorder=5,
-        edgecolors="darkgoldenrod",
-        linewidth=0.5,
     )
     axes_flat[2].set_title(title)
 
@@ -261,16 +105,6 @@ def plot_time_series_with_BTSP_events(
 
     CA1s.plot_rate_timeseries(chosen_neurons="all", spikes=True, fig=fig, ax=ax)
     lo, hi = ax.get_ylim()
-    # for t in CA1s.history["BTSP_events"]:
-    #     y_hei = lo + (hi - lo) * 0.95
-    #     ax.scatter(
-    #         CA1s.history["t"][t] / 60,
-    #         y_hei,
-    #         marker=markers.MarkerStyle("x"),
-    #         s=8,
-    #         color=(CA1s.color or "k"),
-    #         alpha=0.7,
-    #     )
 
     target_reached_step = CA1s.Agent.target_df["reached_step"].to_numpy()  # type: ignore[attr-defined]
     if np.isnan(target_reached_step[-1]):
@@ -304,9 +138,9 @@ def plot_time_series_with_BTSP_events(
 
 
 def learn_T_maze_BTSP(
-    env_params: dict[str, Any] = ENV_PARAMS_T_MAZE,
-    agent_params: dict[str, Any] = AGENT_PARAMS_T_MAZE,
-    CA3_PC_params: dict[str, Any] = CA3_PC_PARAMS_T_MAZE,
+    env_params: dict[str, Any] | None = None,
+    agent_params: dict[str, Any] | None = None,
+    CA3_PC_params: dict[str, Any] | None = None,
     CA1_params: dict[str, Any] | None = None,
     EC_params: dict[str, Any] | None = None,
     num_rewards: int = 200,
@@ -326,11 +160,11 @@ def learn_T_maze_BTSP(
     """Run a T-maze learning experiment with BTSP learning.
 
     Args:
-        env_params (dict): Parameters for the environment. Defaults to ENV_PARAMS_T_MAZE.
-        agent_params (dict): Parameters for the agent. Defaults to AGENT_PARAMS_T_MAZE.
+        env_params (dict): Parameters for the environment. Defaults to None.
+        agent_params (dict): Parameters for the agent. Defaults to None.
         CA3_PC_params (dict): Parameters for the CA3 place cells. Defaults to
-            CA3_PC_PARAMS_T_MAZE.
-        CA1_params (dict): Parameters for the CA1 neurons. Defaults to CA1_PARAMS_T_MAZE.
+            None.
+        CA1_params (dict): Parameters for the CA1 neurons. Defaults to None.
         num_rwd (int, optional): Target number of rewards to reach. Defaults to 200.
         max_steps (int, optional): Maximum number of steps to run. Defaults to 10000.
         weight_recording_freq (int, optional): Frequency at which to record weights.
@@ -344,23 +178,22 @@ def learn_T_maze_BTSP(
         Environment, Agent, EC cells, CA3 place cells, CA1 neurons
     """
 
+    env_params = params_util.get_env_params(environment="tmaze") or env_params
     Env = env.TEnv(params=env_params)
 
+    agent_params = params_util.get_agent_params(environment="tmaze") or agent_params
     Ag = agent.TAgent(Env, params=agent_params)
 
+    CA3_PC_params = params_util.get_CA3_PC_params(environment="tmaze") or CA3_PC_params
     CA3_PCs = PlaceCells(Ag, params=CA3_PC_params)
 
     if CA1_params is None:
-        if two_compartment:
-            CA1_params = CA1_TWO_COMP_PARAMS
-        else:
-            CA1_params = CA1_PARAMS_T_MAZE
-
-    CA1_params = copy.copy(CA1_params)
+        CA1_params = params_util.get_CA1_params(
+            environment="tmaze", BTSP=True, two_compartment=two_compartment
+        )
 
     if two_compartment:
-        if EC_params is None:
-            EC_params = EC_PARAMS_T_MAZE
+        EC_params = params_util.get_EC_params(environment="tmaze") or EC_params
         ECs = object_neurons.ObjectCells(Ag, params=EC_params)
         CA1_params["dend_input_layers"] = [ECs]  # type: ignore[assignment]
         CA1_params["soma_input_layers"] = [CA3_PCs]  # type: ignore[assignment]
@@ -592,10 +425,10 @@ def plot_1D_time_info(
 
 
 def learn_1D_BTSP(
-    env_params: dict[str, Any] = ENV_PARAMS_1D,
-    agent_params: dict[str, Any] = AGENT_PARAMS_1D,
-    CA3_PC_params: dict[str, Any] = CA3_PC_PARAMS_1D,
-    CA1_params: dict[str, Any] = CA1_PARAMS_1D,
+    env_params: dict[str, Any] | None = None,
+    agent_params: dict[str, Any] | None = None,
+    CA3_PC_params: dict[str, Any] | None = None,
+    CA1_params: dict[str, Any] | None = None,
     num_rewards: int = 10,
     max_num_steps: int = 5000,
     weight_recording_freq: int = 100,
@@ -607,11 +440,10 @@ def learn_1D_BTSP(
     """Run a 1D learning experiment with BTSP learning.
 
     Args:
-        env_params (dict): Parameters for the environment. Defaults to ENV_PARAMS_1D.
-        agent_params (dict): Parameters for the agent. Defaults to AGENT_PARAMS_1D.
-        CA3_PC_params (dict): Parameters for the CA3 place cells. Defaults to
-            CA3_PC_PARAMS_1D.
-        CA1_params (dict): Parameters for the CA1 neurons. Defaults to CA1_PARAMS_1D.
+        env_params (dict): Parameters for the environment. Defaults to None.
+        agent_params (dict): Parameters for the agent. Defaults to None.
+        CA3_PC_params (dict): Parameters for the CA3 place cells. Defaults to None.
+        CA1_params (dict): Parameters for the CA1 neurons. Defaults to None.
         num_rewards (int, optional): Target number of rewards to reach.
             Defaults to 200.
         max_num_steps (int, optional): Maximum number of steps to run.
@@ -630,12 +462,20 @@ def learn_1D_BTSP(
         Environment, Agent, CA3 place cells, CA1 neurons
     """
 
+    env_params = params_util.get_env_params(environment="linear") or env_params
     Env = Environment(params=env_params)
 
+    agent_params = params_util.get_agent_params(environment="linear") or agent_params
     Ag = agent.ResetableAgent(Env, params=agent_params)
+
+    CA3_PC_params = params_util.get_CA3_PC_params(environment="linear") or CA3_PC_params
     CA3_PCs = PlaceCells(Ag, params=CA3_PC_params)
 
-    CA1_params = copy.copy(CA1_params)
+    if CA1_params is None:
+        CA1_params = params_util.get_CA1_params(
+            environment="linear", two_compartment=two_compartment, BTSP=True
+        )
+
     CA1_params["input_layers"] = [CA3_PCs]
     if two_compartment:
         CA1s = two_comp_neurons.TwoCompLayer(Ag, params=CA1_params)
@@ -701,8 +541,6 @@ def learn_1D_BTSP(
 
 
 if __name__ == "__main__":
-    Env, Ag, CA3_PCs, CA1s = learn_1D_BTSP(
-        ENV_PARAMS_1D, AGENT_PARAMS_1D, CA3_PC_PARAMS_1D, CA1_PARAMS_1D
-    )
+    Env, Ag, CA3_PCs, CA1s = learn_1D_BTSP()
 
     breakpoint()
