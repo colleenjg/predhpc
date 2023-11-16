@@ -45,7 +45,7 @@ class TwoCompLayer:
         "inhibit_dend": True,
         "inhibit_color": "k",
         "inhibit_weight": 0.5,  # multiplied by -1 identity matrix
-        "inhibit_activation_params": util.get_standard_sigmoid_params(center_0=False),
+        "inhibit_activation_function": util.get_standard_sigmoid_params(center_0=False),
         "inhibit_input_filter_tau": 0.1,
         "inhibit_input_trend_tau": 0.1,
     }
@@ -159,7 +159,7 @@ class TwoCompLayer:
             inhibit_params = {
                 "name": "SomaInhibitionOfDendrites",
                 "n": self.n,
-                "activation_params": self.inhibit_activation_params,  # type: ignore[attr-defined]
+                "activation_function": self.inhibit_activation_function,  # type: ignore[attr-defined]
                 "color": self.inhibit_color,  # type: ignore[attr-defined]
                 "input_filter_tau": self.inhibit_input_filter_tau,  # type: ignore[attr-defined]
                 "input_trend_tau": self.inhibit_input_trend_tau,  # type: ignore[attr-defined]

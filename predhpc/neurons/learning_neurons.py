@@ -35,7 +35,7 @@ class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
 
     default_params = {
         "n": 10,
-        "activation_params": {"activation": "sigmoid"},
+        "activation_function": {"activation": "sigmoid"},
         "name": "SmoothFeedForwardLayer",
         "input_filter_tau": 0.1,  # in sec
         "input_trend_tau": None,  # in sec
@@ -181,14 +181,13 @@ class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
             biases = biases.reshape((-1, 1))
         V += biases
 
-        firingrate = rutils.activate(V, other_args=self.activation_params)
+        firingrate = self.activation_function(V, deriv=False)
         # saves current copy of activation derivative at firing rate (useful for learning rules)
         if (
             evaluate_at == "last"
         ):  # save copy of the firing rate through the dervative of the activation function
-            self.firingrate_prime = rutils.activate(
-                V, other_args=self.activation_params, deriv=True
-            )
+            self.firingrate_prime = self.activation_function(V, deriv=True)
+
         return firingrate
 
     def update(self):
@@ -316,7 +315,7 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
 
     default_params = {
         "n": 10,
-        "activation_params": {"activation": "sigmoid"},
+        "activation_function": {"activation": "sigmoid"},
         "name": "LearnLayer",
         "lr": 1e-4,  # learning rate
         "biases": None,
@@ -732,7 +731,7 @@ class HebbianLayer(LearnLayer):
 
     default_params = {
         "n": 10,
-        "activation_params": {"activation": "sigmoid"},
+        "activation_function": {"activation": "sigmoid"},
         "name": "HebbianLayer",
         "lr": 1e-4,  # learning rate
         "biases": None,
@@ -1488,6 +1487,12 @@ class NMDACurrent:
         return self._activation_params
 
     @property
+    def activation_function(self):
+        return lambda x, deriv=False: rutils.activate(
+            x, deriv=deriv, other_args=self.activation_params
+        )
+
+    @property
     def binding_params(self):
         self._binding_params = {
             "activation": "sigmoid",
@@ -1499,18 +1504,24 @@ class NMDACurrent:
 
         return self._binding_params
 
+    @property
+    def binding_function(self):
+        return lambda x, deriv=False: rutils.activate(
+            x, deriv=deriv, other_args=self.binding_params
+        )
+
     def plot_function(
         self, param_type="binding", min_input_fr=-10, max_input_fr=10, fig=None, ax=None
     ):
         if param_type == "binding":
-            params = self.binding_params
+            function = self.binding_function
         elif param_type == "activation":
-            params = self.activation_params
+            function = self.activation_function
         else:
             raise ValueError(f"Unknown param type {param_type}")
 
         fig, ax = plot_util.plot_activation_function(
-            params,
+            function,
             min_input_fr=min_input_fr,
             max_input_fr=max_input_fr,
             fig=fig,
@@ -1564,9 +1575,8 @@ class NMDACurrent:
         """
 
         if evaluate_at == "last":
-            receptor_binding = rutils.activate(
+            receptor_binding = self.binding_function(
                 self.InputLayer.get_incoming_firingrates(),
-                other_args=self.binding_params,
             )  # rethink how to measure receptor binding (considering weights / biases)
 
             # biexponential decay: loss of activation and desensitization
@@ -1591,9 +1601,7 @@ class NMDACurrent:
 
             # compute additional activation, based on effective binding and level of
             # depolarization of the neuron
-            neuron_activity_gate = rutils.activate(
-                self.InputLayer.firingrate, other_args=self.activation_params
-            )
+            neuron_activity_gate = self.activation_function(self.InputLayer.firingrate)
 
             receptor_activation += effective_binding * neuron_activity_gate
         else:
@@ -1783,7 +1791,7 @@ class NMDALayer(BTSPLayer):
 
         self._add_NMDA_current()
 
-        self.ramp_to_BTSP = np.zeros(self.n).astype(float)  # type: ignore[attr-defined]
+        self.BTSP_ramp = np.zeros(self.n).astype(float)  # type: ignore[attr-defined]
         self.history["BTSP_ramp"] = list()
 
     def _add_NMDA_current(self):
@@ -1809,7 +1817,7 @@ class NMDALayer(BTSPLayer):
 
         super().save_to_history()
 
-        self.history["BTSP_ramp"].append(self.ramp_to_BTSP.tolist())
+        self.history["BTSP_ramp"].append(self.BTSP_ramp.tolist())
 
         return
 
@@ -1869,10 +1877,11 @@ class NMDALayer(BTSPLayer):
         super().update()
 
         above_threshold = self.firingrate > self.BTSP_induction_threshold  # type: ignore[attr-defined]
-        self.ramp_to_BTSP[~above_threshold] = 0
-        self.ramp_to_BTSP[above_threshold] += self.Agent.dt / self.BTSP_plateau_length  # type: ignore[attr-defined]
+        self.BTSP_ramp[~above_threshold] = 0
+        self.BTSP_ramp[above_threshold] += self.Agent.dt / self.BTSP_plateau_length  # type: ignore[attr-defined]
+        self.BTSP_ramp = np.around(self.BTSP_ramp, 10)  # avoid rounding problems
 
-        BTSP_targets = np.where(self.ramp_to_BTSP >= 1)[0]
+        BTSP_targets = np.where(self.BTSP_ramp == 1)[0]  # only once per plateau
         if self.BTSP_learn and len(BTSP_targets):
             if self.single_BTSP:
                 keep_BTSP_targets = np.asarray(

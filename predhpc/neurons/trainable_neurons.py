@@ -55,7 +55,9 @@ class RegressionLayer(learning_neurons.LearnLayer):
     ignored_params = {key: None for key in ignored_param_keys}
 
     fixed_params = {
-        "activation_params": {"activation": "linear"},  # keep regression output exactly
+        "activation_function": {
+            "activation": "linear"
+        },  # keep regression output exactly
         "biases": None,
     }
 
@@ -260,11 +262,11 @@ class TorchLayer(learning_neurons.LearnLayer):
 
         # ignore activation params, even if they are passed
         if params["sigmoid"]:
-            params["activation_params"] = {"activation": "relu"}
-            self.activ = torch.nn.ReLU  # type: ignore[assignment]
-        else:
-            params["activation_params"] = util.get_standard_sigmoid_params()
+            params["activation_function"] = util.get_standard_sigmoid_params()
             self.activ = torch.nn.Sigmoid  # type: ignore[assignment]
+        else:
+            params["activation_function"] = {"activation": "relu"}
+            self.activ = torch.nn.ReLU  # type: ignore[assignment]
 
         return params
 
