@@ -737,6 +737,7 @@ class HebbianLayer(LearnLayer):
         "biases": None,
         "normalize_weights_divisively": False,
         "apply_Ojas_rule": False,
+        "regularization_alpha": None,
         "use_targets": False,
         "init_weights_zero": False,  # whether to initialize weights to 0
         "w_init_scale": 1,  # scale of the initial weights
@@ -868,10 +869,12 @@ class HebbianLayer(LearnLayer):
             lr = self.lr  # type: ignore[attr-defined]
 
         if self.apply_Ojas_rule:  # type: ignore[attr-defined]
-            util.perform_Oja_update_(Is, ws, O, lr=lr, b=b)
+            alpha = self.regularization_alpha or 0.1
+            util.perform_Oja_update_(Is, ws, O, lr=lr, b=b, alpha=alpha)
         elif self.normalize_weights_divisively:  # type: ignore[attr-defined]
+            alpha = self.regularization_alpha or 1.0
             util.perform_divisively_normalized_Hebbian_update_(
-                Is, ws, O, lr=lr, b=b, p=self.p
+                Is, ws, O, lr=lr, b=b, p=self.p, alpha=alpha
             )
         else:
             util.perform_Hebbian_update_(Is, ws, O, lr=lr, b=b)
@@ -1879,9 +1882,10 @@ class NMDALayer(BTSPLayer):
         above_threshold = self.firingrate > self.BTSP_induction_threshold  # type: ignore[attr-defined]
         self.BTSP_ramp[~above_threshold] = 0
         self.BTSP_ramp[above_threshold] += self.Agent.dt / self.BTSP_plateau_length  # type: ignore[attr-defined]
-        self.BTSP_ramp = np.around(self.BTSP_ramp, 10)  # avoid rounding problems
 
-        BTSP_targets = np.where(self.BTSP_ramp == 1)[0]  # only once per plateau
+        BTSP_targets = np.where(np.around(self.BTSP_ramp, 4) == 1)[
+            0
+        ]  # only once per plateau
         if self.BTSP_learn and len(BTSP_targets):
             if self.single_BTSP:
                 keep_BTSP_targets = np.asarray(

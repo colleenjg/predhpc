@@ -79,14 +79,17 @@ class ResetableAgent(Agent):
 
         if self.Environment.dimensionality == "2D":
             self.fixed_direction = False
-        elif self.Environment.dimensionality == "1D" and self.fixed_direction:
-            if self.speed_mean < 0:  # type: ignore[attr-defined]
-                raise ValueError("Cannot have fixed direction with negative speed.")
 
         self.set_trajectory_lengths()
         self.set_all_positions()
         self.set_target_df()
         self.set_trajectory_df()
+
+        if self.Environment.dimensionality == "1D" and self.fixed_direction:
+            if np.sign(self.reset_position - self.start_position) != np.sign(self.speed_mean):  # type: ignore[attr-defined]
+                raise ValueError(
+                    "If direction is fixed, speed must have the same sign."
+                )
 
         self._last_target_reached_step = -1
         self._last_stop_step = -1
@@ -350,9 +353,8 @@ class ResetableAgent(Agent):
         new_velocity = self.velocity  # type: ignore[has-type]
         speed_mean, speed_std = self.speed_mean, self.speed_std  # type: ignore[attr-defined]
         for _ in range(10):
-            if (
-                new_velocity < 0
-            ):  # resample velocity until it is positive  # type: ignore[has-type]
+            # resample velocity until it has the correct sign
+            if np.sign(self.reset_position - self.start_position) != np.sign(new_velocity):  # type: ignore[has-type]
                 new_velocity = prev_velocity + rutils.ornstein_uhlenbeck(
                     dt=dt,
                     x=prev_velocity,
@@ -363,7 +365,7 @@ class ResetableAgent(Agent):
             else:
                 break
 
-        if new_velocity < 0:  # type: ignore[has-type]
+        if np.sign(self.reset_position - self.start_position) != np.sign(new_velocity):  # type: ignore[has-type]
             new_velocity = prev_velocity * 0  # set to 0
 
         self.velocity = new_velocity
