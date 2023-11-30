@@ -32,8 +32,8 @@ class ResetableAgent(Agent):
         "reset_position": None,  # position to reset trajectories from
         "target_position": None,  # position to use as target
         "wait_between_targets": 30,  # number of steps to wait between target reaching
-        "reset_reached_within_tolerance_prop_to_dt": 0.5,  # proportion of dt to use as reset tolerance
-        "target_reached_within_tolerance_prop_to_dt": 0.5,  # proportion of dt to use as target tolerance
+        "reset_reached_within_tolerance_prop_to_dt": 0.55,  # proportion of dt to use as reset tolerance
+        "target_reached_within_tolerance_prop_to_dt": 0.55,  # proportion of dt to use as target tolerance
         "fixed_direction": False,  # keep same direction (1D environment only)
     }
     """
@@ -49,8 +49,8 @@ class ResetableAgent(Agent):
         "reset_position": None,  # position to reset trajectories from
         "target_position": None,  # position to use as target
         "wait_between_targets": 30,  # number of steps to wait between target reaching
-        "reset_reached_within_tolerance_prop_to_dt": 0.5,  # proportion of dt to use as reset tolerance
-        "target_reached_within_tolerance_prop_to_dt": 0.5,  # proportion of dt to use as target tolerance
+        "reset_reached_within_tolerance_prop_to_dt": 0.55,  # proportion of dt to use as reset tolerance
+        "target_reached_within_tolerance_prop_to_dt": 0.55,  # proportion of dt to use as target tolerance
         "fixed_direction": False,  # keep same direction (1D environment only)
     }
 
@@ -211,6 +211,19 @@ class ResetableAgent(Agent):
             self.set_position_and_velocity(position=self.start_position, velocity=0)
         self.steps_before_checking_for_target = 0
 
+    def reverse(self, reset=False):
+        """Reverse the agent's start and reset positions."""
+
+        new_reset_pos, new_start_pos = self.start_position, self.reset_position
+        self.start_position = new_start_pos
+        self.reset_position = new_reset_pos
+    
+        if self.Environment.D == 1:
+            self.speed_mean = -self.speed_mean
+
+        if reset:
+            self.reset()
+
     def set_trajectory_lengths(self):
         """Set the trajectory lengths, either from the passed value, or by
         sampling from the exponential distribution.
@@ -341,11 +354,13 @@ class ResetableAgent(Agent):
         if not (self.Environment.dimensionality == "1D" and self.fixed_direction):
             return
 
-        if self.velocity >= 0:  # type: ignore[has-type]
+        if np.sign(self.reset_position - self.start_position) == np.sign(self.velocity):  # type: ignore[has-type]
             return
 
-        if self.reset_position is not None and self.pos[0] > self.reset_position[0]:
-            return
+        if self.reset_position is not None:
+            returning = np.sign(self.reset_position[0] - self.pos[0]) == np.sign(self.velocity[0])  # type: ignore[has-type]
+            if returning:
+                return
 
         if dt is None:
             dt = self.dt  # type: ignore[has-type]
@@ -560,7 +575,7 @@ class ResetableAgent(Agent):
     def check_if_position_reached(
         self,
         position: np.ndarray[tuple[int], np.dtype[np.float64]] | None = None,
-        sample_within_tolerance_prop_to_dt: float = 0.5,
+        sample_within_tolerance_prop_to_dt: float = 0.55,
     ) -> bool:
         """Check if the agent has reached a position.
 
@@ -664,7 +679,7 @@ class ResetableAgent(Agent):
         return self.reached_target
 
     def reset(self):
-        """Reset the agent to a random location."""
+        """Reset the agent."""
 
         self.end_trajectory()
 
@@ -1456,7 +1471,7 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
         "trajectory_length": 2000,  # int or iterable of ints
         "num_trajectories": 10,  # number of trajectory lengths to sample
         "wait_between_targets": 10,  # number of steps to wait between target reaching
-        "target_reached_within_tolerance_prop_to_dt": 0.5,  # proportion of dt to use as target tolerance
+        "target_reached_within_tolerance_prop_to_dt": 0.55,  # proportion of dt to use as target tolerance
         "num_random_walk_steps": 100,  # number of steps to random walk, if target is not in sight
         "always_log_teleportation": False,  # whether to log teleportation events when they occur
     }

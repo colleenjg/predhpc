@@ -39,7 +39,7 @@ class TwoCompLayer:
         "dend_input_layers": [],
         "soma_to_dend_weight": 0.5,
         "dend_to_soma_weight": 0.5,
-        "dend_first": False,
+        "dend_first": True,
         "soma_color": "C0",
         "dend_color": "C1",
         "inhibit_dend": True,
@@ -148,11 +148,17 @@ class TwoCompLayer:
             )
 
         dend_to_soma_weight = np.eye(self.n) * self.dend_to_soma_weight  # type: ignore[attr-defined]
-        self.SomaCompartment.add_input(self.DendriteCompartment, w=dend_to_soma_weight)
+        self.SomaCompartment.add_input(
+            self.DendriteCompartment,
+            w=dend_to_soma_weight,
+            recurrent=not (self.dend_first),
+        )
         self.SomaCompartment.add_input_layers_with_no_learning(self.DendriteCompartment.name)  # type: ignore[attr-defined]
 
         soma_to_dend_weight = np.eye(self.n) * self.soma_to_dend_weight  # type: ignore[attr-defined]
-        self.DendriteCompartment.add_input(self.SomaCompartment, w=soma_to_dend_weight)
+        self.DendriteCompartment.add_input(
+            self.SomaCompartment, w=soma_to_dend_weight, recurrent=self.dend_first
+        )
         self.DendriteCompartment.add_input_layers_with_no_learning(self.SomaCompartment.name)  # type: ignore[attr-defined]
 
         if self.inhibit_dend:  # type: ignore[attr-defined]
@@ -176,7 +182,7 @@ class TwoCompLayer:
 
             dend_inhibition = np.eye(self.n) * -1
             self.DendriteCompartment.add_input(
-                self.DendriteInhibition, w=dend_inhibition
+                self.DendriteInhibition, w=dend_inhibition, recurrent=self.dend_first
             )
 
             self.DendriteCompartment.add_input_layers_with_no_learning(self.DendriteInhibition.name)  # type: ignore[attr-defined]

@@ -143,11 +143,14 @@ class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
 
         return
 
-    def get_state(self, evaluate_at="last", **kwargs):
+    def get_state(self, evaluate_at="last", max_recurrence=None, **kwargs):
         """Taken from FeedForward.get_state()
 
         Args:
             evaluate_at (str, optional). Defaults to 'last'.
+            max_recurrence: The maximum number of time get_state() recursively calls
+                recurrent inputs (prevents infinite recursion error). Default is None.
+
         Returns:
             firingrate: array of firing rates
         """
@@ -162,6 +165,11 @@ class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
             V = np.zeros((self.n, kwargs["pos"].shape[0]))
 
         for inputlayer in self.inputs.values():
+            pass_max_recurrence = max_recurrence
+            if max_recurrence is not None and inputlayer["recurrent"]:
+                if max_recurrence <= 0:
+                    continue
+                pass_max_recurrence = max_recurrence - 1
             w = inputlayer["w"]
             if evaluate_at == "last":
                 if self.input_filter_tau or self.input_trend_tau:
@@ -171,7 +179,11 @@ class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
                 else:
                     I = inputlayer["layer"].firingrate
             else:  # kick can down the road let input layer decide how to evaluate the firingrate. this is core to feedforward layer as this recursive call will backprop through the upstraem layers until it reaches a "core" (e.g. place cells) layer which will then evaluate the firingrate.
-                I = inputlayer["layer"].get_state(evaluate_at, **kwargs)
+                I = inputlayer["layer"].get_state(
+                    evaluate_at,
+                    max_recurrence=pass_max_recurrence,
+                    **kwargs,
+                )
 
             inputlayer["I_temp"] = I
             V += np.matmul(w, I)
@@ -274,7 +286,7 @@ class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
             height = max([1, min(n / 12.0 + 5 / 3, 8)])
             fig, ax = plt.subplots(figsize=[6, height])
 
-        color = self.color  # type: ignore[attr-defined]
+        color = input_layer.color  # type: ignore[attr-defined]
 
         ax.plot(t, unfiltered + shifts, ls=(0, (1, 1)), color=color, alpha=1.0)
         ax.plot(t, filtered + shifts, alpha=0.8, color=color)
@@ -1440,6 +1452,7 @@ class NMDACurrent:
         NMDA_activation_threshold=0.8,  # firing rate
         max_current=3.0,
         start_desensitization=0,
+        test_activation=0.3,
         color="C5",
         save_history=True,
     ):
@@ -1459,6 +1472,7 @@ class NMDACurrent:
         self.NMDA_activation_threshold = NMDA_activation_threshold
         self.max_current = max_current
         self.start_desensitization = start_desensitization
+        self.test_activation = test_activation
         self.color = color
 
         self.NMDA_receptor_binding = np.zeros(self.n)
@@ -1562,7 +1576,11 @@ class NMDACurrent:
         return decay
 
     def get_state(
-        self, evaluate_at="last", return_all: bool = False, dt: float | None = None
+        self,
+        evaluate_at="last",
+        return_all: bool = False,
+        dt: float | None = None,
+        **kwargs,
     ):
         """Get the state of the NMDA current.
 
@@ -1572,16 +1590,17 @@ class NMDACurrent:
             return_all (bool, optional): Whether to return all state variables.
                 Defaults to False.
             dt (float, optional): Time step. Defaults to None.
+            **kwargs: Keyword arguments ignored
 
         Returns:
             np.ndarray: State of the NMDA current.
         """
 
-        if evaluate_at == "last":
-            receptor_binding = self.binding_function(
-                self.InputLayer.get_incoming_firingrates(),
-            )  # rethink how to measure receptor binding (considering weights / biases)
+        receptor_binding = self.binding_function(
+            self.InputLayer.get_incoming_firingrates(),
+        )  # rethink how to measure receptor binding (considering weights / biases)
 
+        if evaluate_at == "last":
             # biexponential decay: loss of activation and desensitization
             receptor_activation = self.NMDA_receptor_activation * self.get_decay(
                 "activation", dt=dt
@@ -1608,7 +1627,10 @@ class NMDACurrent:
 
             receptor_activation += effective_binding * neuron_activity_gate
         else:
-            receptor_activation = receptor_binding
+            receptor_activation = np.minimum(
+                np.full_like(receptor_binding, self.test_activation),
+                receptor_binding,
+            )  # avoid saturation when evaluating rate maps
 
         current = receptor_activation * self.max_current  # type: ignore[operator]
 
@@ -1764,8 +1786,8 @@ class NMDALayer(BTSPLayer):
     default_params = {
         "n": 10,
         "name": "NMDALayer",
-        "NMDA_activation_threshold": 0.8,
-        "BTSP_induction_threshold": 0.8,
+        "NMDA_activation_threshold": 2,
+        "BTSP_induction_threshold": 8,
         "BTSP_plateau_length": 0.1,  # seconds
     }
 
@@ -1808,7 +1830,7 @@ class NMDALayer(BTSPLayer):
             save_history=self.save_history,  # type: ignore[attr-defined]
         )
 
-        self.add_input(self.NMDACurrent, w=np.eye(self.n))  # type: ignore[attr-defined]
+        self.add_input(self.NMDACurrent, w=np.eye(self.n), recurrent=True)  # type: ignore[attr-defined]
         self.add_input_layers_with_no_learning(self.NMDACurrent.name)
 
         return self.NMDACurrent
@@ -1883,9 +1905,10 @@ class NMDALayer(BTSPLayer):
         self.BTSP_ramp[~above_threshold] = 0
         self.BTSP_ramp[above_threshold] += self.Agent.dt / self.BTSP_plateau_length  # type: ignore[attr-defined]
 
-        BTSP_targets = np.where(np.around(self.BTSP_ramp, 4) == 1)[
+        BTSP_targets = np.where(np.isclose(self.BTSP_ramp, 1))[
             0
         ]  # only once per plateau
+
         if self.BTSP_learn and len(BTSP_targets):
             if self.single_BTSP:
                 keep_BTSP_targets = np.asarray(
