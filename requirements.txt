@@ -2,6 +2,7 @@ matplotlib
 numpy
 pandas
 ratinabox
+ray
 scikit-learn
 seaborn
 tqdm
