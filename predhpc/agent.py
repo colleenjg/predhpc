@@ -32,15 +32,15 @@ class ResetableAgent(Agent):
         "reset_position": None,  # position to reset trajectories from
         "target_position": None,  # position to use as target
         "wait_between_targets": 30,  # number of steps to wait between target reaching
-        "reset_reached_within_tolerance_prop_to_dt": 0.55,  # proportion of dt to use as reset tolerance
-        "target_reached_within_tolerance_prop_to_dt": 0.55,  # proportion of dt to use as target tolerance
+        "reset_reached_within_tolerance_prop_to_speed": 0.55,  # proportion of mean speed to use as reset tolerance
+        "target_reached_within_tolerance_prop_to_speed": 0.55,  # proportion of mean speed to use as target tolerance
         "fixed_direction": False,  # keep same direction (1D environment only)
     }
     """
 
     default_params = {
-        "dt": 0.01,  # time step, in seconds
-        "head_direction_smoothing_timescale": 0.02,  # higher than dt
+        "dt": 0.1,  # time step, in seconds
+        "head_direction_smoothing_timescale": 0.2,  # higher than dt
         "trajectory_length": None,  # int or iterable of ints
         "num_trajectories": None,  # number of trajectory lengths to sample
         "exp_factors": None,  # exponential factors for trajectory_length (inv. scale, rate, minimum). Defaults to None.
@@ -49,8 +49,8 @@ class ResetableAgent(Agent):
         "reset_position": None,  # position to reset trajectories from
         "target_position": None,  # position to use as target
         "wait_between_targets": 30,  # number of steps to wait between target reaching
-        "reset_reached_within_tolerance_prop_to_dt": 0.55,  # proportion of dt to use as reset tolerance
-        "target_reached_within_tolerance_prop_to_dt": 0.55,  # proportion of dt to use as target tolerance
+        "reset_reached_within_tolerance_prop_to_speed": 0.55,  # proportion of mean speed to use as reset tolerance
+        "target_reached_within_tolerance_prop_to_speed": 0.55,  # proportion of mean speed to use as target tolerance
         "fixed_direction": False,  # keep same direction (1D environment only)
     }
 
@@ -204,11 +204,33 @@ class ResetableAgent(Agent):
 
         self.start_position = self.format_position(self.start_position)
         self.reset_position = self.format_position(self.reset_position)
-        self.target_position = self.format_position(self.target_position)
+        self.set_target_position(self.target_position)
 
         self.must_fix_record_after_manual_update = False
         if self.start_position is not None:
             self.set_position_and_velocity(position=self.start_position, velocity=0)
+
+    def set_target_position(self, position):
+        """Set the target position, checking that it is within the environment
+        extent.
+        """
+
+        self.target_position = self.format_position(position)
+
+        if self.target_position is None:
+            return
+
+        target_position = np.asarray(self.target_position).reshape(
+            1, self.Environment.D
+        )
+        if hasattr(self, "_target_object_idx"):
+            self.Environment.objects["objects"][
+                self._target_object_idx
+            ] = target_position
+        else:
+            self.Environment.add_object(position, "new")
+            self._target_object_idx = len(self.Environment.objects["objects"]) - 1
+
         self.steps_before_checking_for_target = 0
 
     def reverse(self, reset=False):
@@ -217,7 +239,7 @@ class ResetableAgent(Agent):
         new_reset_pos, new_start_pos = self.start_position, self.reset_position
         self.start_position = new_start_pos
         self.reset_position = new_reset_pos
-    
+
         if self.Environment.D == 1:
             self.speed_mean = -self.speed_mean
 
@@ -438,22 +460,22 @@ class ResetableAgent(Agent):
     def sample_within_tolerance(
         self,
         position: np.ndarray[tuple[int], np.dtype[np.float64]],
-        sample_within_tolerance_prop_to_dt: float = 1,
+        sample_within_tolerance_prop_to_speed: float = 0.5,
         max_attempts: int = 100,
     ) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
         """Sample a position within the tolerance of the given position.
 
         Args:
             position (np.ndarray): The position to sample around.
-            sample_within_tolerance_prop_to_dt (float): The proportion of the tolerance to
+            sample_within_tolerance_prop_to_speed (float): The proportion of the tolerance to
                 sample within. Defaults to None, in which case the agent's
-                target_reached_within_tolerance_prop_to_dt is used.
+                target_reached_within_tolerance_prop_to_speed is used.
 
         Returns:
             position (np.ndarray): The sampled position.
         """
 
-        tolerance = self.dt * sample_within_tolerance_prop_to_dt  # type: ignore[has-type]
+        tolerance = np.absolute(self.speed_mean) * sample_within_tolerance_prop_to_speed  # type: ignore[has-type]
 
         new_position = None
         for _ in range(max_attempts):
@@ -475,7 +497,7 @@ class ResetableAgent(Agent):
         if new_position is None:
             raise RuntimeError(
                 f"Could not find a new position within tolerance proportion "
-                f"{sample_within_tolerance_prop_to_dt} of {position}."
+                f"{sample_within_tolerance_prop_to_speed} of {position}."
             )
 
         return new_position
@@ -575,13 +597,13 @@ class ResetableAgent(Agent):
     def check_if_position_reached(
         self,
         position: np.ndarray[tuple[int], np.dtype[np.float64]] | None = None,
-        sample_within_tolerance_prop_to_dt: float = 0.55,
+        sample_within_tolerance_prop_to_speed: float = 0.55,
     ) -> bool:
         """Check if the agent has reached a position.
 
         Args:
             target_position (np.array): Target position.
-            sample_within_tolerance_prop_to_dt (float): Tolerance proportion, wrt self.dt.
+            sample_within_tolerance_prop_to_speed (float): Tolerance proportion, wrt mean speed.
 
         Returns:
             bool: Whether the agent has reached the target position.
@@ -592,7 +614,7 @@ class ResetableAgent(Agent):
             dist = np.linalg.norm(self.pos - position, ord=2)
 
             # check if the distance is less than the tolerance
-            if dist < (self.dt * sample_within_tolerance_prop_to_dt):  # type: ignore[has-type]
+            if dist < (np.absolute(self.speed_mean) * sample_within_tolerance_prop_to_speed):  # type: ignore[has-type]
                 return True
 
         return False
@@ -604,7 +626,7 @@ class ResetableAgent(Agent):
         """
 
         return self.check_if_position_reached(
-            self.reset_position, self.reset_reached_within_tolerance_prop_to_dt  # type: ignore[attr-defined]
+            self.reset_position, self.reset_reached_within_tolerance_prop_to_speed  # type: ignore[attr-defined]
         )
 
     def check_if_target_position_reached(self) -> bool:
@@ -622,7 +644,7 @@ class ResetableAgent(Agent):
 
         else:
             target_reached = self.check_if_position_reached(
-                self.target_position, self.target_reached_within_tolerance_prop_to_dt  # type: ignore[attr-defined]
+                self.target_position, self.target_reached_within_tolerance_prop_to_speed  # type: ignore[attr-defined]
             )
             if target_reached:
                 self.steps_before_checking_for_target = self.wait_between_targets  # type: ignore[attr-defined]
@@ -1450,7 +1472,7 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
             raise ValueError("pos must be 'both', 'left', or 'right'.")
 
         # check if the distance is less than the tolerance
-        if distance < (self.dt * self.reset_reached_within_tolerance_prop_to_dt):  # type: ignore[attr-defined]
+        if distance < (np.absolute(self.speed_mean) * self.reset_reached_within_tolerance_prop_to_speed):  # type: ignore[attr-defined]
             return True
 
         return False
@@ -1471,7 +1493,7 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
         "trajectory_length": 2000,  # int or iterable of ints
         "num_trajectories": 10,  # number of trajectory lengths to sample
         "wait_between_targets": 10,  # number of steps to wait between target reaching
-        "target_reached_within_tolerance_prop_to_dt": 0.55,  # proportion of dt to use as target tolerance
+        "target_reached_within_tolerance_prop_to_speed": 0.55,  # proportion of mean speed to use as target tolerance
         "num_random_walk_steps": 100,  # number of steps to random walk, if target is not in sight
         "always_log_teleportation": False,  # whether to log teleportation events when they occur
     }
@@ -1480,7 +1502,7 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
         "reset_position",
         "start_position",
         "target_position",
-        "reset_reached_within_tolerance_prop_to_dt",
+        "reset_reached_within_tolerance_prop_to_speed",
         "fixed_direction",
     ]
     ignored_params = {key: None for key in ignored_param_keys}
@@ -1584,14 +1606,27 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
 
         return target_probability_df
 
+    def _end_random_walk(self):
+        """End the random walk."""
+
+        if self.current_num_of_random_walk_steps == 0:
+            return
+
+        df_idx = len(self.target_df) - 1
+        column = "random_walk_periods"
+        self.target_df.loc[df_idx, column][-1].append(self.num_steps_total)
+        self.current_num_of_random_walk_steps = 0
+
     def check_random_reached(self):
         """Check if the target was reached during a random walk."""
 
         if self.current_num_of_random_walk_steps != 0 and self.reached_target:
-            df_idx = len(self.target_df) - 1
-            column = "random_walk_periods"
-            self.target_df.loc[df_idx, column][-1].append(self.num_steps_total)  # type: ignore[attr-defined]
-            self.current_num_of_random_walk_steps = 0
+            self._end_random_walk()
+
+    def end_trajectory(self):
+        super().end_trajectory()
+
+        self._end_random_walk()
 
     def set_new_target(self):
         """Set a new target."""
@@ -1599,6 +1634,7 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
         # add random walk steps
         if len(self.target_df) != 0:
             self.check_random_reached()
+            self._end_random_walk()
             random_walk_periods = np.asarray(
                 self.target_df.loc[len(self.target_df) - 1, "random_walk_periods"]
             )
@@ -1765,16 +1801,16 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
     def sample_within_tolerance(
         self,
         position: np.ndarray[tuple[int], np.dtype[np.float64]],
-        sample_within_tolerance_prop_to_dt: float | None = None,
+        sample_within_tolerance_prop_to_speed: float | None = None,
         max_attempts: int = 100,
     ) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
         """Sample a position within the tolerance of the given position.
 
         Args:
             position (np.ndarray): The position to sample around.
-            sample_within_tolerance_prop_to_dt (float): The proportion of the tolerance to
+            sample_within_tolerance_prop_to_speed (float): The proportion of the tolerance to
                 sample within. Defaults to None, in which case the agent's
-                target_reached_within_tolerance_prop_to_dt is used.
+                target_reached_within_tolerance_prop_to_speed is used.
 
         Returns:
             position (np.ndarray): The sampled position.
@@ -1783,14 +1819,14 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
         if len(position) != 2:
             raise ValueError(f"position must have length 2, but found {len(position)}.")
 
-        if sample_within_tolerance_prop_to_dt is None:
-            prop_to_dt = self.target_reached_within_tolerance_prop_to_dt  # type: ignore[attr-defined]
+        if sample_within_tolerance_prop_to_speed is None:
+            prop_to_speed = self.target_reached_within_tolerance_prop_to_speed  # type: ignore[attr-defined]
         else:
-            prop_to_dt = sample_within_tolerance_prop_to_dt
+            prop_to_speed = sample_within_tolerance_prop_to_speed
 
         new_position = super().sample_within_tolerance(
             position,
-            sample_within_tolerance_prop_to_dt=prop_to_dt,
+            sample_within_tolerance_prop_to_speed=prop_to_speed,
             max_attempts=max_attempts,
         )
 
@@ -1886,13 +1922,13 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
             teleport_pair_num, direction="in"
         )
 
-        tolerance_prop_to_dt = self.target_reached_within_tolerance_prop_to_dt  # type: ignore[attr-defined]
+        tolerance_prop_to_speed = self.target_reached_within_tolerance_prop_to_speed  # type: ignore[attr-defined]
 
         teleport = False
 
         # check if close to teleport in
         near_teleport = self.check_if_position_reached(
-            teleport_coords, tolerance_prop_to_dt
+            teleport_coords, tolerance_prop_to_speed
         )
         if near_teleport:
             # check if agent is within 45 degrees, either side of the teleport in
@@ -2002,13 +2038,13 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
 
         teleport_vector = self.get_teleport_vector(teleport_pair_num, direction="out")
 
-        tolerance_prop_to_dt = self.target_reached_within_tolerance_prop_to_dt  # type: ignore[attr-defined]
+        tolerance_prop_to_speed = self.target_reached_within_tolerance_prop_to_speed  # type: ignore[attr-defined]
 
         i = 0
         out_coords = None
         while out_coords is None:
             sampled_out_coords = self.sample_within_tolerance(
-                teleport_coords, tolerance_prop_to_dt
+                teleport_coords, tolerance_prop_to_speed
             )
             for x, y in [(1, 1), (1, -1), (-1, 1), (-1, -1)]:
                 coords_diff = sampled_out_coords - teleport_coords
@@ -2212,10 +2248,13 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
 
         self.end_trajectory()
 
-        super().reset()
-
         self.set_all_positions(first_setting=False)
-        self.set_random_walk()
+
+        if self.trajectory_lengths is not None:
+            i = (len(self.trajectory_df) - 1) % len(self.trajectory_lengths)
+            self.trajectory_length = self.trajectory_lengths[i]
+
+        self.current_trajectory_length = 0
 
         self.set_new_trajectory()
 

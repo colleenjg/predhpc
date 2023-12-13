@@ -178,13 +178,13 @@ def learn_T_maze_BTSP(
         Environment, Agent, EC cells, CA3 place cells, CA1 neurons
     """
 
-    env_params = params_util.get_env_params(environment="tmaze") or env_params
+    env_params = env_params or params_util.get_env_params(environment="tmaze")
     Env = env.TEnv(params=env_params)
 
-    agent_params = params_util.get_agent_params(environment="tmaze") or agent_params
+    agent_params = agent_params or params_util.get_agent_params(environment="tmaze")
     Ag = agent.TAgent(Env, params=agent_params)
 
-    CA3_PC_params = params_util.get_CA3_PC_params(environment="tmaze") or CA3_PC_params
+    CA3_PC_params = CA3_PC_params or params_util.get_CA3_PC_params(environment="tmaze")
     CA3_PCs = PlaceCells(Ag, params=CA3_PC_params)
 
     if CA1_params is None:
@@ -193,7 +193,7 @@ def learn_T_maze_BTSP(
         )
 
     if two_compartment:
-        EC_params = params_util.get_EC_params(environment="tmaze") or EC_params
+        EC_params = EC_params or params_util.get_EC_params(environment="tmaze")
         ECs = object_neurons.ObjectCells(Ag, params=EC_params)
         CA1_params["dend_input_layers"] = [ECs]  # type: ignore[assignment]
         CA1_params["soma_input_layers"] = [CA3_PCs]  # type: ignore[assignment]
@@ -398,7 +398,7 @@ def plot_1D_time_info(
 
     # Plot CA3 rate timeseries
     CA3_PCs.plot_rate_timeseries(
-        chosen_neurons="all", spikes=True, fig=fig, ax=axes_flat[1], autosave=False
+        chosen_neurons="all", spikes=False, fig=fig, ax=axes_flat[1], autosave=False
     )
     axes_flat[1].set_title("CA3 rate timeseries")
 
@@ -462,13 +462,13 @@ def learn_1D_BTSP(
         Environment, Agent, CA3 place cells, CA1 neurons
     """
 
-    env_params = params_util.get_env_params(environment="linear") or env_params
+    env_params = env_params or params_util.get_env_params(environment="linear")
     Env = Environment(params=env_params)
 
-    agent_params = params_util.get_agent_params(environment="linear") or agent_params
+    agent_params = agent_params or params_util.get_agent_params(environment="linear")
     Ag = agent.ResetableAgent(Env, params=agent_params)
 
-    CA3_PC_params = params_util.get_CA3_PC_params(environment="linear") or CA3_PC_params
+    CA3_PC_params = CA3_PC_params or params_util.get_CA3_PC_params(environment="linear")
     CA3_PCs = PlaceCells(Ag, params=CA3_PC_params)
 
     if CA1_params is None:

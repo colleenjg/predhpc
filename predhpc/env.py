@@ -142,6 +142,130 @@ class TEnv(Environment, util.ParamsManagerMixin):
 
         return self._T_split
 
+    @property
+    def top_arms_prop_of_area(self):
+        bottom_stem_height = (1 - self.arm_height_as_prop_of_y) * self.get_scale_y()
+        bottom_stem_width = self.stem_width_as_prop_of_x * self.get_scale_x()
+        bottom_stem_area = bottom_stem_height * bottom_stem_width
+
+        top_arms_height = self.arm_height_as_prop_of_y * self.get_scale_y()
+        top_arms_width = self.get_scale_x()
+        top_arms_area = top_arms_height * top_arms_width
+
+        top_arms_prop_of_area = top_arms_area / (top_arms_area + bottom_stem_area)
+
+        return top_arms_prop_of_area
+
+    def sample_positions(self, n=10, method="uniform_jitter", area="both"):
+        """Scatters 'n' locations across the environment.
+        Args:
+            n (int): number of features
+            method: "uniform", "uniform_jittered" or "random" for how points are distributed
+
+        Returns:
+            array: (n x dimensionality) of positions
+        """
+
+        # sample from each area separately (top arms or bottom stem)
+        if area == "both":
+            n_top = int(np.around(self.top_arms_prop_of_area * n))
+            n_bottom = int(n - n_top)
+        elif area == "top":
+            n_top = n
+            n_bottom = 0
+        elif area == "bottom":
+            n_top = 0
+            n_bottom = n
+        else:
+            raise ValueError(f"Unknown area: {area}")
+
+        positions = list()
+        adjusted_bottom_upper_limit = None  # for uniform sampling
+        for area in ["top", "bottom"]:
+            if area == "top":
+                n = n_top
+                extent_x = [0, self.get_scale_x()]
+                extent_y = [
+                    self.get_scale_y() * (1 - self.arm_height_as_prop_of_y),
+                    self.get_scale_y(),
+                ]
+            elif area == "bottom":
+                n = n_bottom
+                extent_x = [
+                    (0.5 - self.stem_width_as_prop_of_x / 2) * self.get_scale_x(),
+                    (0.5 + self.stem_width_as_prop_of_x / 2) * self.get_scale_x(),
+                ]
+                extent_y = [0, self.get_scale_y() * (1 - self.arm_height_as_prop_of_y)]
+
+            if method == "random":
+                area_positions = np.zeros((n, 2))
+                area_positions[:, 0] = np.random.uniform(*extent_x, size=n)
+                area_positions[:, 1] = np.random.uniform(*extent_y, size=n)
+            elif method[:7] == "uniform":
+                area_size = (extent_x[1] - extent_x[0]) * (extent_y[1] - extent_y[0])
+
+                delta = np.sqrt(area_size / n)
+
+                if area == "top":
+                    num_y_vals = min(1, int((extent_y[1] - extent_y[0]) // delta))
+                    num_x_vals = int(n // num_y_vals)
+                    delta_y = delta
+                    delta_x = (extent_x[1] - extent_x[0]) / num_x_vals
+
+                elif area == "bottom":
+                    num_x_vals = min(1, int((extent_x[1] - extent_x[0]) // delta))
+                    num_y_vals = int(n // num_x_vals)
+                    delta_x = delta
+
+                    if adjusted_bottom_upper_limit is not None:
+                        delta_y = (adjusted_bottom_upper_limit - extent_y[0]) / (
+                            num_y_vals + 0.5
+                        )
+                        extent_y[1] = adjusted_bottom_upper_limit - delta_y / 2
+                    else:
+                        delta_y = (extent_y[1] - extent_y[0]) / num_y_vals
+
+                if num_x_vals < 2:
+                    x = np.array([extent_x[0] + (extent_x[1] - extent_x[0]) / 2])
+                else:
+                    x = np.linspace(
+                        extent_x[0] + delta_x / 2, extent_x[1] - delta_x / 2, num_x_vals
+                    )
+
+                if num_y_vals < 2:
+                    y = np.array([extent_y[0] + (extent_y[1] - extent_y[0]) / 2])
+                else:
+                    y = np.linspace(
+                        extent_y[0] + delta_y / 2, extent_y[1] - delta_y / 2, num_y_vals
+                    )
+
+                if area == "top":
+                    adjusted_bottom_upper_limit = y[0]
+
+                area_positions = np.array(np.meshgrid(x, y)).reshape(2, -1).T
+                n_uniformly_distributed = area_positions.shape[0]
+                if "jitter" in method:
+                    delta_x = x[0] - extent_x[0]
+                    area_positions[:, 0] += np.random.uniform(
+                        -0.45 * delta_x, 0.45 * delta_x, n
+                    )
+                    delta_y = y[0] - extent_y[0]
+                    area_positions[:, 1] += np.random.uniform(
+                        -0.45 * delta_y, 0.45 * delta_y, n
+                    )
+                n_remaining = n - n_uniformly_distributed
+                if n_remaining > 0:
+                    positions_remaining = self.sample_positions(
+                        n=n_remaining, method="random", area=area
+                    )
+                    area_positions = np.vstack((area_positions, positions_remaining))
+
+            positions.append(area_positions)
+
+        positions = np.vstack(positions)
+
+        return positions
+
     def plot_environment(
         self,
         fig: mpl_figure.Figure | None = None,
@@ -672,7 +796,7 @@ class OpenField(Environment, util.ParamsManagerMixin):
 
         self.object_df.loc[len(self.object_df)] = new_object  # type: ignore[attr-defined]
 
-    def add_reward_objects(self, num: int = 1):
+    def add_reward_objects(self, num: int = 1, coords=None):
         """Add reward objects.
 
         Args:
@@ -681,14 +805,21 @@ class OpenField(Environment, util.ParamsManagerMixin):
 
         reward_type = self.type_name_to_num_dict["reward"]
 
-        for _ in range(num):
-            coords = self.sample_coords()
-            self.add_object(coords, object_type=reward_type)
+        if coords is not None:
+            num = len(coords)
+
+        for n in range(num):
+            if coords is None:
+                coord = self.sample_coords()
+            else:
+                coord = np.asarray(coords[n], dtype=np.float64).reshape(2)
+                self.check_if_position_is_in_environment(coord)
+            self.add_object(coord, object_type=reward_type)
 
         if num > 0:
             self.reset_object_type_dicts()
 
-    def add_novel_objects(self, num: int = 1):
+    def add_novel_objects(self, num: int = 1, coords=None):
         """Add novel objects.
 
         Args:
@@ -697,26 +828,61 @@ class OpenField(Environment, util.ParamsManagerMixin):
 
         novel_type = self.type_name_to_num_dict["novel"]
 
-        for _ in range(num):
-            coords = self.sample_coords()
-            self.add_object(coords, object_type=novel_type)
+        if coords is not None:
+            num = len(coords)
+
+        for n in range(num):
+            if coords is None:
+                coord = self.sample_coords()
+            else:
+                coord = np.asarray(coords[n], dtype=np.float64).reshape(2)
+                self.check_if_position_is_in_environment(coord)
+
+            self.add_object(coord, object_type=novel_type)
 
         if num > 0:
             self.reset_object_type_dicts()
 
-    def add_teleport_pairs(self, num: int = 1):
+    def add_teleport_pairs(self, num: int = 1, coord_pairs=None):
         """Add teleport pairs (directional).
 
         Args:
             num (int, optional): number of teleport pairs to add. Defaults to 1.
         """
 
-        for _ in range(num):
+        if coord_pairs is not None:
+            num = len(coord_pairs)
+
+        def format_teleport_pair(coord_pair):
+            try:
+                coords_in, coords_out = coord_pair
+            except ValueError as err:
+                if "values to unpack" in str(err):
+                    raise ValueError(
+                        f"Expected two coordinates per teleport pair, but got {len(coords)}."
+                    )
+                elif "unpack non-iterable" in str(err):
+                    raise ValueError(
+                        f"Each coordinate pair must be an iterable of length 2."
+                    )
+            coord_pair = [coords_in, coords_out]
+            for c in range(2):
+                coord_pair[c] = np.asarray(coord_pair[c], dtype=np.float64).reshape(2)
+                self.check_if_position_is_in_environment(coord_pair[c])
+
+            return coord_pair
+
+        for n in range(num):
             object_type_nums = self.get_new_teleport_pair_object_type_nums()
             self.num_teleport_pairs += 1
             self.reset_object_type_dicts()  # within loop, so that teleport pair object types are not reused
-            for _, object_type_num in object_type_nums.items():
-                coords = self.sample_coords()
+            if coord_pairs is not None:
+                coord_pair = format_teleport_pair(coord_pairs[n])
+            for o, object_type_num in enumerate(object_type_nums.values()):
+                if coord_pairs is None:
+                    coords = self.sample_coords()
+                else:
+                    coords = coord_pair[o]
                 self.add_object(coords, object_type=object_type_num)
 
     @property
@@ -846,11 +1012,12 @@ class OpenField(Environment, util.ParamsManagerMixin):
                 after max_attempts attempts.
         """
 
-        warnings.warn(
-            "add_walls() does not check whether a new wall will create a hole "
-            "in the environment. Be sure to check environment visually.",
-            category=EnvironmentWarning,
-        )
+        if num > 0:
+            warnings.warn(
+                "add_walls() does not check whether a new wall will create a hole "
+                "in the environment. Be sure to check environment visually.",
+                category=EnvironmentWarning,
+            )
 
         for _ in range(num):
             i = 0
