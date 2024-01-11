@@ -100,7 +100,7 @@ def plot_time_series_with_BTSP_events(
         fig, ax: Figure and axes.
     """
 
-    if fig is None or ax is None:
+    if ax is None:
         fig, ax = plt.subplots(figsize=(6, 1.2**CA1s.n))
 
     CA1s.plot_rate_timeseries(chosen_neurons="all", spikes=True, fig=fig, ax=ax)

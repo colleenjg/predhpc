@@ -31,9 +31,9 @@ class ResetableAgent(Agent):
         "start_position": None,  # position to start trajectories from
         "reset_position": None,  # position to reset trajectories from
         "target_position": None,  # position to use as target
-        "wait_between_targets": 30,  # number of steps to wait between target reaching
-        "reset_reached_within_tolerance_prop_to_speed": 0.55,  # proportion of mean speed to use as reset tolerance
-        "target_reached_within_tolerance_prop_to_speed": 0.55,  # proportion of mean speed to use as target tolerance
+        "wait_between_targets": 10,  # number of steps to wait between target reaching
+        "reset_reached_within_tolerance_prop_to_speed_dt": 0.55,  # proportion of current speed to use as reset tolerance
+        "target_reached_within_tolerance_prop_to_speed_dt": 0.55,  # proportion of current speed to use as target tolerance
         "fixed_direction": False,  # keep same direction (1D environment only)
     }
     """
@@ -48,9 +48,9 @@ class ResetableAgent(Agent):
         "start_position": None,  # position to start trajectories from
         "reset_position": None,  # position to reset trajectories from
         "target_position": None,  # position to use as target
-        "wait_between_targets": 30,  # number of steps to wait between target reaching
-        "reset_reached_within_tolerance_prop_to_speed": 0.55,  # proportion of mean speed to use as reset tolerance
-        "target_reached_within_tolerance_prop_to_speed": 0.55,  # proportion of mean speed to use as target tolerance
+        "wait_between_targets": 10,  # number of steps to wait between target reaching
+        "reset_reached_within_tolerance_prop_to_speed_dt": 0.55,  # proportion of current speed * dt to use as reset tolerance
+        "target_reached_within_tolerance_prop_to_speed_dt": 0.55,  # proportion of current speed * dt to use as target tolerance
         "fixed_direction": False,  # keep same direction (1D environment only)
     }
 
@@ -460,22 +460,22 @@ class ResetableAgent(Agent):
     def sample_within_tolerance(
         self,
         position: np.ndarray[tuple[int], np.dtype[np.float64]],
-        sample_within_tolerance_prop_to_speed: float = 0.5,
+        sample_within_tolerance_prop_to_speed_dt: float = 0.5,
         max_attempts: int = 100,
     ) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
         """Sample a position within the tolerance of the given position.
 
         Args:
             position (np.ndarray): The position to sample around.
-            sample_within_tolerance_prop_to_speed (float): The proportion of the tolerance to
+            sample_within_tolerance_prop_to_speed_dt (float): The proportion of the tolerance to
                 sample within. Defaults to None, in which case the agent's
-                target_reached_within_tolerance_prop_to_speed is used.
+                target_reached_within_tolerance_prop_to_speed_dt is used.
 
         Returns:
             position (np.ndarray): The sampled position.
         """
 
-        tolerance = np.absolute(self.speed_mean) * sample_within_tolerance_prop_to_speed  # type: ignore[has-type]
+        tolerance = np.absolute(self.speed_mean) * self.dt * sample_within_tolerance_prop_to_speed_dt  # type: ignore[has-type]
 
         new_position = None
         for _ in range(max_attempts):
@@ -497,7 +497,7 @@ class ResetableAgent(Agent):
         if new_position is None:
             raise RuntimeError(
                 f"Could not find a new position within tolerance proportion "
-                f"{sample_within_tolerance_prop_to_speed} of {position}."
+                f"{sample_within_tolerance_prop_to_speed_dt} of {position}."
             )
 
         return new_position
@@ -597,13 +597,13 @@ class ResetableAgent(Agent):
     def check_if_position_reached(
         self,
         position: np.ndarray[tuple[int], np.dtype[np.float64]] | None = None,
-        sample_within_tolerance_prop_to_speed: float = 0.55,
+        sample_within_tolerance_prop_to_speed_dt: float = 0.55,
     ) -> bool:
         """Check if the agent has reached a position.
 
         Args:
             target_position (np.array): Target position.
-            sample_within_tolerance_prop_to_speed (float): Tolerance proportion, wrt mean speed.
+            sample_within_tolerance_prop_to_speed_dt (float): Tolerance proportion, wrt mean speed * dt.
 
         Returns:
             bool: Whether the agent has reached the target position.
@@ -614,7 +614,9 @@ class ResetableAgent(Agent):
             dist = np.linalg.norm(self.pos - position, ord=2)
 
             # check if the distance is less than the tolerance
-            if dist < (np.absolute(self.speed_mean) * sample_within_tolerance_prop_to_speed):  # type: ignore[has-type]
+            speed = np.linalg.norm(self.velocity, ord=2)
+            reached_dist = speed * self.dt * sample_within_tolerance_prop_to_speed_dt
+            if dist < reached_dist:  # type: ignore[has-type]
                 return True
 
         return False
@@ -626,7 +628,7 @@ class ResetableAgent(Agent):
         """
 
         return self.check_if_position_reached(
-            self.reset_position, self.reset_reached_within_tolerance_prop_to_speed  # type: ignore[attr-defined]
+            self.reset_position, self.reset_reached_within_tolerance_prop_to_speed_dt  # type: ignore[attr-defined]
         )
 
     def check_if_target_position_reached(self) -> bool:
@@ -644,7 +646,7 @@ class ResetableAgent(Agent):
 
         else:
             target_reached = self.check_if_position_reached(
-                self.target_position, self.target_reached_within_tolerance_prop_to_speed  # type: ignore[attr-defined]
+                self.target_position, self.target_reached_within_tolerance_prop_to_speed_dt  # type: ignore[attr-defined]
             )
             if target_reached:
                 self.steps_before_checking_for_target = self.wait_between_targets  # type: ignore[attr-defined]
@@ -771,6 +773,85 @@ class ResetableAgent(Agent):
         self.current_trajectory_length += 1
         self.num_steps_total += 1
 
+    def plot_distance_to(
+        self,
+        position: str | np.ndarray[tuple[int], np.dtype[np.float64]] = "target",
+        t_start: float | None = None,
+        t_end: float | None = None,
+        fig: mpl_figure.Figure | None = None,
+        ax: plt.Axes | None = None,
+        alpha: float = 0.8,
+        color: str = "k",
+        tolerance_prop_to_speed_dt: float | None = None,
+        zoom_prop: float | None = None,
+        mark_below_tolerance: bool = False,
+        autosave: bool | None = None,
+    ) -> tuple[mpl_figure.Figure, plt.Axes]:
+        """Plot the distance to a position across the agent's history."""
+
+        t = np.asarray(self.history["t"])
+        startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
+
+        t = t[startid : endid + 1] / 60
+        positions = np.asarray(self.history["pos"])[startid : endid + 1]
+
+        position_name = position
+        if isinstance(position, str):
+            if position == "target":
+                position = self.target_position
+                if tolerance_prop_to_speed_dt is None:
+                    tolerance_prop_to_speed_dt = self.target_reached_within_tolerance_prop_to_speed_dt  # type: ignore[attr-defined]
+            elif position == "reset":
+                position = self.reset_position
+                if tolerance_prop_to_speed_dt is None:
+                    tolerance_prop_to_speed_dt = self.reset_reached_within_tolerance_prop_to_speed_dt  # type: ignore[attr-defined]
+            elif position == "start":
+                position = self.start_position
+            else:
+                raise ValueError(
+                    f"Expected position to be 'target', 'reset' or 'start', but got {position}."
+                )
+
+        position = self.format_position(position)
+
+        distances = np.linalg.norm(positions - position, ord=2, axis=1)
+
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(8, 2))
+
+        ax.plot(t, distances, alpha=alpha, lw=1, color=color)
+        if tolerance_prop_to_speed_dt is not None:
+            speed = np.linalg.norm(np.asarray(self.history["vel"]), ord=2, axis=1)
+            speed = speed[startid : endid + 1]
+            y = speed * self.dt * tolerance_prop_to_speed_dt  # type: ignore[attr-defined]
+            ax.plot(t, y, color=color, alpha=alpha / 2, lw=0.5)
+            if zoom_prop is not None:
+                ax.set_ylim(0, y.max() * zoom_prop)
+            if mark_below_tolerance:
+                below = np.where(distances < y)[0]
+                if len(below):
+                    ax.scatter(
+                        t[below], distances[below], color=color, marker=".", s=12
+                    )
+
+        elif zoom_prop or mark_below_tolerance:
+            raise ValueError(
+                "Cannot zoom or mark below the tolerance if a tolerance is not provided."
+            )
+
+        ax.set_xlabel("Time / min")
+        ax.set_ylabel(f"Distance to {position_name} / m")
+
+        ax.spines["right"].set_visible(False)
+        ax.spines["top"].set_visible(False)
+
+        if fig is None:
+            fig = ax.figure
+
+        util.save_figure(fig, "distance", save=autosave)
+
+        return fig, ax
+
     def plot_trajectory_resets(
         self,
         t_start: float | None = None,
@@ -823,8 +904,10 @@ class ResetableAgent(Agent):
         elif len(time) == 0:
             raise RuntimeError("Duration too short. No time points to plot.")
 
-        if fig is None or ax is None:
+        if ax is None:
             fig, ax = plt.subplots(figsize=(8, 5))
+        if fig is None:
+            fig = ax.figure
 
         if self.Environment.D == 1:
             min_y, max_y = self.Environment.extent
@@ -1045,8 +1128,8 @@ class ResetableAgent(Agent):
 
             fig, ax = self.Environment.plot_environment(fig=fig, ax=ax)
 
-            if fig is None or ax is None:
-                raise RuntimeError("fig or ax is None.")
+            if ax is None:
+                raise RuntimeError("ax is None.")
 
             if plot_target and self.target_position is not None:
                 ax.scatter(
@@ -1086,7 +1169,7 @@ class ResetableAgent(Agent):
                 linewidth=0,
             )
         if self.Environment.dimensionality == "1D":
-            if fig is None or ax is None:
+            if ax is None:
                 fig, ax = plt.subplots(figsize=(3, 1.5))
             ax.scatter(time / 60, trajectory, alpha=alpha, linewidth=0, c=c, s=5)
             ax.spines["left"].set_position(("data", t_start / 60))
@@ -1106,8 +1189,11 @@ class ResetableAgent(Agent):
                 ax.set_facecolor(background_color)
                 fig.patch.set_facecolor(background_color)  # type: ignore[attr-defined]
 
-        if fig is None or ax is None:
-            raise RuntimeError("fig or ax is None.")
+        if ax is None:
+            raise RuntimeError("ax is None.")
+
+        if fig is None:
+            fig = ax.figure
 
         util.save_figure(fig, "trajectory", save=autosave)
 
@@ -1199,8 +1285,8 @@ class ResetableAgent(Agent):
 
             if self.Environment.dimensionality == "2D":
                 fig, ax = self.Environment.plot_environment(fig=fig, ax=ax)
-                if fig is None or ax is None:
-                    raise RuntimeError("fig or ax is None.")
+                if ax is None:
+                    raise RuntimeError("ax is None.")
                 if self.target_position is not None:
                     ax.scatter(
                         *self.target_position,
@@ -1231,7 +1317,7 @@ class ResetableAgent(Agent):
                     marker=marker,
                 )
             elif self.Environment.dimensionality == "1D":
-                if fig is None or ax is None:
+                if ax is None:
                     fig, ax = plt.subplots(figsize=(3, 1.5))
                 ax.scatter(
                     time / 60,
@@ -1259,8 +1345,11 @@ class ResetableAgent(Agent):
                     ax.set_facecolor(background_color)
                     fig.patch.set_facecolor(background_color)  # type: ignore[attr-defined]
 
-        if fig is None or ax is None:
-            raise RuntimeError("fig or ax is None.")
+        if ax is None:
+            raise RuntimeError("ax is None.")
+
+        if fig is None:
+            fig = ax.figure
 
         util.save_figure(fig, "trajectory_edges", save=autosave)
 
@@ -1472,7 +1561,7 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
             raise ValueError("pos must be 'both', 'left', or 'right'.")
 
         # check if the distance is less than the tolerance
-        if distance < (np.absolute(self.speed_mean) * self.reset_reached_within_tolerance_prop_to_speed):  # type: ignore[attr-defined]
+        if distance < (np.absolute(self.speed_mean) * self.reset_reached_within_tolerance_prop_to_speed_dt):  # type: ignore[attr-defined]
             return True
 
         return False
@@ -1493,7 +1582,7 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
         "trajectory_length": 2000,  # int or iterable of ints
         "num_trajectories": 10,  # number of trajectory lengths to sample
         "wait_between_targets": 10,  # number of steps to wait between target reaching
-        "target_reached_within_tolerance_prop_to_speed": 0.55,  # proportion of mean speed to use as target tolerance
+        "target_reached_within_tolerance_prop_to_speed_dt": 0.55,  # proportion of mean speed * dt to use as target tolerance
         "num_random_walk_steps": 100,  # number of steps to random walk, if target is not in sight
         "always_log_teleportation": False,  # whether to log teleportation events when they occur
     }
@@ -1502,7 +1591,7 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
         "reset_position",
         "start_position",
         "target_position",
-        "reset_reached_within_tolerance_prop_to_speed",
+        "reset_reached_within_tolerance_prop_to_speed_dt",
         "fixed_direction",
     ]
     ignored_params = {key: None for key in ignored_param_keys}
@@ -1801,16 +1890,16 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
     def sample_within_tolerance(
         self,
         position: np.ndarray[tuple[int], np.dtype[np.float64]],
-        sample_within_tolerance_prop_to_speed: float | None = None,
+        sample_within_tolerance_prop_to_speed_dt: float | None = None,
         max_attempts: int = 100,
     ) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
         """Sample a position within the tolerance of the given position.
 
         Args:
             position (np.ndarray): The position to sample around.
-            sample_within_tolerance_prop_to_speed (float): The proportion of the tolerance to
+            sample_within_tolerance_prop_to_speed_dt (float): The proportion of the tolerance to
                 sample within. Defaults to None, in which case the agent's
-                target_reached_within_tolerance_prop_to_speed is used.
+                target_reached_within_tolerance_prop_to_speed_dt is used.
 
         Returns:
             position (np.ndarray): The sampled position.
@@ -1819,14 +1908,14 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
         if len(position) != 2:
             raise ValueError(f"position must have length 2, but found {len(position)}.")
 
-        if sample_within_tolerance_prop_to_speed is None:
-            prop_to_speed = self.target_reached_within_tolerance_prop_to_speed  # type: ignore[attr-defined]
+        if sample_within_tolerance_prop_to_speed_dt is None:
+            prop_to_speed_dt = self.target_reached_within_tolerance_prop_to_speed_dt  # type: ignore[attr-defined]
         else:
-            prop_to_speed = sample_within_tolerance_prop_to_speed
+            prop_to_speed_dt = sample_within_tolerance_prop_to_speed_dt
 
         new_position = super().sample_within_tolerance(
             position,
-            sample_within_tolerance_prop_to_speed=prop_to_speed,
+            sample_within_tolerance_prop_to_speed_dt=prop_to_speed_dt,
             max_attempts=max_attempts,
         )
 
@@ -1922,13 +2011,13 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
             teleport_pair_num, direction="in"
         )
 
-        tolerance_prop_to_speed = self.target_reached_within_tolerance_prop_to_speed  # type: ignore[attr-defined]
+        tolerance_prop_to_speed_dt = self.target_reached_within_tolerance_prop_to_speed_dt  # type: ignore[attr-defined]
 
         teleport = False
 
         # check if close to teleport in
         near_teleport = self.check_if_position_reached(
-            teleport_coords, tolerance_prop_to_speed
+            teleport_coords, tolerance_prop_to_speed_dt
         )
         if near_teleport:
             # check if agent is within 45 degrees, either side of the teleport in
@@ -2038,13 +2127,13 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
 
         teleport_vector = self.get_teleport_vector(teleport_pair_num, direction="out")
 
-        tolerance_prop_to_speed = self.target_reached_within_tolerance_prop_to_speed  # type: ignore[attr-defined]
+        tolerance_prop_to_speed_dt = self.target_reached_within_tolerance_prop_to_speed_dt  # type: ignore[attr-defined]
 
         i = 0
         out_coords = None
         while out_coords is None:
             sampled_out_coords = self.sample_within_tolerance(
-                teleport_coords, tolerance_prop_to_speed
+                teleport_coords, tolerance_prop_to_speed_dt
             )
             for x, y in [(1, 1), (1, -1), (-1, 1), (-1, -1)]:
                 coords_diff = sampled_out_coords - teleport_coords
@@ -2421,11 +2510,14 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
             ax (plt.Axes): Axes with the plot.
         """
 
-        if fig is None or ax is None or plot_env:
+        if ax is None or plot_env:
             fig, ax = self.Environment.plot_environment(fig=fig, ax=ax)
 
-        if fig is None or ax is None:
-            raise RuntimeError("fig or ax is None.")
+        if ax is None:
+            raise RuntimeError("ax is None.")
+
+        if fig is None:
+            fig = ax.figure
 
         if len(self.target_df) == 0:
             return fig, ax
@@ -2532,7 +2624,7 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
             ax (plt.Axes): Axes with the plot.
         """
 
-        if fig is None or ax is None:
+        if ax is None:
             fig, ax = plt.subplots(figsize=(8, 3))
 
         t, pos = np.array(self.history["t"]), np.array(self.history["pos"])

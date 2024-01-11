@@ -7,7 +7,7 @@ from matplotlib import pyplot as plt
 from matplotlib import figure as mpl_figure
 import numpy as np
 
-from predhpc import util, plot_util
+from predhpc import util, plot_util, params_util
 from predhpc.neurons import learning_neurons
 
 if TYPE_CHECKING:
@@ -45,7 +45,7 @@ class TwoCompLayer:
         "inhibit_dend": True,
         "inhibit_color": "k",
         "inhibit_weight": 0.5,  # multiplied by -1 identity matrix
-        "inhibit_activation_function": util.get_standard_sigmoid_params(center_0=False),
+        "inhibit_activation_function": params_util.LINEAR_SIGMOID_ACTIVATION_FUNCTION,
         "inhibit_input_filter_tau": 0.1,
         "inhibit_input_trend_tau": 0.1,
     }
@@ -397,6 +397,9 @@ class TwoCompLayer:
             if self.inhibit_dend:
                 ax.plot([], [], color=inhibit_color, label="inhib.")
             ax.legend()
+
+        if fig is None:
+            fig = ax.figure
 
         util.save_figure(fig, f"{self.name}_firingrate", save=autosave)  # type: ignore[attr-defined]
 

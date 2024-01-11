@@ -5,7 +5,7 @@ import warnings
 import numpy as np
 from ratinabox.Neurons import FeedForwardLayer, ObjectVectorCells, PlaceCells  # type: ignore[import]
 
-from predhpc import env
+from predhpc import env, plot_util, util
 
 if TYPE_CHECKING:
     import ratinabox  # type: ignore[import]
@@ -113,6 +113,57 @@ class ObjectCells(FeedForwardLayer):
     def update(self):
         self.PlaceCellInputs.update()
         super().update()
+
+    def get_plotting_times(
+        self, t_start: float | None = None, t_end: float | None = None
+    ):
+        """Get the times to plot.
+
+        Args:
+            t_start (float, optional): Start time. Defaults to None.
+            t_end (float, optional): End time. Defaults to None.
+
+        Returns:
+            t: Times to plot.
+            startid: Index of the start time.
+            endid: Index of the end time.
+        """
+
+        t = np.array(self.history["t"])
+        startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
+        t = t[startid : endid + 1]
+
+        return t, startid, endid
+
+    def plot_rate_timeseries(
+        self,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        adjust_xlim: bool = True,
+        **kwargs,
+    ):
+        t, _, _ = self.get_plotting_times(t_start, t_end)
+        t_start = t[0]
+        t_end = t[-1]
+
+        fig, ax = super().plot_rate_timeseries(
+            t_start=t_start,
+            t_end=t_end,
+            autosave=False,
+            **kwargs,
+        )
+
+        if adjust_xlim:
+            xlim = np.asarray([t_start, t_end]) / 60
+            ax.set_xlim(*xlim)
+
+            xticks = np.around(xlim, 2)
+            ax.set_xticks(xticks)
+            ax.set_xticklabels(xticks)
+
+        util.save_figure(fig, f"{self.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
+
+        return fig, ax
 
 
 class FixedObjectCells(ObjectCells):
@@ -397,6 +448,49 @@ class FixedObjectVectorCells(ObjectVectorCells):
         np.random.shuffle(tuning_types)
 
         self.tuning_types = tuning_types
+
+    def get_plotting_times(
+        self, t_start: float | None = None, t_end: float | None = None
+    ):
+        """Get the times to plot.
+
+        Args:
+            t_start (float, optional): Start time. Defaults to None.
+            t_end (float, optional): End time. Defaults to None.
+
+        Returns:
+            t: Times to plot.
+            startid: Index of the start time.
+            endid: Index of the end time.
+        """
+
+        t = np.array(self.history["t"])
+        startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
+        t = t[startid : endid + 1]
+
+        return t, startid, endid
+
+    def plot_rate_timeseries(
+        self,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        autosave: bool | None = None,
+        **kwargs,
+    ):
+        t, startid, endid = self.get_plotting_times(t_start, t_end)
+        t_start = t[startid]
+        t_end = t[endid]
+
+        fig, ax = super().plot_rate_timeseries(
+            t_start=t_start,
+            t_end=t_end,
+            autosave=False,
+            **kwargs,
+        )
+
+        util.save_figure(fig, f"{self.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
+
+        return fig, ax
 
 
 class WeightedObjectVectorCells(ObjectVectorCells):

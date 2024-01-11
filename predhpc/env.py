@@ -279,8 +279,8 @@ class TEnv(Environment, util.ParamsManagerMixin):
             fig=fig, ax=ax, autosave=False, plot_objects=False, **kwargs
         )
 
-        if fig is None or ax is None:
-            raise RuntimeError("fig or ax is None.")
+        if ax is None:
+            raise RuntimeError("ax is None.")
 
         ax.scatter(
             *self.T_start,
@@ -318,6 +318,9 @@ class TEnv(Environment, util.ParamsManagerMixin):
             zorder=5,
         )
         ax.legend(loc="lower right", frameon=False)
+
+        if fig is None:
+            fig = ax.figure
 
         util.save_figure(fig, "Environment", save=autosave)
 
@@ -1063,7 +1066,7 @@ class OpenField(Environment, util.ParamsManagerMixin):
             ax (matplotlib axis): axis with environment plotted.
         """
 
-        if fig is None or ax is None:
+        if ax is None:
             env_width = self.extent[1] - self.extent[0]
             add_x = 0
             if plot_objects:
@@ -1076,8 +1079,8 @@ class OpenField(Environment, util.ParamsManagerMixin):
             fig=fig, ax=ax, autosave=False, plot_objects=False, **kwargs
         )
 
-        if fig is None or ax is None:
-            raise RuntimeError("fig or ax is None.")
+        if ax is None:
+            raise RuntimeError("ax is None.")
 
         if plot_objects:
             type_num_to_plot_params_dict = copy.deepcopy(
@@ -1100,6 +1103,9 @@ class OpenField(Environment, util.ParamsManagerMixin):
         legend = ax.get_legend()
         if no_legend and legend is not None:
             legend.remove()
+
+        if fig is None:
+            fig = ax.figure
 
         util.save_figure(fig, "Environment", save=autosave)
 

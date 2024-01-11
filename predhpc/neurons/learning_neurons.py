@@ -8,9 +8,8 @@ import numpy as np
 
 from ratinabox.Neurons import Neurons, FeedForwardLayer  # type: ignore[import]
 from ratinabox import utils as rutils  # type: ignore[import]
-from ratinabox import MOUNTAIN_PLOT_OVERLAP, MOUNTAIN_PLOT_SHIFT_MM  # type: ignore[import]
 
-from predhpc import util, plot_util
+from predhpc import util, plot_util, params_util
 
 if TYPE_CHECKING:
     import ratinabox  # type: ignore[import]
@@ -35,7 +34,7 @@ class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
 
     default_params = {
         "n": 10,
-        "activation_function": {"activation": "sigmoid"},
+        "activation_function": params_util.LINEAR_SIGMOID_ACTIVATION_FUNCTION,
         "name": "SmoothFeedForwardLayer",
         "input_filter_tau": 0.1,  # in sec
         "input_trend_tau": None,  # in sec
@@ -63,6 +62,9 @@ class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
 
+        self.activation_params = self.params[
+            "activation_function"
+        ]  # store activation parameters
         super().__init__(Agent, self.params)
 
         return
@@ -80,6 +82,39 @@ class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
             )
 
         return filter_tau
+
+    def plot_activation_function(
+        self, min_input_fr=-15, max_input_fr=15, fig=None, ax=None
+    ):
+        fig, ax = plot_util.plot_activation_function(
+            self.activation_function,
+            min_input_fr=min_input_fr,
+            max_input_fr=max_input_fr,
+            fig=fig,
+            ax=ax,
+            color=self.color,
+        )
+
+        ax.set_title("Activation function")
+
+        return fig, ax
+
+    def plot_firingrate_distribution(self, fig=None, ax=None, bins=50):
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=(4, 2))
+
+        firingrates = np.asarray(self.history["firingrate"]).reshape(-1)
+        ax.hist(firingrates, bins=bins, color=self.color, alpha=0.6, density=True)
+
+        ax.axvline(0, color="k", lw=1, ls="dashed")
+
+        ax.set_xlabel("Firing rate")
+        ax.set_ylabel("Density")
+        ax.set_title("Firing rate distribution")
+
+        ax.spines[["right", "top"]].set_visible(False)
+
+        return fig, ax
 
     def add_input(self, input_layer: Neurons, **kwargs):
         super().add_input(input_layer, **kwargs)
@@ -202,6 +237,58 @@ class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
 
         return firingrate
 
+    def get_plotting_times(
+        self, t_start: float | None = None, t_end: float | None = None
+    ):
+        """Get the times to plot.
+
+        Args:
+            t_start (float, optional): Start time. Defaults to None.
+            t_end (float, optional): End time. Defaults to None.
+
+        Returns:
+            t: Times to plot.
+            startid: Index of the start time.
+            endid: Index of the end time.
+        """
+
+        t = np.array(self.history["t"])
+        startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
+        t = t[startid : endid + 1]
+
+        return t, startid, endid
+
+    def plot_rate_timeseries(
+        self,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        adjust_xlim: bool = True,
+        autosave: bool | None = None,
+        **kwargs,
+    ):
+        t, _, _ = self.get_plotting_times(t_start, t_end)
+        t_start = t[0]
+        t_end = t[-1]
+
+        fig, ax = super().plot_rate_timeseries(
+            t_start=t_start,
+            t_end=t_end,
+            autosave=False,
+            **kwargs,
+        )
+
+        if adjust_xlim:
+            xlim = np.asarray([t_start, t_end]) / 60
+            ax.set_xlim(*xlim)
+
+            xticks = np.around(xlim, 2)
+            ax.set_xticks(xticks)
+            ax.set_xticklabels(xticks)
+
+        util.save_figure(fig, f"{self.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
+
+        return fig, ax
+
     def update(self):
         """Update the layer, and filtered inputs"""
 
@@ -281,7 +368,7 @@ class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
         height = 0.6 * (unfiltered.max() - unfiltered.min())
         shifts = np.arange(unfiltered.shape[1]).reshape(1, -1) * height
 
-        if fig is None or ax is None:
+        if ax is None:
             n = unfiltered.shape[1]
             height = max([1, min(n / 12.0 + 5 / 3, 8)])
             fig, ax = plt.subplots(figsize=[6, height])
@@ -302,6 +389,9 @@ class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
         if title is None:
             title = filter_key.replace("_", " ").capitalize()
         ax.set_title(title)
+
+        if fig is None:
+            fig = ax.figure
 
         util.save_figure(fig, f"{self.name}_{filter_key}", save=autosave)  # type: ignore[attr-defined]
 
@@ -327,7 +417,6 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
 
     default_params = {
         "n": 10,
-        "activation_function": {"activation": "sigmoid"},
         "name": "LearnLayer",
         "lr": 1e-4,  # learning rate
         "biases": None,
@@ -426,27 +515,6 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
         if self.target is not None:
             target_mse = np.mean((self.target - self.firingrate) ** 2)
             self.history["target_mse"].append(target_mse)
-
-    def get_plotting_times(
-        self, t_start: float | None = None, t_end: float | None = None
-    ):
-        """Get the times to plot.
-
-        Args:
-            t_start (float, optional): Start time. Defaults to None.
-            t_end (float, optional): End time. Defaults to None.
-
-        Returns:
-            t: Times to plot.
-            startid: Index of the start time.
-            endid: Index of the end time.
-        """
-
-        t = np.array(self.history["t"])
-        startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
-        t = t[startid : endid + 1]
-
-        return t, startid, endid
 
     def plot_rate_map(
         self,
@@ -701,7 +769,7 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
             fig, ax: Figure and axis of the plot.
         """
 
-        if fig is None or ax is None:
+        if ax is None:
             fig, ax = plt.subplots(figsize=(8, 3))
 
         _, startid, _ = self.get_plotting_times(t_start=t_start)
@@ -719,6 +787,9 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
         ax.set_xlabel(xlabel)
         ax.set_ylabel("Count")
         ax.spines[["top", "right"]].set_visible(False)
+
+        if fig is None:
+            fig = ax.figure
 
         util.save_figure(fig, f"{self.name}_firing_rate_histogram", save=autosave)  # type: ignore[attr-defined]
 
@@ -743,7 +814,6 @@ class HebbianLayer(LearnLayer):
 
     default_params = {
         "n": 10,
-        "activation_function": {"activation": "sigmoid"},
         "name": "HebbianLayer",
         "lr": 1e-4,  # learning rate
         "biases": None,
@@ -832,6 +902,12 @@ class HebbianLayer(LearnLayer):
             if f"filtered_{key}_for_learning" not in self.history.keys():
                 self.history[f"filtered_{key}_for_learning"] = dict()
             self.history[f"filtered_{key}_for_learning"][name_in] = list()
+
+        if self.normalize_weights_divisively:
+            self.update_weights(
+                filter_key="I", lr=0
+            )  # normalize weights only (no update)
+            self.inputs[name_in]["w_init"] = copy.deepcopy(self.inputs[name_in]["w"])
 
     def save_to_history(self):
         """Save the current state of the layer to the history, including the
@@ -1078,14 +1154,13 @@ class BTSPLayer(HebbianLayer):
                 return
             BTSP_targets = keep_BTSP_targets
 
-            lr = np.full(self.n, self.lr)  # type: ignore[attr-defined]
-            lr[np.asarray(BTSP_targets)] *= self.BTSP_lr_fact  # type: ignore[attr-defined]
+            lr = np.zeros(self.n)  # type: ignore[attr-defined]
+            lr[np.asarray(BTSP_targets)] = self.BTSP_lr_fact * self.lr  # type: ignore[attr-defined]
 
             self.num_BTSP_to_date[np.asarray(BTSP_targets)] += +1
             self.last_BTSP_step[np.asarray(BTSP_targets)] = self.num_steps_total - 1
             for targ in BTSP_targets:
                 self.last_BTSP_pos[targ] = self.Agent.pos
-
             self.update_weights(filter_key="filtered_inputs_for_BTSP", lr=lr)
             self.history["BTSP_events"].append(
                 self.num_steps_total - 1
@@ -1234,6 +1309,8 @@ class BTSPLayer(HebbianLayer):
                 i = chosen_neurons.index(target)
 
                 if timeseries:
+                    if event < 0:
+                        continue
                     sub_ax = axes
                     x_pos = t[event] / 60
                     line_sep = (sub_ax.get_ylim()[1] - 1) / num_neurons
@@ -1339,8 +1416,6 @@ class BTSPLayer(HebbianLayer):
             plt.Axes: Axes object.
         """
 
-        t_start = t_start or self.history["t"][0]
-
         fig, ax = super().plot_rate_timeseries(
             t_start=t_start,
             t_end=t_end,
@@ -1367,16 +1442,17 @@ class BTSPLayer(HebbianLayer):
         if xlim is not None:
             ax.set_xlim(xlim)
 
-        util.save_figure(fig, f"{self.name}_ratemaps", save=autosave)  # type: ignore[attr-defined]
+        util.save_figure(fig, f"{self.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
 
         return fig, ax
 
-    def plot_BTSP_ramp(self, fig=None, ax=None, autosave=None):
+    def plot_BTSP_ramp(self, fig=None, ax=None, plot_events=True, autosave=None):
         """Plot the BTSP ramp of the layer.
 
         Args:
             fig (mpl_figure.Figure): Figure object. Defaults to None.
             ax (plt.Axes): Axes object. Defaults to None.
+            plot_events (bool, optional): Whether to plot BTSP event markers. Defaults to True.
             autosave (bool, optional): Whether to autosave the figure. Defaults to None.
 
         Returns:
@@ -1389,8 +1465,23 @@ class BTSPLayer(HebbianLayer):
         elif ax.shape != (2,):
             raise ValueError("ax must have shape (2,).")
 
+        if self.n > 1:
+            raise NotImplementedError(
+                "Plotting BTSP ramp only implemented for 1 neuron."
+            )
+
         t = np.asarray(self.history["t"])
-        ax[0].plot(t, self.history["BTSP_ramp"], lw=1.2, color=self.color)
+        BTSP_ramp = np.asarray(self.history["BTSP_ramp"])[:, 0]  # 1st neuron only
+
+        ax[0].plot(t, BTSP_ramp, lw=1.2, color=self.color)
+        ax[0].fill_between(
+            t,
+            np.zeros(len(t)),
+            BTSP_ramp,
+            lw=0,
+            alpha=0.2,
+            color=self.color,
+        )
         ax[0].set_ylabel("Prop. of BTSP\nthreshold reached")
         ax[0].spines[["top", "right"]].set_visible(False)
         ax[0].axhline(1, ls="dashed")
@@ -1402,7 +1493,6 @@ class BTSPLayer(HebbianLayer):
         ax[1].spines[["top", "right"]].set_visible(False)
 
         i = 0
-        BTSP_ramp = np.asarray(self.history["BTSP_ramp"])
         num_steps_for_plateau = int(np.ceil(self.BTSP_plateau_length / self.Agent.dt))
         labels = ["BTSP event", "insufficient"]
         while i < len(BTSP_ramp):
@@ -1435,7 +1525,24 @@ class BTSPLayer(HebbianLayer):
                 labels[l] = None
             else:
                 i += num_steps_for_plateau
-        ax[1].legend()
+
+        if plot_events:
+            BTSP_events = np.asarray(self.history["BTSP_events"])
+            if len(BTSP_events):
+                y = 1
+                ax[0].scatter(
+                    t[np.asarray(BTSP_events)],
+                    np.full(len(BTSP_events), y),
+                    color=(self.color or "k"),
+                    alpha=0.8,
+                    marker=markers.MarkerStyle("x"),
+                    s=10,
+                )
+        if BTSP_ramp.max() < 0:
+            ax[1].legend()
+
+        if fig is None:
+            fig = ax[0].figure
 
         util.save_figure(fig, f"{self.name}_BTSP_ramp", save=autosave)  # type: ignore[attr-defined]
 
@@ -1528,7 +1635,7 @@ class NMDACurrent:
         )
 
     def plot_function(
-        self, param_type="binding", min_input_fr=-10, max_input_fr=10, fig=None, ax=None
+        self, param_type="binding", min_input_fr=-15, max_input_fr=15, fig=None, ax=None
     ):
         if param_type == "binding":
             function = self.binding_function
@@ -1788,7 +1895,7 @@ class NMDALayer(BTSPLayer):
         "name": "NMDALayer",
         "NMDA_activation_threshold": 2,
         "BTSP_induction_threshold": 8,
-        "BTSP_plateau_length": 0.1,  # seconds
+        "BTSP_plateau_length": 0.12,  # seconds
     }
 
     ignored_param_keys = list()
@@ -1814,10 +1921,21 @@ class NMDALayer(BTSPLayer):
 
         super().__init__(Agent, self.params)
 
+        self._check_BTSP_plateau_length()
         self._add_NMDA_current()
 
         self.BTSP_ramp = np.zeros(self.n).astype(float)  # type: ignore[attr-defined]
         self.history["BTSP_ramp"] = list()
+
+    def _check_BTSP_plateau_length(self):
+        num_steps = self.BTSP_plateau_length / self.Agent.dt
+        if not np.isclose(num_steps, int(num_steps)):
+            low_plateau_length = np.floor(num_steps) * self.Agent.dt
+            high_plateau_length = np.ceil(num_steps) * self.Agent.dt
+            raise ValueError(
+                f"BTSP_plateau_length must be a multiple of the Agent's dt ({self.Agent.dt}). "
+                f"Try {low_plateau_length} or {high_plateau_length}."
+            )
 
     def _add_NMDA_current(self):
         """Set the NMDA intermediate layer."""
@@ -1974,7 +2092,7 @@ class NMDALayer(BTSPLayer):
         elif ax.shape != (3,):
             raise ValueError("ax must have shape (3,).")
 
-        super().plot_BTSP_ramp(fig, ax[:2], autosave=False)
+        super().plot_BTSP_ramp(fig=fig, ax=ax[:2], autosave=False)
 
         ax[2].plot(
             self.history["t"],
@@ -1986,6 +2104,9 @@ class NMDALayer(BTSPLayer):
         ax[2].set_xlabel("Time (s)")
         ax[2].set_ylabel("CA1 NMDA current")
         ax[2].spines[["top", "right"]].set_visible(False)
+
+        if fig is None:
+            fig = ax[0].figure
 
         util.save_figure(fig, f"{self.name}_BTSP_ramp", save=autosave)  # type: ignore[attr-defined]
 
