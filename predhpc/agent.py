@@ -509,7 +509,9 @@ class ResetableAgent(Agent):
             list: Trajectory lengths to date.
         """
 
-        trajectory_lengths_to_date = self.trajectory_df["num_steps_total"].to_numpy()
+        trajectory_lengths_to_date = (
+            self.trajectory_df["num_steps_total"].to_numpy().copy()
+        )
 
         if np.isnan(trajectory_lengths_to_date[-1]):
             last_start = int(

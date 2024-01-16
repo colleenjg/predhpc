@@ -215,7 +215,7 @@ class SmoothFeedForwardLayer(FeedForwardLayer, util.ParamsManagerMixin):
                     I = inputlayer["layer"].firingrate
             else:  # kick can down the road let input layer decide how to evaluate the firingrate. this is core to feedforward layer as this recursive call will backprop through the upstraem layers until it reaches a "core" (e.g. place cells) layer which will then evaluate the firingrate.
                 I = inputlayer["layer"].get_state(
-                    evaluate_at,
+                    evaluate_at=evaluate_at,
                     max_recurrence=pass_max_recurrence,
                     **kwargs,
                 )
@@ -1735,9 +1735,17 @@ class NMDACurrent:
             receptor_activation += effective_binding * neuron_activity_gate
         else:
             receptor_activation = np.minimum(
-                np.full_like(receptor_binding, self.test_activation),
-                receptor_binding,
+                receptor_binding, self.test_activation
             )  # avoid saturation when evaluating rate maps
+
+            if evaluate_at == "all":
+                pos_dim = self.Agent.Environment.flattened_discrete_coords.shape[0]
+            else:
+                pos_dim = kwargs["pos"].shape[0]
+
+            receptor_activation = np.repeat(receptor_activation, pos_dim).reshape(
+                -1, pos_dim
+            )
 
         current = receptor_activation * self.max_current  # type: ignore[operator]
 

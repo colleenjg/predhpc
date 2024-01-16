@@ -140,6 +140,7 @@ class ObjectCells(FeedForwardLayer):
         t_start: float | None = None,
         t_end: float | None = None,
         adjust_xlim: bool = True,
+        autosave: bool | None = None,
         **kwargs,
     ):
         t, _, _ = self.get_plotting_times(t_start, t_end)
