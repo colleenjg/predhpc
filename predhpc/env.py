@@ -207,13 +207,17 @@ class TEnv(Environment, util.ParamsManagerMixin):
                 delta = np.sqrt(area_size / n)
 
                 if area == "top":
-                    num_y_vals = min(1, int((extent_y[1] - extent_y[0]) // delta))
+                    num_y_vals = max(
+                        1, int(np.around((extent_y[1] - extent_y[0]) / delta))
+                    )
                     num_x_vals = int(n // num_y_vals)
                     delta_y = delta
                     delta_x = (extent_x[1] - extent_x[0]) / num_x_vals
 
                 elif area == "bottom":
-                    num_x_vals = min(1, int((extent_x[1] - extent_x[0]) // delta))
+                    num_x_vals = max(
+                        1, int(np.around((extent_x[1] - extent_x[0]) // delta))
+                    )
                     num_y_vals = int(n // num_x_vals)
                     delta_x = delta
 

@@ -189,7 +189,10 @@ def learn_T_maze_BTSP(
 
     if CA1_params is None:
         CA1_params = params_util.get_CA1_params(
-            environment="tmaze", BTSP=True, two_compartment=two_compartment
+            environment="tmaze",
+            BTSP=True,
+            NMDA=two_compartment,
+            two_compartment=two_compartment,
         )
 
     if two_compartment:
@@ -473,7 +476,10 @@ def learn_1D_BTSP(
 
     if CA1_params is None:
         CA1_params = params_util.get_CA1_params(
-            environment="linear", two_compartment=two_compartment, BTSP=True
+            environment="linear",
+            BTSP=True,
+            NMDA=two_compartment,
+            two_compartment=two_compartment,
         )
 
     CA1_params["input_layers"] = [CA3_PCs]
