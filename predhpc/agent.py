@@ -777,7 +777,8 @@ class ResetableAgent(Agent):
 
     def plot_distance_to(
         self,
-        position: str | np.ndarray[tuple[int], np.dtype[np.float64]] = "target",
+        position_name: str = "target",
+        position: None | np.ndarray[tuple[int], np.dtype[np.float64]] = None,
         t_start: float | None = None,
         t_end: float | None = None,
         fig: mpl_figure.Figure | None = None,
@@ -797,21 +798,21 @@ class ResetableAgent(Agent):
         t = t[startid : endid + 1] / 60
         positions = np.asarray(self.history["pos"])[startid : endid + 1]
 
-        position_name = position
-        if isinstance(position, str):
-            if position == "target":
+        if position is None:
+            if position_name == "target":
                 position = self.target_position
                 if tolerance_prop_to_speed_dt is None:
                     tolerance_prop_to_speed_dt = self.target_reached_within_tolerance_prop_to_speed_dt  # type: ignore[attr-defined]
-            elif position == "reset":
+            elif position_name == "reset":
                 position = self.reset_position
                 if tolerance_prop_to_speed_dt is None:
                     tolerance_prop_to_speed_dt = self.reset_reached_within_tolerance_prop_to_speed_dt  # type: ignore[attr-defined]
-            elif position == "start":
+            elif position_name == "start":
                 position = self.start_position
             else:
                 raise ValueError(
-                    f"Expected position to be 'target', 'reset' or 'start', but got {position}."
+                    f"Can only infer `position` from `position_name` if the latter is "
+                    f"'target', 'reset' or 'start', but got {position_name}."
                 )
 
         position = self.format_position(position)
