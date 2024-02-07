@@ -277,9 +277,9 @@ class ResetableAgent(Agent):
 
     def format_position(
         self,
-        position: np.ndarray[tuple[int], np.dtype[np.float64]]
-        | list[float]
-        | None = None,
+        position: (
+            np.ndarray[tuple[int], np.dtype[np.float64]] | list[float] | None
+        ) = None,
     ) -> np.ndarray[tuple[int], np.dtype[np.float64]] | None:
         """Formats positions, if applicable, and returns them.
 
@@ -814,6 +814,8 @@ class ResetableAgent(Agent):
                     f"Can only infer `position` from `position_name` if the latter is "
                     f"'target', 'reset' or 'start', but got {position_name}."
                 )
+            if position is None:
+                raise ValueError(f"{position_name} is set to None.")
 
         position = self.format_position(position)
 
@@ -1678,9 +1680,9 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
         target_probability_df.reset_index(drop=True, inplace=True)
 
         # add a no target row
-        target_probability_df.loc[
-            len(target_probability_df), "object_type_name"
-        ] = "no_target"
+        target_probability_df.loc[len(target_probability_df), "object_type_name"] = (
+            "no_target"
+        )
 
         # add target probabilities
         target_probability_df.loc[:, "target_factor"] = 1
@@ -1720,7 +1722,7 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
 
         self._end_random_walk()
 
-    def set_new_target(self):
+    def set_new_target(self, target: str | None = None):
         """Set a new target."""
 
         # add random walk steps
@@ -1733,14 +1735,28 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
             num_random_walk_steps = 0
             if len(random_walk_periods) > 0:
                 num_random_walk_steps = np.sum(np.diff(random_walk_periods, axis=1))
-            self.target_df.loc[
-                len(self.target_df) - 1, "num_random_walk_steps"
-            ] = num_random_walk_steps
+            self.target_df.loc[len(self.target_df) - 1, "num_random_walk_steps"] = (
+                num_random_walk_steps
+            )
 
         target_probability_df = self.get_target_probability_df()
 
-        object_weights = target_probability_df["target_probability"].values
-        idx = np.random.choice(len(object_weights), 1, p=np.asarray(object_weights))[0]
+        if target is None:
+            object_weights = target_probability_df["target_probability"].values
+            idx = np.random.choice(
+                len(object_weights), 1, p=np.asarray(object_weights)
+            )[0]
+        else:
+            rows = target_probability_df.loc[
+                target_probability_df["object_type_name"] == target
+            ]
+            if len(rows) == 0:
+                raise ValueError(f"No target of type {target} in the environment.")
+            elif len(rows) > 1:
+                raise RuntimeError(
+                    f"More than one target of type {target} in the environment."
+                )
+            idx = rows.index[0]
 
         target_row = target_probability_df.loc[idx]
 
@@ -1830,13 +1846,15 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
         else:
             self.current_num_of_random_walk_steps = 0
 
-    def set_all_positions(self, first_setting: bool = True):
+    def set_all_positions(self, first_setting: bool = True, target: str | None = None):
         """
         Set all the positions for the agent.
 
         Args:
             first_setting (bool, optional): Whether this is the first setting.
                 Defaults to True.
+            target (str, optional): The target to set. Ignore if first_setting is True.
+                Defaults to None.
         """
 
         # set initial position and velocity
@@ -1847,7 +1865,7 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
 
         self.target_position = None
         if not first_setting:
-            self.set_new_target()
+            self.set_new_target(target=target)
 
         self.steps_before_checking_for_target = 0
 
@@ -2291,9 +2309,9 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
                     )
                 teleportation_data[f"{direction}_object_idx"] = object_idx[0]
                 teleportation_data[f"{direction}_object_type_num"] = type_num
-                teleportation_data[
-                    f"{direction}_object_type_name"
-                ] = self.Environment.object_type_num_to_name_dict[type_num]
+                teleportation_data[f"{direction}_object_type_name"] = (
+                    self.Environment.object_type_num_to_name_dict[type_num]
+                )
 
                 coords = in_coords if direction == "in" else out_coords
                 velocity = in_velocity if direction == "in" else out_velocity
