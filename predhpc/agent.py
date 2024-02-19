@@ -2375,6 +2375,7 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
         dt: float | None = None,
         speed_fact: int | float = 3,
         drift_to_random_strength_ratio: float = 0.7,
+        drift_velocity: float | np.ndarray[tuple[int], np.dtype[np.float64]] | None = None,
         **kwargs,
     ):
         """Update the agent, optionally with a new position and velocity.
@@ -2405,13 +2406,12 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
             drift_to_random_strength_ratio=drift_to_random_strength_ratio,
         )
 
-        drift_velocity = None
-        if teleport_coords is None:
+        # calculate drift_velocity
+        if teleport_coords is None and drift_velocity is None:
             drift_velocity = self.get_drift_velocity(
                 pos=self.pos, speed_fact=speed_fact
             )
 
-        # calculate drift_velocity
         if self.current_num_of_random_walk_steps > 0:
             self.current_num_of_random_walk_steps -= 1
             if teleport_coords is not None:

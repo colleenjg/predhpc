@@ -28,7 +28,11 @@ class SimpleValueNeuron(PlaceCells):
 
         super().__init__(Agent, self.params)
 
-    def get_local_gradient(self, evaluate_at="agent", abs_shift=1e3, p=2, **kwargs):
+        self.peak = np.asarray(self.params["peak"]).reshape(
+            -1, 2
+        )
+
+    def get_local_gradient(self, evaluate_at="agent", abs_shift=1e-3, p=2, thresh_gradV=None, **kwargs):
         if evaluate_at == "agent":
             pos = self.Agent.pos
         elif evaluate_at == "all":
@@ -71,6 +75,13 @@ class SimpleValueNeuron(PlaceCells):
             else:
                 prog_norm = ((self.max_fr - V) / self.max_fr) ** p
                 gradV = gradV / norm * prog_norm
+
+            end_norm = np.sqrt(np.sum(gradV ** 2))
+
+            if thresh_gradV is not None:
+                end_norm = np.sqrt(np.sum(gradV ** 2))
+                if end_norm < thresh_gradV:
+                    return None
 
             return gradV
 
