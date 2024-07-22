@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING, Any, Sequence
 import warnings
 
 from matplotlib import pyplot as plt
-from matplotlib import figure as mpl_figure
 import numpy as np
 
 from predhpc import util, plot_util, params_util
@@ -14,7 +13,7 @@ if TYPE_CHECKING:
     import ratinabox  # type: ignore[import]
 
 
-class TwoCompLayer:
+class TwoCompLayer(object):
     """This trained class defines a population of neurons with two compartments.
     This class is a subclass of Neurons() and inherits its properties/plotting
     functions.
@@ -65,7 +64,7 @@ class TwoCompLayer:
         taken from a default dictionary below.
 
         Args:
-            params (dict, optional). Defaults to dict().
+        - params (dict, optional). Default is dict().
         """
 
         self.Agent = Agent
@@ -227,28 +226,27 @@ class TwoCompLayer:
 
     def plot_rate_map(
         self,
-        fig: mpl_figure.Figure | None = None,
-        ax: plt.Axes | None = None,
+        ax: plt.Axes | np.ndarray | None = None,
         compartment: str | None = None,
         no_legend: bool = False,
         autosave: bool | None = None,
         **kwargs,
-    ) -> tuple[mpl_figure.Figure, np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]]:
+    ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]] | plt.Axes:
         """Plot the rate map of the soma and dendritic layers, overlayed, ensuring no
         more than 20 columns are plotted.
 
         Args:
-            fig (mpl_figure.Figure, optional): Figure object. Defaults to None.
-            ax (plt.Axes, optional): Axes object. Defaults to None.
-            compartment (str, optional): Which compartment to plot, if environment is
-                2D ("soma", "dend" or "both"). Defaults to None
-                (i.e., "soma" if environment is 2D, and "both" otherwise).
-            no_legend (bool, optional): Whether to remove the legend. Defaults to False.
-            autosave (bool, optional): Whether to autosave the figure. Defaults to None.
+        - ax (np.ndarray or plt.Axes, optional): Subplot or array of subplots to plot
+        - on (one per plotted ROI, if environment is 2D). Default is None.
+        - compartment (str, optional): Which compartment to plot, if environment is
+        - 2D ("soma", "dend" or "both"). Default is None
+        - (i.e., "soma" if environment is 2D, and "both" otherwise).
+        - no_legend (bool, optional): Whether to remove the legend. Default is False.
+        - autosave (bool, optional): Whether to autosave the figure. Default is None.
 
         Returns:
-            mpl_figure.Figure: Figure object.
-            plt.Axes: Axes object.
+        - ax (np.ndarray or plt.Axes): Subplot or array of subplots with rate maps
+        - plotted (one per plotted ROI).
         """
 
         if compartment is None:
@@ -274,8 +272,7 @@ class TwoCompLayer:
             )
 
         if self.inhibit_dend and compartment in ["all", "inhibit"]:
-            fig, ax = self.DendriteInhibition.plot_rate_map(
-                fig=fig,
+            ax = self.DendriteInhibition.plot_rate_map(
                 ax=ax,
                 autosave=False,
                 no_legend=no_legend,
@@ -284,7 +281,6 @@ class TwoCompLayer:
 
         if compartment in ["all", "dend"]:
             self.DendriteCompartment.plot_rate_map(
-                fig=fig,
                 ax=ax,
                 autosave=False,
                 no_legend=no_legend,
@@ -292,8 +288,7 @@ class TwoCompLayer:
             )
 
         if compartment in ["all", "soma"]:
-            fig, ax = self.SomaCompartment.plot_rate_map(
-                fig=fig,
+            ax = self.SomaCompartment.plot_rate_map(
                 ax=ax,
                 autosave=False,
                 no_legend=no_legend,
@@ -310,63 +305,70 @@ class TwoCompLayer:
                 sub_ax.plot([], [], color=self.DendriteInhibition.color, label="inhib.")
             sub_ax.legend(loc="lower right")
 
+        fig = np.asarray(ax).ravel()[0].figure
         util.save_figure(fig, f"{self.name}_ratemaps", save=autosave)  # type: ignore[attr-defined]
 
-        return fig, ax
+        return ax
 
     def plot_rate_timeseries(
         self,
-        fig: mpl_figure.Figure | None = None,
-        ax: plt.Axes | None = None,
+        ax: plt.Axes | np.ndarray | None = None,
         soma_color: str | None = None,
         dend_color: str | None = None,
         inhibit_color: str | None = None,
         autosave: bool | None = None,
         separate_axes: bool = False,
         **kwargs,
-    ) -> tuple[mpl_figure.Figure, np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]]:
+    ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
         """Plot a timeseries of the firing rate of the soma and dendritic layers of a
         neuron, overlayed.
 
         Args:
-            fig (mpl_figure.Figure, optional): Figure object. Defaults to None.
-            axes (plt.Axes, optional): Axes object. Defaults to None.
-            soma_color (str, optional): Color for soma compartment. Defaults to None.
-            dend_color (str, optional): Color for dendrite compartment. Defaults to None.
-            autosave (bool, optional): Whether to autosave the figure. Defaults to None.
+        - ax (1D np.ndarray or plt.Axes, optional): Subplot or 1D array of subplots
+        - if separate_axes (one per compartment). Default is None.
+        - soma_color (str, optional): Color for soma compartment. Default is None.
+        - dend_color (str, optional): Color for dendrite compartment. Default is None.
+        - autosave (bool, optional): Whether to autosave the figure. Default is None.
 
         Returns:
-            mpl_figure.Figure: Figure object.
-            plt.Axes: Axes object.
+        - ax (1D np.ndarray or plt.Axes): Subplot or 1D array of subplots
+        - if separate_axes (one per compartment).
         """
 
         if separate_axes:
             num_rows = 2 + self.inhibit_dend  # type: ignore[attr-defined]
             if ax is None:
-                fig, ax = plt.subplots(
-                    num_rows, 1, figsize=[6, 1.2 * num_rows], sharex=True, sharey=True
+                _, ax = plt.subplots(
+                    num_rows,
+                    1,
+                    figsize=[6, 1.2 * num_rows],
+                    sharex=True,
+                    sharey=True,
+                    squeeze=False,
                 )
-            elif ax.shape != (num_rows,):
-                raise ValueError(
-                    f"ax must be a 1D array of length {num_rows}, not {ax.shape}."
-                )
+            elif ax.shape == (num_rows,):
+                ax = ax.reshape(num_rows, 1)
+
+            if ax.shape != (num_rows, 1):
+                raise ValueError(f"ax must have shape ({num_rows}, 1).")
+
+            ax1D = ax.ravel()
+        else:
+            sub_ax = ax
 
         soma_color = soma_color or self.SomaCompartment.color
-        sub_ax = ax[0] if separate_axes else ax
-        fig, sub_ax = self.SomaCompartment.plot_rate_timeseries(
-            fig=fig,
-            ax=sub_ax,
+        soma_ax = ax1D[0] if separate_axes else sub_ax
+        soma_ax = self.SomaCompartment.plot_rate_timeseries(
+            sub_ax=soma_ax,
             color=soma_color,
             autosave=False,
             **kwargs,
         )
-        ax = ax if separate_axes else sub_ax
 
         dend_color = dend_color or self.DendriteCompartment.color
-        sub_ax = ax[1] if separate_axes else ax
+        dend_ax = ax1D[1] if separate_axes else sub_ax
         self.DendriteCompartment.plot_rate_timeseries(
-            fig=fig,
-            ax=sub_ax,
+            sub_ax=dend_ax,
             color=dend_color,
             autosave=False,
             **kwargs,
@@ -374,10 +376,9 @@ class TwoCompLayer:
 
         if self.inhibit_dend:
             inhibit_color = inhibit_color or self.DendriteInhibition.color
-            sub_ax = ax[2] if separate_axes else ax
+            inh_ax = ax1D[2] if separate_axes else sub_ax
             self.DendriteInhibition.plot_rate_timeseries(
-                fig=fig,
-                ax=sub_ax,
+                sub_ax=inh_ax,
                 color=inhibit_color,
                 autosave=False,
                 **kwargs,
@@ -385,54 +386,52 @@ class TwoCompLayer:
 
         if separate_axes:
             titles = ["Soma compartment", "Dendrite compartment", "Interneuron"]
-            for s, sub_ax in enumerate(ax):
+            for s, sub_ax in enumerate(ax1D):
                 sub_ax.set_title(titles[s])
-                plot_util.add_target_reset_points(self.Agent, self, sub_ax)
-                if s != len(ax) - 1:
+                plot_util.add_target_reset_points(self.Agent, self, sub_ax=sub_ax)
+                if s != len(ax1D) - 1:
                     sub_ax.set_xlabel("")
         else:
-            ax.plot([], [], color=soma_color, label="soma")
-            ax.plot([], [], color=dend_color, label="dend")
+            soma_ax.plot([], [], color=soma_color, label="soma")
+            soma_ax.plot([], [], color=dend_color, label="dend")
             if self.inhibit_dend:
-                ax.plot([], [], color=inhibit_color, label="inhib.")
-            ax.legend()
+                soma_ax.plot([], [], color=inhibit_color, label="inhib.")
+            soma_ax.legend()
 
-        if fig is None:
-            fig = ax.figure
-
+        fig = np.asarray(ax).ravel()[0].figure
         util.save_figure(fig, f"{self.name}_firingrate", save=autosave)  # type: ignore[attr-defined]
 
-        return fig, ax
+        return ax
 
     def plot_rate_maps_across_learning(
         self,
-        fig: mpl_figure.Figure | None = None,
-        ax: plt.Axes | None = None,
+        axes: plt.Axes | np.ndarray | None = None,
         compartment: str | None = None,
         no_legend: bool = False,
         title: str | None = None,
         autosave: bool | None = None,
         **kwargs,
-    ) -> tuple[mpl_figure.Figure, np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]]:
+    ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
         """Plot the rate map of the soma and dendritic layers, overlayed, ensuring no
         more than 20 columns are plotted.
 
         Args:
-            fig (mpl_figure.Figure, optional): Figure object. Defaults to None.
-            ax (plt.Axes, optional): Axes object. Defaults to None.
-            compartment (str, optional): Which compartment to plot, if environment is
-                2D ("soma", "dend", "inhibit" or "both"). Defaults to None
-                (i.e., "soma" if environment is 2D, and "both" otherwise).
-            no_legend (bool, optional): Whether to remove the legend. Defaults to False.
-            title (str, optional): Title for the figure. Defaults to None.
-            autosave (bool, optional): Whether to autosave the figure. Defaults to None.
+        - axes (2D np.ndarray, optional): Array of subplots to plot on
+        - (number of ROIs x num_maps or v.v.). If None, a new array is created.
+        - Default is None.
+        - compartment (str, optional): Which compartment to plot, if environment is
+        - 2D ("soma", "dend", "inhibit" or "both"). Default is None
+        - (i.e., "soma" if environment is 2D, and "both" otherwise).
+        - no_legend (bool, optional): Whether to remove the legend. Default is False.
+        - title (str, optional): Title for the figure. Default is None.
+        - autosave (bool, optional): Whether to autosave the figure. Default is None.
 
-        Keyword Args:
-            kwargs: Keyword arguments to pass to plot_rate_maps_across_learning.
+        Keyword args:
+        - **kwargs: Keyword arguments for NMDALayer.plot_rate_maps_across_learning().
 
         Returns:
-            mpl_figure.Figure: Figure object.
-            plt.Axes: Axes object.
+        - axes (2D np.ndarray): Array of subplots. If input 'axes' was None,
+            shape is 2D (number of ROIs x num_maps or v.v. if only one ROI).
         """
 
         if compartment is None:
@@ -458,34 +457,31 @@ class TwoCompLayer:
             )
 
         if self.inhibit_dend and compartment in ["all", "inhibit"]:
-            fig, ax = self.DendriteInhibition.plot_rate_maps_across_learning(
-                fig=fig,
-                ax=ax,
+            axes = self.DendriteInhibition.plot_rate_maps_across_learning(
+                axes=axes,
                 autosave=False,
                 no_legend=no_legend,
                 **kwargs,
             )
 
         if compartment in ["all", "dend"]:
-            self.DendriteCompartment.plot_rate_maps_across_learning(
-                fig=fig,
-                ax=ax,
+            axes = self.DendriteCompartment.plot_rate_maps_across_learning(
+                axes=axes,
                 autosave=False,
                 no_legend=no_legend,
                 **kwargs,
             )
 
         if compartment in ["all", "soma"]:
-            fig, ax = self.SomaCompartment.plot_rate_maps_across_learning(
-                fig=fig,
-                ax=ax,
+            axes = self.SomaCompartment.plot_rate_maps_across_learning(
+                axes=axes,
                 autosave=False,
                 no_legend=no_legend,
                 **kwargs,
             )
 
         if not no_legend and self.Agent.Environment.dimensionality == "1D":
-            sub_ax = ax
+            sub_ax = np.asarray(axes).ravel()[0]
 
             if compartment in ["all", "soma"]:
                 sub_ax.plot([], [], color=self.SomaCompartment.color, label="soma")
@@ -507,8 +503,9 @@ class TwoCompLayer:
 
             title = f"{title_start} across learning"
 
+        fig = np.asarray(axes).ravel()[0].figure
         fig.suptitle(title, y=0.90)
 
         util.save_figure(fig, f"{self.name}_rate_maps_across_learning", save=autosave)  # type: ignore[attr-defined]
 
-        return fig, ax
+        return axes

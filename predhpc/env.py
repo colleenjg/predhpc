@@ -1,15 +1,14 @@
 import copy
 import itertools
-from typing import Any
+from typing import Any, TYPE_CHECKING
 import warnings
 
 import numpy as np
 from matplotlib import pyplot as plt  # type: ignore[import]
 from matplotlib import markers
-from matplotlib import figure as mpl_figure
 import pandas as pd  # type: ignore[import]
 
-from ratinabox import Environment  # type: ignore[import]
+from ratinabox import Environment as riabEnv  # type: ignore[import]
 
 from predhpc import util
 
@@ -19,6 +18,33 @@ class EnvironmentWarning(UserWarning):
 
 
 warnings.simplefilter("once", EnvironmentWarning)
+
+
+class Environment(riabEnv):
+
+    def plot_environment(self, sub_ax=None, **kwargs):
+        """Plot the environment.
+
+        Args:
+        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
+            created.
+
+        Keyword args:
+        - **kwargs: Keyword arguments for ratinabox.PlaceCells.plot_rate_timeseries().
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with environment plotted.
+        """
+
+        if sub_ax is not None:
+            kwargs["ax"] = sub_ax
+
+        if "ax" in kwargs.keys():
+            kwargs["fig"] = kwargs["ax"].figure
+
+        _, sub_ax = super().plot_environment(**kwargs)
+
+        return sub_ax
 
 
 class TEnv(Environment, util.ParamsManagerMixin):
@@ -159,11 +185,12 @@ class TEnv(Environment, util.ParamsManagerMixin):
     def sample_positions(self, n=10, method="uniform_jitter", area="both"):
         """Scatters 'n' locations across the environment.
         Args:
-            n (int): number of features
-            method: "uniform", "uniform_jittered" or "random" for how points are distributed
+        - n (int): Number of features
+        - method (str): "uniform", "uniform_jittered" or "random" for how points are
+            distributed.
 
         Returns:
-            array: (n x dimensionality) of positions
+        - positions (np.ndarray): Positions with shape (n, self.dimensionality)
         """
 
         # sample from each area separately (top arms or bottom stem)
@@ -272,21 +299,20 @@ class TEnv(Environment, util.ParamsManagerMixin):
 
     def plot_environment(
         self,
-        fig: mpl_figure.Figure | None = None,
-        ax: plt.Axes | None = None,
+        sub_ax: plt.Axes | None = None,
         autosave: bool | None = None,
         **kwargs,
-    ) -> tuple[mpl_figure.Figure, plt.Axes]:
+    ) -> plt.Axes:
         """Plot the environment."""
 
-        fig, ax = super().plot_environment(
-            fig=fig, ax=ax, autosave=False, plot_objects=False, **kwargs
+        sub_ax = super().plot_environment(
+            ax=sub_ax, autosave=False, plot_objects=False, **kwargs
         )
 
-        if ax is None:
-            raise RuntimeError("ax is None.")
+        if sub_ax is None:
+            raise RuntimeError("sub_ax is None.")
 
-        ax.scatter(
+        sub_ax.scatter(
             *self.T_start,
             marker=markers.MarkerStyle("^"),
             color="gold",
@@ -297,7 +323,7 @@ class TEnv(Environment, util.ParamsManagerMixin):
 
         if len(self.objects):
             for object_coords in self.objects["objects"]:
-                ax.scatter(
+                sub_ax.scatter(
                     *object_coords,
                     marker=markers.MarkerStyle("o"),
                     color="blue",
@@ -306,7 +332,7 @@ class TEnv(Environment, util.ParamsManagerMixin):
                     label="target",
                 )
 
-        ax.scatter(
+        sub_ax.scatter(
             *self.left_T_end,
             marker=markers.MarkerStyle("x"),
             color="red",
@@ -314,21 +340,19 @@ class TEnv(Environment, util.ParamsManagerMixin):
             zorder=5,
             label="reset",
         )
-        ax.scatter(
+        sub_ax.scatter(
             *self.right_T_end,
             marker=markers.MarkerStyle("x"),
             color="red",
             s=18,
             zorder=5,
         )
-        ax.legend(loc="lower right", frameon=False)
+        sub_ax.legend(loc="lower right", frameon=False)
 
-        if fig is None:
-            fig = ax.figure
-
+        fig = sub_ax.figure
         util.save_figure(fig, "Environment", save=autosave)
 
-        return fig, ax
+        return sub_ax
 
 
 class OpenField(Environment, util.ParamsManagerMixin):
@@ -409,12 +433,12 @@ class OpenField(Environment, util.ParamsManagerMixin):
         """Get object type numbers for a new teleport pair.
 
         Args:
-            first (int): First object type number to use. If None, use the next
-                available number. Defaults to None.
+        - first (int): First object type number to use. If None, use the next
+            available number. Default is None.
 
         Returns:
-            object_type_nums (dict): Dictionary of object type numbers for the
-                teleport pair.
+        - object_type_nums (dict): Dictionary of object type numbers for the
+            teleport pair.
         """
 
         if first is None:
@@ -529,12 +553,12 @@ class OpenField(Environment, util.ParamsManagerMixin):
         """Get the teleport coordinates for the given teleport pair.
 
         Args:
-            teleport_pair_num (int): The teleport pair to get the coordinates for.
-            direction (str, optional): The direction to get the coordinates for.
-                Defaults to "in".
+        - teleport_pair_num (int): The teleport pair to get the coordinates for.
+        - direction (str, optional): The direction to get the coordinates for.
+            Default is "in".
 
         Returns:
-            np.ndarray: The teleport coordinates.
+        - teleport_coords (np.ndarray): The teleport coordinates.
         """
 
         teleport_coords = self.teleport_pairs_dict[teleport_pair_num][direction][1]
@@ -545,10 +569,10 @@ class OpenField(Environment, util.ParamsManagerMixin):
         """Get the orientation of a teleport pair.
 
         Args:
-            teleport_pair_num (int): teleport pair number.
+        - teleport_pair_num (int): Teleport pair number.
 
         Returns:
-            str: orientation of the teleport pair.
+        - orientation (str): Orientation of the teleport pair.
         """
 
         if teleport_pair_num % 2 == 0:
@@ -562,7 +586,9 @@ class OpenField(Environment, util.ParamsManagerMixin):
         """Get the number of each object type.
 
         Returns:
-            tuple: number of novel, reward, and teleport objects.
+        - num_novel (int): Number of novel objects
+        - num_reward (int): Number of reward objects
+        - num_teleport (int): Number of teleport objects
         """
 
         num_novel, num_reward, num_teleport = 0, 0, 0
@@ -586,10 +612,10 @@ class OpenField(Environment, util.ParamsManagerMixin):
         """Get the orientation of a teleport pair.
 
         Args:
-            teleport_pair_num (int): teleport pair number.
+        - teleport_pair_num (int): Teleport pair number.
 
         Returns:
-            str: orientation of the teleport pair.
+        - marker (str): Orientation of the teleport pair.
         """
 
         orientation = self.get_teleport_pair_orientation(teleport_pair_num)
@@ -626,10 +652,10 @@ class OpenField(Environment, util.ParamsManagerMixin):
         """Get the distance from a set of coordinates to the closest objects.
 
         Args:
-            coords (np.ndarray): coordinates to get distance from.
+        - coords (np.ndarray): Coordinates to get distance from.
 
         Returns:
-            float: closest distance.
+        - closest_dist (float): Closest distance.
         """
 
         if len(self.objects["objects"]) == 0:
@@ -650,10 +676,10 @@ class OpenField(Environment, util.ParamsManagerMixin):
         """Get the distance from a set of coordinates to the closest wall.
 
         Args:
-            coords (np.ndarray): coordinates to get distance from.
+        - coords (np.ndarray): Coordinates to get distance from.
 
         Returns:
-            float: closest distance.
+        - closest_dist (float): Closest distance.
         """
 
         if len(self.walls) == 0:
@@ -673,17 +699,17 @@ class OpenField(Environment, util.ParamsManagerMixin):
         object (half for walls).
 
         Args:
-            min_dist (float, optional): minimum distance to closest object or
-                wall. Defaults to None.
-            max_attempts (int, optional): maximum number of attempts to sample
-                valid coordinates. Defaults to 1000.
+        - min_dist (float, optional): Minimum distance to closest object or
+            wall. Default is None.
+        - max_attempts (int, optional): Maximum number of attempts to sample
+            valid coordinates. Default is 1000.
 
         Raises:
-            ValueError: if could not sample valid coordinates after max_attempts
-                attempts.
+        - ValueError: if could not sample valid coordinates after max_attempts
+            attempts.
 
         Returns:
-            coords (1d array): sampled coordinates [x, y].
+        - coords (1D np.ndarray): Sampled coordinates [x, y].
         """
 
         if min_dist is None:
@@ -717,13 +743,13 @@ class OpenField(Environment, util.ParamsManagerMixin):
         """Sample valid coordinates for the end of a wall given the start coordinates.
 
         Args:
-            start_coords (1d array): start of wall.
-            min_dist (float, optional): minimum distance to closest object.
-                Defaults to None.
+        - start_coords (1D np.ndarray): Start of wall.
+        - min_dist (float, optional): Minimum distance to closest object.
+            Default is None.
 
         Returns:
-            end_coords (1d array): sampled end of wall coordinates [x, y].
-                Returns None if could not sample valid end coordinates.
+        - end_coords (1D np.ndarray): Sampled end of wall coordinates [x, y].
+            Returns None if could not sample valid end coordinates.
         """
 
         if not self.check_if_position_is_in_environment(start_coords):
@@ -807,7 +833,7 @@ class OpenField(Environment, util.ParamsManagerMixin):
         """Add reward objects.
 
         Args:
-            num (int, optional): number of reward objects to add. Defaults to 1.
+        - num (int, optional): Number of reward objects to add. Default is 1.
         """
 
         reward_type = self.type_name_to_num_dict["reward"]
@@ -830,7 +856,7 @@ class OpenField(Environment, util.ParamsManagerMixin):
         """Add novel objects.
 
         Args:
-            num (int, optional): number of novel objects to add. Defaults to 1.
+        - num (int, optional): Number of novel objects to add. Default is 1.
         """
 
         novel_type = self.type_name_to_num_dict["novel"]
@@ -854,7 +880,7 @@ class OpenField(Environment, util.ParamsManagerMixin):
         """Add teleport pairs (directional).
 
         Args:
-            num (int, optional): number of teleport pairs to add. Defaults to 1.
+        - num (int, optional): Number of teleport pairs to add. Default is 1.
         """
 
         if coord_pairs is not None:
@@ -934,8 +960,9 @@ class OpenField(Environment, util.ParamsManagerMixin):
 
     def check_if_walls_ends_too_close(
         self,
-        new_wall_coords: np.ndarray[tuple[int, int], np.dtype[np.float64]]
-        | list[list[float]],
+        new_wall_coords: (
+            np.ndarray[tuple[int, int], np.dtype[np.float64]] | list[list[float]]
+        ),
         min_dist=None,
     ) -> bool:
         """
@@ -950,14 +977,14 @@ class OpenField(Environment, util.ParamsManagerMixin):
         wall, or intersects near the middle of either wall.
 
         Args:
-            new_wall_coords (list or 2D array): coordinates of new wall,
-                with dims [[x1, y1], [x2, y2]]
-            min_dist (float, optional): minimum distance between walls.
-                Defaults to None.
+        - new_wall_coords (list or 2D array): Coordinates of new wall,
+            with dims [[x1, y1], [x2, y2]]
+        - min_dist (float, optional): Minimum distance between walls.
+            Default is None.
 
         Returns:
-            bool: True if the ends of a new wall are too close to an existing wall,
-                else False.
+        - walls_ends_too_close (bool): True if the ends of a new wall are too close
+            to an existing wall, else False.
         """
 
         if len(self.walls) == 0:
@@ -968,6 +995,7 @@ class OpenField(Environment, util.ParamsManagerMixin):
 
         new_wall = np.asarray(new_wall_coords)
 
+        walls_ends_too_close = False
         for wall in self.walls:
             # get angle between two vectors
             angle = util.get_angle_between_vectors(
@@ -997,9 +1025,10 @@ class OpenField(Environment, util.ParamsManagerMixin):
                 exp_dist = np.linalg.norm(end1 - end2, ord=2)
 
                 if farthest < exp_dist:
-                    return True
+                    walls_ends_too_close = True
+                    break
 
-        return False
+        return walls_ends_too_close
 
     def add_walls(self, num: int = 1, max_attempts: int = 1000):
         """Add walls.
@@ -1010,13 +1039,13 @@ class OpenField(Environment, util.ParamsManagerMixin):
         Does NOT check whether new wall creates a hole.
 
         Args:
-            num (int, optional): number of walls to add. Defaults to 1.
-            max_attempts (int, optional): maximum number of attempts to sample
-                valid wall start and end coordinates. Defaults to 1000.
+        - num (int, optional): Number of walls to add. Default is 1.
+        - max_attempts (int, optional): Maximum number of attempts to sample
+            valid wall start and end coordinates. Default is 1000.
 
         Raises:
-            ValueError: if could not sample valid wall start and end coordinates
-                after max_attempts attempts.
+        - ValueError: if could not sample valid wall start and end coordinates
+            after max_attempts attempts.
         """
 
         if num > 0:
@@ -1049,42 +1078,40 @@ class OpenField(Environment, util.ParamsManagerMixin):
 
     def plot_environment(
         self,
-        fig: mpl_figure.Figure | None = None,
-        ax: plt.Axes | None = None,
+        sub_ax: plt.Axes | None = None,
         plot_objects: bool = True,
         no_legend: bool = False,
         autosave: bool | None = None,
         **kwargs,
-    ) -> tuple[mpl_figure.Figure, plt.Axes]:
+    ) -> plt.Axes:
         """Plot the environment.
 
         Args:
-            fig (matplotlib figure, optional): figure to plot on. Defaults to None.
-            ax (matplotlib axis, optional): axis to plot on. Defaults to None.
-            plot_objects (bool, optional): whether to plot objects. Defaults to True.
-            no_legend (bool, optional): whether to remove legend. Defaults to False.
-            autosave (bool, optional): whether to save the plot. Defaults to None.
+        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
+            created.
+        - plot_objects (bool, optional): Whether to plot objects. Default is True.
+        - no_legend (bool, optional): Whether to remove legend. Default is False.
+        - autosave (bool, optional): Whether to save the plot. Default is None.
 
         Returns:
-            fig (matplotlib figure): figure with environment plotted.
-            ax (matplotlib axis): axis with environment plotted.
+        - sub_ax (plt.Axes): Subplot with environment plotted.
         """
 
-        if ax is None:
+        if sub_ax is None:
             env_width = self.extent[1] - self.extent[0]
             add_x = 0
             if plot_objects:
                 add_x = 3 * env_width  # for legend and labels
-            fig, ax = plt.subplots(
+            _, sub_ax = plt.subplots(
                 figsize=(3 * env_width + add_x, 3 * (self.extent[3] - self.extent[2]))
             )
 
-        fig, ax = super().plot_environment(
-            fig=fig, ax=ax, autosave=False, plot_objects=False, **kwargs
+        sub_ax = super().plot_environment(
+            ax=sub_ax, autosave=False, plot_objects=False, **kwargs
         )
 
-        if ax is None:
-            raise RuntimeError("ax is None.")
+        if sub_ax is None:
+            raise RuntimeError("sub_ax is None.")
 
         if plot_objects:
             type_num_to_plot_params_dict = copy.deepcopy(
@@ -1096,21 +1123,19 @@ class OpenField(Environment, util.ParamsManagerMixin):
                 label = None
                 if "name" in type_num_to_plot_params_dict[object_type].keys():
                     label = type_num_to_plot_params_dict[object_type].pop("name")
-                ax.scatter(
+                sub_ax.scatter(
                     *coords,
                     **type_num_to_plot_params_dict[object_type],
                     label=label,
                 )
 
-            ax.legend(loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
+            sub_ax.legend(loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
 
-        legend = ax.get_legend()
+        legend = sub_ax.get_legend()
         if no_legend and legend is not None:
             legend.remove()
 
-        if fig is None:
-            fig = ax.figure
-
+        fig = sub_ax.figure
         util.save_figure(fig, "Environment", save=autosave)
 
-        return fig, ax
+        return sub_ax

@@ -2,14 +2,12 @@ import copy
 from typing import TYPE_CHECKING, Any
 
 from matplotlib import pyplot as plt  # type: ignore[import]
-from matplotlib import figure as mpl_figure
 import numpy as np
 from sklearn.linear_model import Ridge  # type: ignore[import]
 from sklearn.multioutput import MultiOutputRegressor  # type: ignore[import]
-from ratinabox.Neurons import Neurons  # type: ignore[import]
 
 from predhpc import util
-from predhpc.neurons import learning_neurons
+from predhpc.neurons import riab_neurons, learning_neurons
 
 if TYPE_CHECKING:
     import ratinabox  # type: ignore[import]
@@ -67,7 +65,7 @@ class RegressionLayer(learning_neurons.LearnLayer):
         taken from a default dictionary below.
 
         Args:
-            params (dict, optional). Defaults to dict().
+        - params (dict, optional). Default is dict().
         """
 
         self.Agent = Agent
@@ -137,21 +135,18 @@ class RegressionLayer(learning_neurons.LearnLayer):
 
         return
 
-    def plot_loss(self, **loss_kwargs) -> tuple[mpl_figure.Figure, plt.Axes]:  # type: ignore[override]
+    def plot_loss(self, **loss_kwargs) -> plt.Axes:  # type: ignore[override]
         """
         Plot the loss of the layer over time.
 
-        Kwargs:
-            loss_kwargs: Keyword arguments passed to super().plot_loss().
+        Keyword args:
+        - loss_**kwargs: Keyword arguments for LearnLayer.plot_loss().
 
         Returns:
-            fig, ax: Figure and axis of the plot.
+        - sub_ax (plt.Axes): Subplot with loss plotted.
 
         Raises:
-            ValueError: If the layer was not trained with targets.
-
-        Example:
-            >>> fig, ax = layer.plot_loss() # plot the loss of the layer
+        - ValueError: If the layer was not trained with targets.
         """
 
         test_p = None
@@ -160,23 +155,23 @@ class RegressionLayer(learning_neurons.LearnLayer):
 
         loss_kwargs["test_p"] = test_p
 
-        fig, ax = super().plot_loss(**loss_kwargs)
+        sub_ax = super().plot_loss(**loss_kwargs)
 
-        return fig, ax
+        return sub_ax
 
     def plot_histogram(  # type: ignore[override]
         self, autosave: bool | None = None, **loss_kwargs
-    ) -> tuple[mpl_figure.Figure, plt.Axes]:
-        """Plot the firing rate histogram of the layer.
+    ) -> plt.Axes:
+        """Plot thehistogram of the layer.
 
         Args:
-            autosave (bool, optional): Whether to save the figure. Defaults to None.
+        - autosave (bool, optional): Whether to save the figure. Default is None.
 
-        Keyword Args:
-            loss_kwargs: Keyword arguments passed to super().plot_histogram().
+        Keyword args:
+        - loss_**kwargs: Keyword arguments for to LearnLayer.plot_histogram().
 
         Returns:
-            fig, ax: Figure and axis of the plot.
+        - sub_ax (plt.Axes): Subplot withhistogram plotted.
         """
 
         fit_str = " (unfitted)"
@@ -184,13 +179,14 @@ class RegressionLayer(learning_neurons.LearnLayer):
             loss_kwargs["t_start"] = self.history["t"][self.last_fit_step]
             fit_str = " (fitted)"
 
-        fig, ax = super().plot_histogram(autosave=False, **loss_kwargs)
+        sub_ax = super().plot_histogram(autosave=False, **loss_kwargs)
 
-        ax.set_xlabel(f"Firing rate{fit_str}")
+        sub_ax.set_xlabel(f"Firing rate{fit_str}")
 
+        fig = sub_ax.get_figure()
         util.save_figure(fig, f"{self.name}_firing_rate_histogram", save=autosave)  # type: ignore[attr-defined]
 
-        return fig, ax
+        return sub_ax
 
 
 class TorchLayer(learning_neurons.LearnLayer):
@@ -233,7 +229,7 @@ class TorchLayer(learning_neurons.LearnLayer):
         taken from a default dictionary below.
 
         Args:
-            params (dict, optional). Defaults to dict().
+        - params (dict, optional). Default is dict().
         """
 
         self.Agent = Agent
@@ -309,11 +305,11 @@ class TorchLayer(learning_neurons.LearnLayer):
 
         return self._layer
 
-    def add_input(self, input_layer: Neurons, **kwargs):
+    def add_input(self, input_layer: riab_neurons.Neurons, **kwargs):
         """Add an input layer to the TorchLayer.
 
         Args:
-            input_layer (_type_): _description_
+        - input_layer (_type_): _description_
         """
 
         if hasattr(self, "_layer"):
@@ -323,21 +319,18 @@ class TorchLayer(learning_neurons.LearnLayer):
 
         super().add_input(input_layer, **kwargs)
 
-    def plot_loss(self, **loss_kwargs) -> tuple[mpl_figure.Figure, plt.Axes]:  # type: ignore[override]
+    def plot_loss(self, **loss_kwargs) -> plt.Axes:  # type: ignore[override]
         """
         Plot the loss of the layer over time.
 
-        Kwargs:
-            loss_kwargs: Keyword arguments passed to super().plot_loss().
+        Keyword args:
+        - loss_**kwargs: Keyword arguments for LearnLayer.plot_loss().
 
         Returns:
-            fig, ax: Figure and axis of the plot.
+        - sub_ax (plt.Axes): Subplot with loss plotted.
 
         Raises:
-            ValueError: If the layer was not trained with targets.
-
-        Example:
-            >>> fig, ax = layer.plot_loss() # plot the loss of the layer
+        - ValueError: If the layer was not trained with targets.
         """
 
         test_p = None
@@ -346,23 +339,23 @@ class TorchLayer(learning_neurons.LearnLayer):
 
         loss_kwargs["test_p"] = test_p
 
-        fig, ax = super().plot_loss(**loss_kwargs)
+        sub_ax = super().plot_loss(**loss_kwargs)
 
-        return fig, ax
+        return sub_ax
 
     def plot_histogram(  # type: ignore[override]
         self, autosave: bool | None = None, **loss_kwargs
-    ) -> tuple[mpl_figure.Figure, plt.Axes]:
-        """Plot the firing rate histogram of the layer.
+    ) -> plt.Axes:
+        """Plot thehistogram of the layer.
 
         Args:
-            autosave (bool, optional): Whether to save the figure. Defaults to None.
+        - autosave (bool, optional): Whether to save the figure. Default is None.
 
-        Keyword Args:
-            loss_kwargs: Keyword arguments passed to super().plot_histogram().
+        Keyword args:
+        - loss_**kwargs: Keyword arguments for LearnLayer.plot_histogram().
 
         Returns:
-            fig, ax: Figure and axis of the plot.
+        - sub_ax (plt.Axes): Subplot with histogram plotted.
         """
 
         train_str = " (untrained)"
@@ -370,10 +363,11 @@ class TorchLayer(learning_neurons.LearnLayer):
             loss_kwargs["t_start"] = self.history["t"][self.train_steps[-1]]
             train_str = " (trained)"
 
-        fig, ax = super().plot_histogram(autosave=False, **loss_kwargs)
+        sub_ax = super().plot_histogram(autosave=False, **loss_kwargs)
 
-        ax.set_xlabel(f"Firing rate{train_str}")
+        sub_ax.set_xlabel(f"Firing rate{train_str}")
 
+        fig = sub_ax.get_figure()
         util.save_figure(fig, f"{self.name}_firing_rate_histogram", save=autosave)  # type: ignore[attr-defined]
 
-        return fig, ax
+        return sub_ax

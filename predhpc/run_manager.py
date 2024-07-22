@@ -5,18 +5,21 @@ import warnings
 
 from matplotlib import pyplot as plt  # type: ignore[import]
 from matplotlib import markers
-from matplotlib import figure as mpl_figure
 import numpy as np
 from tqdm import tqdm  # type: ignore[import]
-from ratinabox import Environment, PlaceCells  # type: ignore[import]
 
 from predhpc import agent, env, plot_util, util, params_util
-from predhpc.neurons import learning_neurons, two_comp_neurons, object_neurons
+from predhpc.neurons import (
+    riab_neurons,
+    learning_neurons,
+    two_comp_neurons,
+    object_neurons,
+)
 
 
 def plot_T_maze(
     Ag: agent.TAgent,
-    CA3_PCs: PlaceCells,
+    CA3_PCs: riab_neurons.PlaceCells,
     CA1s_or_ECs: learning_neurons.BTSPLayer | object_neurons.ObjectCells,
     method: str = "groundtruth",
     autosave: bool | None = None,
@@ -25,86 +28,82 @@ def plot_T_maze(
     CA1 rate map.
 
     Args:
-        Ag (agent.Agent): Agent.
-        CA3_PCs (neurons.PlaceCells): CA3 place cells.
-        CA1s (neurons.BTSPLayer): CA1s layer.
+    - Ag (agent.Agent): Agent.
+    - CA3_PCs (riab_neurons.PlaceCells): CA3 place cells.
+    - CA1s (learning_neurons.BTSPLayer): CA1s layer.
 
     Returns:
-        fig, axes: Figure and axes.
+    - axes (2D np.ndarray): Array of subplots with T maze information plotted.
     """
 
-    fig, axes = plt.subplots(ncols=3, figsize=(9, 3))
-    axes_flat = np.asarray(axes).reshape(-1)
+    fig, axes = plt.subplots(ncols=3, figsize=(9, 3), squeeze=False)
+    ax1D = np.asarray(axes).ravel()
 
     # Plot trajectories on T-maze
-    Ag.plot_trajectory(
-        scale_cmap_per=False, ms_2D=5, alpha=0.3, fig=fig, ax=axes_flat[0]
-    )
-    axes_flat[0].set_title("Trajectories")
+    Ag.plot_trajectory(scale_cmap_per=False, ms_2D=5, alpha=0.3, sub_ax=ax1D[0])
+    ax1D[0].set_title("Trajectories")
 
     # Plot CA3 place cell locations on T-maze
     plot_util.plot_overlayed_rate_maps(
-        CA3_PCs, fig=fig, ax=axes_flat[1], method="max", colorbar=False
+        CA3_PCs, sub_ax=ax1D[1], method="max", colorbar=False
     )
-    CA3_PCs.plot_place_cell_locations(fig=fig, ax=axes_flat[1])
-    axes_flat[1].scatter(
+    CA3_PCs.plot_place_cell_locations(ax=ax1D[1])
+    ax1D[1].scatter(
         *Ag.target_position,
         marker=".",
         color="blue",
         s=18,
         zorder=5,
     )
-    axes_flat[1].set_title("CA3 rate maps")
+    ax1D[1].set_title("CA3 rate maps")
 
     # Plot CA1 rate map on T-maze
     if isinstance(CA1s_or_ECs, learning_neurons.BTSPLayer):
-        CA1s_or_ECs.plot_rate_map(fig=fig, ax=axes_flat[2], method=method)
+        CA1s_or_ECs.plot_rate_map(ax=ax1D[2], method=method)
         title = f"{CA1s_or_ECs.name.replace('_', ' ')} rate map"  # type: ignore[attr-defined]
     else:
         plot_util.plot_overlayed_rate_maps(
             CA1s_or_ECs,
-            fig=fig,
-            ax=axes_flat[2],
+            sub_ax=ax1D[2],
             method="max",
             colorbar=False,
             replot_env=True,
         )
         title = "EC rate map"
-    axes_flat[2].scatter(
+    ax1D[2].scatter(
         *Ag.target_position,
         marker=".",
         color="blue",
         s=18,
         zorder=5,
     )
-    axes_flat[2].set_title(title)
+    ax1D[2].set_title(title)
 
     util.save_figure(fig, "T_maze", save=autosave)
 
-    return fig, axes
+    return axes
 
 
 def plot_time_series_with_BTSP_events(
     CA1s: learning_neurons.BTSPLayer,
-    fig: mpl_figure.Figure | None = None,
-    ax: plt.Axes | None = None,
-) -> tuple[mpl_figure.Figure, plt.Axes]:
+    sub_ax: plt.Axes | None = None,
+) -> plt.Axes:
     """Plot the time series of the CA1s layer with BTSP events marked.
 
     Args:
-        CA1s (neurons.BTSPLayer): CA1s layer.
-        fig (mpl_figure.Figure, optional): Figure to plot on. Defaults to None.
-        ax (plt.Axes, optional): Axes to plot on. Defaults to None.
+    - CA1s (neurons.BTSPLayer): CA1s layer.
+    - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
+        created. Default is None.
 
     Returns:
-        fig, ax: Figure and axes.
+    - sub_ax (plt.Axes): Subplot with time series and BTSP events plotted.
     """
 
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(6, 1.2**CA1s.n))
+    if sub_ax is None:
+        fig, sub_ax = plt.subplots(figsize=(6, 1.2**CA1s.n))
 
-    CA1s.plot_rate_timeseries(chosen_neurons="all", spikes=True, fig=fig, ax=ax)
-    lo, hi = ax.get_ylim()
+    CA1s.plot_rate_timeseries(chosen_neurons="all", spikes=True, sub_ax=sub_ax)
+    lo, hi = sub_ax.get_ylim()
 
     target_reached_step = CA1s.Agent.target_df["reached_step"].to_numpy()  # type: ignore[attr-defined]
     if np.isnan(target_reached_step[-1]):
@@ -113,7 +112,7 @@ def plot_time_series_with_BTSP_events(
 
     for t in target_reached_step:
         y_hei = lo + (hi - lo) * 0.82
-        ax.scatter(
+        sub_ax.scatter(
             CA1s.Agent.history["t"][t] / 60,
             y_hei,
             marker=markers.MarkerStyle("o"),
@@ -129,12 +128,14 @@ def plot_time_series_with_BTSP_events(
         CA1s.Agent.target_position - all_positions, ord=2, axis=1  # type: ignore[attr-defined]
     )
     norm_dist = distances / distances.max()
-    ax.plot(time_in_min, -norm_dist, color="black", alpha=0.6, lw=1)
-    ax.set_ylim(-norm_dist.max() * 1.2, ax.get_ylim()[1])
+    sub_ax.plot(time_in_min, -norm_dist, color="black", alpha=0.6, lw=1)
+    sub_ax.set_ylim(-norm_dist.max() * 1.2, sub_ax.get_ylim()[1])
 
-    ax.set_title("CA1 time series with BTSP events (with proximity to target)", y=1.1)
+    sub_ax.set_title(
+        "CA1 time series with BTSP events (with proximity to target)", y=1.1
+    )
 
-    return fig, ax
+    return sub_ax
 
 
 def learn_T_maze_BTSP(
@@ -151,31 +152,35 @@ def learn_T_maze_BTSP(
     two_compartment: bool = True,
     autosave: bool | None = None,
 ) -> tuple[
-    Environment,
+    env.Environment,
     agent.ResetableAgent,
     object_neurons.ObjectCells | None,
-    PlaceCells,
+    riab_neurons.PlaceCells,
     learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer,
 ]:
     """Run a T-maze learning experiment with BTSP learning.
 
     Args:
-        env_params (dict): Parameters for the environment. Defaults to None.
-        agent_params (dict): Parameters for the agent. Defaults to None.
-        CA3_PC_params (dict): Parameters for the CA3 place cells. Defaults to
-            None.
-        CA1_params (dict): Parameters for the CA1 neurons. Defaults to None.
-        num_rwd (int, optional): Target number of rewards to reach. Defaults to 200.
-        max_steps (int, optional): Maximum number of steps to run. Defaults to 10000.
-        weight_recording_freq (int, optional): Frequency at which to record weights.
-            Defaults to 100.
-        use_Hebbian (bool, optional): Whether to use Hebbian learning. Defaults to False.
-        BTSP_after_num_target_reaches (int, optional): Number of times to reach target before
-            enabling BTSP learning. Defaults to 2.
-        autosave (bool, optional): Whether to autosave. Defaults to None.
+    - env_params (dict): Parameters for the environment. Default is None.
+    - agent_params (dict): Parameters for the agent. Default is None.
+    - CA3_PC_params (dict): Parameters for the CA3 place cells. Default is
+        None.
+    - CA1_params (dict): Parameters for the CA1 neurons. Default is None.
+    - num_rwd (int, optional): Target number of rewards to reach. Default is 200.
+    - max_steps (int, optional): Maximum number of steps to run. Default is 10000.
+    - weight_recording_freq (int, optional): Frequency at which to record weights.
+        Default is 100.
+    - use_Hebbian (bool, optional): Whether to use Hebbian learning. Default is False.
+    - BTSP_after_num_target_reaches (int, optional): Number of times to reach target before
+        enabling BTSP learning. Default is 2.
+    - autosave (bool, optional): Whether to autosave. Default is None.
 
     Returns:
-        Environment, Agent, EC cells, CA3 place cells, CA1 neurons
+    - Env (Environment): Environment
+    - Ag (Agent): Agent
+    - ECs (ObjectCells): EC cells
+    - CA3_PCs (PlaceCells): Place cell layer
+    - CA1s (BTSPLayer | TwoCompLayer): CA1 neuron layer
     """
 
     env_params = env_params or params_util.get_env_params(environment="tmaze")
@@ -185,7 +190,7 @@ def learn_T_maze_BTSP(
     Ag = agent.TAgent(Env, params=agent_params)
 
     CA3_PC_params = CA3_PC_params or params_util.get_CA3_PC_params(environment="tmaze")
-    CA3_PCs = PlaceCells(Ag, params=CA3_PC_params)
+    CA3_PCs = riab_neurons.PlaceCells(Ag, params=CA3_PC_params)
 
     if CA1_params is None:
         CA1_params = params_util.get_CA1_params(
@@ -287,23 +292,23 @@ def learn_T_maze_BTSP(
 
 def plot_1D_env_info(
     Ag: agent.ResetableAgent,
-    CA3_PCs: PlaceCells,
+    CA3_PCs: riab_neurons.PlaceCells,
     CA1s: learning_neurons.BTSPLayer,
     CA1_weights: list[np.ndarray[tuple[int, int], np.dtype[np.float64]]] | None = None,
     autosave: bool | None = None,
-) -> tuple[mpl_figure.Figure, np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]]:
+) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
     """Plot environment info for a 1D experiment:
         environment, place cell locations, rate map, CA1 weights, CA1 rate map
 
     Args:
-        Ag (agent.ResetableAgent): Agent.
-        CA3_PCs (PlaceCells): CA3 place cells.
-        CA1s (neurons.BTSPLayer): CA1 neurons.
-        CA1_weights (list): List of CA1 weights (num_epochs x num_cells x num_PCs).
-        autosave (bool, optional): Whether to autosave the figure. Defaults to None.
+    - Ag (agent.ResetableAgent): Agent.
+    - CA3_PCs (riab_neurons.PlaceCells): CA3 place cells.
+    - CA1s (neurons.BTSPLayer): CA1 neurons.
+    - CA1_weights (list): List of CA1 weights with shape (num_epochs, num_cells, num_PCs).
+    - autosave (bool, optional): Whether to autosave the figure. Default is None.
 
     Returns:
-        fig, axes: Figure and axes.
+    - Axes (np.ndarray): Array of subplots.
     """
 
     # 7 or 8 plots
@@ -313,75 +318,78 @@ def plot_1D_env_info(
     gridspec_kw = {"height_ratios": height_ratios}
     figsize = plot_util.get_figsize(sum(height_ratios), squat_height=True)
     fig, axes = plt.subplots(
-        nrows=len(height_ratios), figsize=figsize, sharex=True, gridspec_kw=gridspec_kw
+        nrows=len(height_ratios),
+        figsize=figsize,
+        sharex=True,
+        gridspec_kw=gridspec_kw,
+        squeeze=False,
     )
-    axes_flat = np.asarray(axes).reshape(-1)
+    ax1D = np.asarray(axes).ravel()
 
     # Plot environment
-    plot_util.plot_1D_reset_environment(Ag, fig=fig, ax=axes_flat[0], autosave=False)
+    plot_util.plot_1D_reset_environment(Ag, sub_ax=ax1D[0], autosave=False)
 
     # Plot CA3 place cell locations
-    CA3_PCs.plot_place_cell_locations(fig=fig, ax=axes_flat[1], autosave=False)
+    CA3_PCs.plot_place_cell_locations(ax=ax1D[1], autosave=False)
     plot_util.plot_overlayed_rate_maps(
-        CA3_PCs, fig=fig, ax=axes_flat[1], method="max", autosave=False
+        CA3_PCs, fsub_ax=ax1D[1], method="max", autosave=False
     )
-    ymin, ymax = axes_flat[1].get_ylim()
+    ymin, ymax = ax1D[1].get_ylim()
     ymin = min(ymin, 0)
-    axes_flat[1].set_ylim((ymin - 0.05 * (ymax - ymin)), ymax)
-    axes_flat[1].set_title("CA3 place cell locations")
+    ax1D[1].set_ylim((ymin - 0.05 * (ymax - ymin)), ymax)
+    ax1D[1].set_title("CA3 place cell locations")
 
     # Plot CA3 rate map
-    CA3_PCs.plot_rate_map(
-        chosen_neurons="all", fig=fig, ax=axes_flat[2], autosave=False
-    )
-    axes_flat[2].set_title("CA3 rate map")
+    CA3_PCs.plot_rate_map(chosen_neurons="all", ax=ax1D[2], autosave=False)
+    ax1D[2].set_title("CA3 rate map")
 
     # Plot CA1 weights
     i = 3
     if CA1_weights is not None:
         plot_util.plot_1D_input_place_cell_weights(
-            np.asarray(CA1_weights), CA3_PCs, fig=fig, ax=axes_flat[3], autosave=False
+            np.asarray(CA1_weights),
+            CA3_PCs,
+            sub_ax=ax1D[3],
+            autosave=False,
         )
         i += 1
 
     # Plot CA1 rate maps across learning
     plot_util.plot_1D_rate_map_across_learning(
-        Ag, CA1s, fig=fig, axes=axes_flat[i : i + 3], autosave=False  # type: ignore[arg-type]
+        Ag, CA1s, axes=ax1D[i : i + 3], autosave=False  # type: ignore[arg-type]
     )
 
     # Plot environment
-    plot_util.plot_1D_reset_environment(
-        Ag, fig=fig, ax=axes_flat[i + 3], autosave=False
-    )
+    plot_util.plot_1D_reset_environment(Ag, sub_ax=ax1D[i + 3], autosave=False)
 
-    for a, ax_ in enumerate(axes_flat[:-1]):
-        ax_.set_xlabel("")
+    for a, sub_ax in enumerate(ax1D[:-1]):
+        sub_ax.set_xlabel("")
         if a > 1:
-            ax_.spines["bottom"].set_visible(False)
-            ax_.xaxis.set_visible(False)
+            sub_ax.spines["bottom"].set_visible(False)
+            sub_ax.xaxis.set_visible(False)
 
     util.save_figure(fig, "1D_env_info", save=autosave)
 
-    return fig, axes
+    return axes
 
 
 def plot_1D_time_info(
     Ag: agent.ResetableAgent,
-    CA3_PCs: PlaceCells,
+    CA3_PCs: riab_neurons.PlaceCells,
     CA1s: learning_neurons.BTSPLayer,
     autosave: bool | None = None,
-) -> tuple[mpl_figure.Figure, np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]]:
+) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
     """Plot time info for a 1D experiment:
         trajectories, CA1 rate timeseries, CA3 rate timeseries
 
     Args:
-        Ag (agent.ResetableAgent): Agent.
-        CA3_PCs (PlaceCells): CA3 place cells.
-        CA1s (neurons.BTSPLayer): CA1 neurons.
-        autosave (bool, optional): Whether to autosave the figure. Defaults to None.
+    - Ag (agent.ResetableAgent): Agent.
+    - CA3_PCs (riab_neurons.PlaceCells): CA3 place cells.
+    - CA1s (neurons.BTSPLayer): CA1 neurons.
+    - autosave (bool, optional): Whether to autosave the figure. Default is None.
 
     Returns:
-        fig, axes: Figure and axes.
+    - Axes (np.ndarray): Array of subplots.
     """
 
     # 3 plots
@@ -389,42 +397,43 @@ def plot_1D_time_info(
     gridspec_kw = {"height_ratios": height_ratios}
     figsize = plot_util.get_figsize(sum(height_ratios), squat_height=True)
     fig, axes = plt.subplots(
-        nrows=len(height_ratios), figsize=figsize, sharex=True, gridspec_kw=gridspec_kw
+        nrows=len(height_ratios),
+        figsize=figsize,
+        sharex=True,
+        gridspec_kw=gridspec_kw,
+        squeeze=False,
     )
-    axes_flat = np.asarray(axes).reshape(-1)
+    ax1D = np.asarray(axes).ravel()
 
     # Plot trajectories
-    Ag.plot_trajectory_resets(
-        framerate=1 / Ag.dt, fig=fig, ax=axes_flat[0], autosave=False
-    )
-    axes_flat[0].set_title("Trajectories")
+    Ag.plot_trajectory_resets(framerate=1 / Ag.dt, sub_ax=ax1D[0], autosave=False)
+    ax1D[0].set_title("Trajectories")
 
     # Plot CA3 rate timeseries
     CA3_PCs.plot_rate_timeseries(
-        chosen_neurons="all", spikes=False, fig=fig, ax=axes_flat[1], autosave=False
+        chosen_neurons="all", spikes=False, sub_ax=ax1D[1], autosave=False
     )
-    axes_flat[1].set_title("CA3 rate timeseries")
+    ax1D[1].set_title("CA3 rate timeseries")
 
     # Plot CA1 rate timeseries
     CA1s.plot_rate_timeseries(
         chosen_neurons="all",
         spikes=True,
-        fig=fig,
-        ax=axes_flat[2],
+        sub_ax=ax1D[2],
         shift=-10,
         overlap=1,
         autosave=False,
     )
-    axes_flat[2].set_title("CA1 rate timeseries")
+    ax1D[2].set_title("CA1 rate timeseries")
 
-    plot_util.add_target_reset_points(Ag, CA1s, axes_flat[2])
+    plot_util.add_target_reset_points(Ag, CA1s, sub_ax=ax1D[2])
 
-    for ax in axes_flat[:-1]:
-        ax.set_xlabel("")
+    for sub_ax in ax1D[:-1]:
+        sub_ax.set_xlabel("")
 
     util.save_figure(fig, "time_info", save=autosave)
 
-    return fig, axes
+    return axes
 
 
 def learn_1D_BTSP(
@@ -439,40 +448,48 @@ def learn_1D_BTSP(
     BTSP_after_num_target_reaches: int = 5,
     two_compartment: bool = False,
     autosave: bool | None = None,
-) -> tuple[Environment, agent.ResetableAgent, PlaceCells, learning_neurons.BTSPLayer]:
+) -> tuple[
+    env.Environment,
+    agent.ResetableAgent,
+    riab_neurons.PlaceCells,
+    learning_neurons.BTSPLayer,
+]:
     """Run a 1D learning experiment with BTSP learning.
 
     Args:
-        env_params (dict): Parameters for the environment. Defaults to None.
-        agent_params (dict): Parameters for the agent. Defaults to None.
-        CA3_PC_params (dict): Parameters for the CA3 place cells. Defaults to None.
-        CA1_params (dict): Parameters for the CA1 neurons. Defaults to None.
-        num_rewards (int, optional): Target number of rewards to reach.
-            Defaults to 200.
-        max_num_steps (int, optional): Maximum number of steps to run.
-            Defaults to 5000.
-        weight_recording_freq (int, optional): Frequency at which to record weights.
-            Defaults to 100.
-        use_Hebbian (bool, optional): Whether to use Hebbian learning.
-            Defaults to False.
-        BTSP_after_num_target_reaches (int, optional): Number of target reaches at which to
-            apply BTSP event. Defaults to 5.
-        two_compartment (bool, optional): Whether to use two-compartment model.
-            Defaults to False.
-        autosave (bool, optional): Whether to autosave the figure. Defaults to None.
+    - env_params (dict): Parameters for the environment. Default is None.
+    - agent_params (dict): Parameters for the agent. Default is None.
+    - CA3_PC_params (dict): Parameters for the CA3 place cells. Default is None.
+    - CA1_params (dict): Parameters for the CA1 neurons. Default is None.
+    - num_rewards (int, optional): Target number of rewards to reach.
+        Default is 200.
+    - max_num_steps (int, optional): Maximum number of steps to run.
+        Default is 5000.
+    - weight_recording_freq (int, optional): Frequency at which to record weights.
+        Default is 100.
+    - use_Hebbian (bool, optional): Whether to use Hebbian learning.
+        Default is False.
+    - BTSP_after_num_target_reaches (int, optional): Number of target reaches at which to
+        apply BTSP event. Default is 5.
+    - two_compartment (bool, optional): Whether to use two-compartment model.
+        Default is False.
+    - autosave (bool, optional): Whether to autosave the figure. Default is None.
 
     Returns:
-        Environment, Agent, CA3 place cells, CA1 neurons
+    - Env (Environment): Environment
+    - Ag (Agent): Agent
+    - CA3_PCs (PlaceCells): Place cell layer
+    - CA1s (BTSPLayer | TwoCompLayer): CA1 neuron layer
     """
 
     env_params = env_params or params_util.get_env_params(environment="linear")
-    Env = Environment(params=env_params)
+    Env = env.Environment(params=env_params)
 
     agent_params = agent_params or params_util.get_agent_params(environment="linear")
     Ag = agent.ResetableAgent(Env, params=agent_params)
 
     CA3_PC_params = CA3_PC_params or params_util.get_CA3_PC_params(environment="linear")
-    CA3_PCs = PlaceCells(Ag, params=CA3_PC_params)
+    CA3_PCs = riab_neurons.PlaceCells(Ag, params=CA3_PC_params)
 
     if CA1_params is None:
         CA1_params = params_util.get_CA1_params(

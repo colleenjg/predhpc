@@ -105,16 +105,16 @@ class PredHPC(torch.nn.Module):
         """_summary_
 
         Args:
-            input_size (int, optional): Number of inputs to the network.
-                Defaults to 300.
-            n_DG_CA3 (int, optional): Size of the DG/CA3 layer.
-                Defaults to 100.
-            n_CA1 (int, optional): Size of the CA1 layer.
-                Defaults to 100.
-            pred_size (int, optional): Size of the predictive output layer.
-                Defaults to 2.
-            summary (bool, optional): If True, a summary of the model is
-                printed to the console. Defaults to True.
+        - input_size (int, optional): Number of inputs to the network.
+            Default is 300.
+        - n_DG_CA3 (int, optional): Size of the DG/CA3 layer.
+            Default is 100.
+        - n_CA1 (int, optional): Size of the CA1 layer.
+            Default is 100.
+        - pred_size (int, optional): Size of the predictive output layer.
+            Default is 2.
+        - summary (bool, optional): If True, a summary of the model is
+            printed to the console. Default is True.
         """
 
         super().__init__()
@@ -142,10 +142,11 @@ class PredHPC(torch.nn.Module):
         """Forward definition
 
         Args:
-            x (2D Torch tensor): input activations (batch_size x input_size).
+        - x (2D Torch tensor): Input activations with shape (batch_size, input_size).
 
         Returns:
-            prediction (2D Torch tensor): model predictions (batch_size x pred_size).
+        - prediction (2D Torch tensor): Model predictions with shape
+            (batch_size, pred_size).
         """
 
         ## long path
@@ -173,11 +174,11 @@ def save_model(
     """Saves model.
 
     Args:
-        model (torch.nn.Module): torch model
-        filepath (str, optional): Path at which to store model.
-            Defaults to "model.pth.tar".
-        epoch_n (int, optional): Current epoch number. Defaults to 0.
-        optimizer (torch.optim.Optimizer, optional): Torch optimizer. Defaults to None.
+    - model (torch.nn.Module): Torch model
+    - filepath (str, optional): Path at which to store model.
+        Default is "model.pth.tar".
+    - epoch_n (int, optional): Current epoch number. Default is 0.
+    - optimizer (torch.optim.Optimizer, optional): Torch optimizer. Default is None.
     """
 
     state_dict = {
@@ -196,15 +197,15 @@ def load_model(model, filepath: str | Path = "model.pth.tar") -> dict:
     """Loads model from path.
 
     Args:
-        model (torch.nn.Module): torch model
-        filepath (str, optional): Path to the stored model. Defaults to
-            "model.pth.tar".
+    - model (torch.nn.Module): Torch model
+    - filepath (str, optional): Path to the stored model. Default is
+        "model.pth.tar".
 
     Raises:
-        OSError: Filepath doesn't exist
+    - OSError: Filepath doesn't exist
 
     Returns:
-        checkpoint (dict): checkpoint used to load model
+    - checkpoint (dict): Checkpoint used to load model
     """
 
     if not Path(filepath).is_file():
@@ -228,18 +229,18 @@ def run_train(
     """Runs training epochs.
 
     Args:
-        model (torch.nn.Module): Model.
-        train_dl (torch.util.data.DataLoader): Training dataloader.
-        val_dl (torch.util.data.DataLoader): Validation dataloader.
-        num_epochs (int, optional): Number of training epochs. Defaults to 100.
-        device (str, optional): Device to train on. Defaults to "cpu".
-        log_freq (int, optional): Logging frequency. Defaults to 10.
-        filepath (str or Path, optional): Path to load model and resume from,
-            if applicable. Defaults to None.
+    - model (torch.nn.Module): Model.
+    - train_dl (torch.util.data.DataLoader): Training dataloader.
+    - val_dl (torch.util.data.DataLoader): Validation dataloader.
+    - num_epochs (int, optional): Number of training epochs. Default is 100.
+    - device (str, optional): Device to train on. Default is "cpu".
+    - log_freq (int, optional): Logging frequency. Default is 10.
+    - filepath (str or Path, optional): Path to load model and resume from,
+        if applicable. Default is None.
 
     Returns:
-        history (dict): Dictionary storing 'epoch_n', 'train_loss' and
-            'val_loss' lists.
+    - history (dict): Dictionary storing 'epoch_n', 'train_loss' and
+        'val_loss' lists.
     """
 
     criterion = torch.nn.MSELoss()
@@ -314,11 +315,11 @@ def predict(
     """Predict from inputs, using the model.
 
     Args:
-        model (torch.nn.Module): Model.
-        X (2D Tensor): Model input (batch_size x input_size).
+    - model (torch.nn.Module): Model.
+    - X (2D Tensor): Model input with shape (batch_size, input_size).
 
     Returns:
-        prediction (2D Tensor): Predicted outputs (batch_size x pred_size).
+    - prediction (2D Tensor): Predicted outputs with shape (batch_size, pred_size).
     """
 
     model.eval()
@@ -338,20 +339,20 @@ def get_prediction_step_idxs(
     """Returns indices for training and validation sets.
 
     Args:
-        n (int): Number of examples.
-        num_prediction_steps (int, optional): Number of prediction steps. Defaults to 1.
-        prop_val (float, optional): Proportion of examples to use for validation set.
-            Defaults to 0.2.
-        ordered (bool, optional): Whether to use only the last examples for the
-            validation set. Defaults to True.
-        minimum_num_examples (int, optional): Minimum number of examples to use for
-            validation set.
+    - n (int): Number of examples.
+    - num_prediction_steps (int, optional): Number of prediction steps. Default is 1.
+    - prop_val (float, optional): Proportion of examples to use for validation set.
+        Default is 0.2.
+    - ordered (bool, optional): Whether to use only the last examples for the
+        validation set. Default is True.
+    - minimum_num_examples (int, optional): Minimum number of examples to use for
+        validation set.
 
     Returns:
-        training_idxs (torch.IntTensor): Indices for training set.
-        training_idxs_y (torch.IntTensor): Indices for training set, for y.
-        validation_idxs (torch.IntTensor): Indices for validation set
-        validation_idxs_y (torch.IntTensor): Indices for validation set, for y.
+    - training_idxs (torch.IntTensor): Indices for training set.
+    - training_idxs_y (torch.IntTensor): Indices for training set, for y.
+    - validation_idxs (torch.IntTensor): Indices for validation set
+    - validation_idxs_y (torch.IntTensor): Indices for validation set, for y.
     """
 
     if num_prediction_steps == 0:
@@ -398,24 +399,22 @@ def get_prediction_step_idxs(
     return training_idxs, training_idxs_y, validation_idxs, validation_idxs_y
 
 
-def get_indices(
-    n: int, prop_val: float = 0.2, ordered: bool = True
-) -> tuple[
+def get_indices(n: int, prop_val: float = 0.2, ordered: bool = True) -> tuple[
     np.ndarray[tuple[int], np.dtype[np.int64]],
     np.ndarray[tuple[int], np.dtype[np.int64]],
 ]:
     """Returns indices for training and validation sets.
 
     Args:
-        n (int): Number of examples.
-        prop_val (float, optional): Proportion of examples to use for validation set.
-            Defaults to 0.2.
-        ordered (bool, optional): Whether to use only the last examples for the
-            validation set. Defaults to True.
+    - n (int): Number of examples.
+    - prop_val (float, optional): Proportion of examples to use for validation set.
+        Default is 0.2.
+    - ordered (bool, optional): Whether to use only the last examples for the
+        validation set. Default is True.
 
     Returns:
-        training_idxs (1D array): Indices for training set
-        validation_idxs (1D array): Indices for validation set
+    - training_idxs (1D np.ndarray): Indices for training set
+    - validation_idxs (1D np.ndarray): Indices for validation set
     """
 
     num_val = int(n * prop_val)
@@ -444,22 +443,22 @@ def get_dataloaders(
     """Returns dataloaders built from the input data.
 
     Args:
-        X (2D Tensor): Model input (num_examples x input_size).
-        y (2D Tensor, optional): Model target (num_examples x output_size).
-            Defaults to None.
-        num_prediction_steps (int, optional): Number of steps ahead to predict, if y is
-            None. Defaults to 0.
-        batch_size (int, optional): Batch size. Defaults to 32.
-        prop_val (float, optional): Validation proportion. Defaults to 0.2.
-        ordered (bool, optional): If True, data is not shuffled.
-            Defaults to True.
+    - X (2D Tensor): Model input with shape (num_examples, input_size).
+    - y (2D Tensor, optional): Model target with shape (num_examples, output_size).
+        Default is None.
+    - num_prediction_steps (int, optional): Number of steps ahead to predict, if y is
+        None. Default is 0.
+    - batch_size (int, optional): Batch size. Default is 32.
+    - prop_val (float, optional): Validation proportion. Default is 0.2.
+    - ordered (bool, optional): If True, data is not shuffled.
+        Default is True.
 
     Raises:
-        ValueError: If X and y do not have the same length
+    - ValueError: If X and y do not have the same length
 
     Returns:
-        train_dl (torch.util.data.DataLoader): Training dataloader.
-        val_dl (torch.util.data.DataLoader): Validation dataloader.
+    - train_dl (torch.util.data.DataLoader): Training dataloader.
+    - val_dl (torch.util.data.DataLoader): Validation dataloader.
     """
 
     if y is not None:

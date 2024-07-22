@@ -2,17 +2,18 @@ import copy
 from typing import TYPE_CHECKING, Any
 import warnings
 
+from matplotlib import pyplot as plt
 import numpy as np
-from ratinabox.Neurons import FeedForwardLayer, ObjectVectorCells, PlaceCells  # type: ignore[import]
 
 from predhpc import env, plot_util, util
+from predhpc.neurons import riab_neurons
 
 if TYPE_CHECKING:
     import ratinabox  # type: ignore[import]
 
 
-class ObjectCells(FeedForwardLayer):
-    """ """
+class ObjectCells(riab_neurons.FeedForwardLayer):
+    """Initialises ObjectCells, which respond to certain object types."""
 
     default_params = {
         "name": "ObjectCells",
@@ -102,7 +103,9 @@ class ObjectCells(FeedForwardLayer):
 
     def _set_place_inputs(self):
         self.place_params["place_cell_centres"] = self.input_object_locations
-        self.PlaceCellInputs = PlaceCells(self.Agent, params=self.place_params)
+        self.PlaceCellInputs = riab_neurons.PlaceCells(
+            self.Agent, params=self.place_params
+        )
 
     def _add_place_inputs(self):
         self.add_input(
@@ -120,13 +123,13 @@ class ObjectCells(FeedForwardLayer):
         """Get the times to plot.
 
         Args:
-            t_start (float, optional): Start time. Defaults to None.
-            t_end (float, optional): End time. Defaults to None.
+        - t_start (float, optional): Start time. Default is None.
+        - t_end (float, optional): End time. Default is None.
 
         Returns:
-            t: Times to plot.
-            startid: Index of the start time.
-            endid: Index of the end time.
+        - t (1D np.ndarray): Times to plot.
+        - startid (int): Index of the start time.
+        - endid (int): Index of the end time.
         """
 
         t = np.array(self.history["t"])
@@ -139,32 +142,34 @@ class ObjectCells(FeedForwardLayer):
         self,
         t_start: float | None = None,
         t_end: float | None = None,
+        sub_ax: plt.Axes | None = None,
         adjust_xlim: bool = True,
         autosave: bool | None = None,
         **kwargs,
-    ):
+    ) -> plt.Axes:
         t, _, _ = self.get_plotting_times(t_start, t_end)
         t_start = t[0]
         t_end = t[-1]
 
-        fig, ax = super().plot_rate_timeseries(
+        fig, sub_ax = super().plot_rate_timeseries(
             t_start=t_start,
             t_end=t_end,
+            sub_ax=sub_ax,
             autosave=False,
             **kwargs,
         )
 
         if adjust_xlim:
             xlim = np.asarray([t_start, t_end]) / 60
-            ax.set_xlim(*xlim)
+            sub_ax.set_xlim(*xlim)
 
             xticks = np.around(xlim, 2)
-            ax.set_xticks(xticks)
-            ax.set_xticklabels(xticks)
+            sub_ax.set_xticks(xticks)
+            sub_ax.set_xticklabels(xticks)
 
         util.save_figure(fig, f"{self.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
 
-        return fig, ax
+        return ax
 
 
 class FixedObjectCells(ObjectCells):
@@ -250,7 +255,7 @@ class FixedObjectCells(ObjectCells):
         return self._object_types
 
     def _get_num_neurons(self):
-        (
+       (
             num_novel_objects,
             num_reward_objects,
             num_teleport_objects,
@@ -369,7 +374,7 @@ class WeightedObjectCells(ObjectCells):
         return self.n
 
 
-class FixedObjectVectorCells(ObjectVectorCells):
+class FixedObjectVectorCells(riab_neurons.ObjectVectorCells):
     """Initialises FixedObjectVectorCells(), takes as input a parameter dictionary.
     Any values not provided by the params dictionary are taken from a default
     dictionary below.
@@ -406,7 +411,7 @@ class FixedObjectVectorCells(ObjectVectorCells):
                 "Environment must be an OpenField to use FixedObjectVectorCells"
             )
 
-        (
+       (
             num_novel,
             num_reward,
             num_teleport,
@@ -456,13 +461,13 @@ class FixedObjectVectorCells(ObjectVectorCells):
         """Get the times to plot.
 
         Args:
-            t_start (float, optional): Start time. Defaults to None.
-            t_end (float, optional): End time. Defaults to None.
+        - t_start (float, optional): Start time. Default is None.
+        - t_end (float, optional): End time. Default is None.
 
         Returns:
-            t: Times to plot.
-            startid: Index of the start time.
-            endid: Index of the end time.
+        - t (1D np.ndarray): Times to plot.
+        - startid (int): Index of the start time.
+        - endid (int): Index of the end time.
         """
 
         t = np.array(self.history["t"])
@@ -475,6 +480,7 @@ class FixedObjectVectorCells(ObjectVectorCells):
         self,
         t_start: float | None = None,
         t_end: float | None = None,
+        sub_ax: plt.Axes | None = None,
         autosave: bool | None = None,
         **kwargs,
     ):
@@ -482,19 +488,20 @@ class FixedObjectVectorCells(ObjectVectorCells):
         t_start = t[startid]
         t_end = t[endid]
 
-        fig, ax = super().plot_rate_timeseries(
+        fig, sub_ax = super().plot_rate_timeseries(
             t_start=t_start,
             t_end=t_end,
+            sub_ax=sub_ax,
             autosave=False,
             **kwargs,
         )
 
         util.save_figure(fig, f"{self.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
 
-        return fig, ax
+        return fig, sub_ax
 
 
-class WeightedObjectVectorCells(ObjectVectorCells):
+class WeightedObjectVectorCells(riab_neurons.ObjectVectorCells):
     """Initialises WeightedObjectVectorCells(), takes as input a parameter dictionary. Any values not provided by the params dictionary are taken from a default dictionary below.
 
     See ObjectVectorCells for details. WeightedObjectVectorCells are initialised with a random number of cells per object type, based on a weighted distribution per object type.

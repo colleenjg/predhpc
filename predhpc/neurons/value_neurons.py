@@ -2,10 +2,19 @@ import copy
 
 import numpy as np
 
-from ratinabox import PlaceCells
+from predhpc.neurons import riab_neurons
 
 
-class SimpleValueNeuron(PlaceCells):
+class SimpleValueNeuron(riab_neurons.PlaceCells):
+    """
+    Simple value neuron model, building on place cells. Must be initialized with an
+    Agent object
+
+    List of functions:
+        • get_state()
+        • get_local_gradient()
+        • plot_local_gradient()
+    """
 
     default_params = {
         "n": 1,
@@ -17,6 +26,12 @@ class SimpleValueNeuron(PlaceCells):
     }
 
     def __init__(self, Agent, params=dict()):
+        """Initialize a SimpleValueNeuron object.
+
+        Args:
+        - Agent (Agent): Agent object.
+        - params (dict, optional): Dictionary of parameters. Default is dict().
+        """
 
         self.Agent = Agent
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
@@ -28,11 +43,11 @@ class SimpleValueNeuron(PlaceCells):
 
         super().__init__(Agent, self.params)
 
-        self.peak = np.asarray(self.params["peak"]).reshape(
-            -1, 2
-        )
+        self.peak = np.asarray(self.params["peak"]).reshape(-1, 2)
 
-    def get_local_gradient(self, evaluate_at="agent", abs_shift=1e-3, p=2, thresh_gradV=None, **kwargs):
+    def get_local_gradient(
+        self, evaluate_at="agent", abs_shift=1e-3, p=2, thresh_gradV=None, **kwargs
+    ):
         if evaluate_at == "agent":
             pos = self.Agent.pos
         elif evaluate_at == "all":
@@ -76,18 +91,16 @@ class SimpleValueNeuron(PlaceCells):
                 prog_norm = ((self.max_fr - V) / self.max_fr) ** p
                 gradV = gradV / norm * prog_norm
 
-            end_norm = np.sqrt(np.sum(gradV ** 2))
+            end_norm = np.sqrt(np.sum(gradV**2))
 
             if thresh_gradV is not None:
-                end_norm = np.sqrt(np.sum(gradV ** 2))
+                end_norm = np.sqrt(np.sum(gradV**2))
                 if end_norm < thresh_gradV:
                     return None
 
             return gradV
 
-    def plot_local_gradient(
-        self, evaluate_at="agent", pos=None, fig=None, ax=None, **kwargs
-    ):
+    def plot_local_gradient(self, evaluate_at="agent", pos=None, axes=None, **kwargs):
 
         if evaluate_at == "agent":
             pos = self.Agent.pos
@@ -104,10 +117,10 @@ class SimpleValueNeuron(PlaceCells):
         xs = [pos[0], pos[0] + gradV[0]]
         ys = [pos[1], pos[1] + gradV[1]]
 
-        fig, ax = self.plot_rate_map(fig=fig, ax=ax, no_legend=True)
+        axes = self.plot_rate_map(ax=axes, no_legend=True)
 
-        ax[0].scatter(*pos, color="red", marker=".", s=20, zorder=12)
-        ax[0].plot(
+        axes[0].scatter(*pos, color="red", marker=".", s=20, zorder=12)
+        axes[0].plot(
             xs,
             ys,
             color="red",
@@ -115,4 +128,4 @@ class SimpleValueNeuron(PlaceCells):
             zorder=12,
         )
 
-        return fig, ax
+        return axes
