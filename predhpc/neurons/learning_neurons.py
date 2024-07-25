@@ -15,20 +15,35 @@ if TYPE_CHECKING:
 
 
 class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer, util.ParamsManagerMixin):
-    """This class defines a population of neurons that receive feedforward input that
-    is smoothed.
-    This class is a subclass of FeedForwardLayer() and inherits its properties/plotting functions.
+    """
+    SmoothFeedForwardLayer()
 
-    Must be initialised with an Agent, and a "params" dictionary, including input
-    layers.
+    Class extending riab_neurons.FeedForwardLayer. Defines a population of neurons
+    that receive feedforward input that is smoothed.
 
-    List of functions:
-        • get_state()
-        • set_learn()
-        • add_input()
-        • update()
-        • plot_rate_map()
-        • plot_loss()
+    Must be initialised with an Agent. A parameters dictionary can also be passed at
+    initialisation, with, for example, input layers.
+
+    default_params = {
+        "n": 10,
+        "activation_function": params_util.LINEAR_SIGMOID_ACTIVATION_FUNCTION,
+        "name": "SmoothFeedForwardLayer",
+        "input_filter_tau": 0.1,  # in sec
+        "input_trend_tau": None,  # in sec
+    }
+
+    See riab_neurons.FeedForwardLayer for properties.
+
+    List of methods (in addition to riab_neurons.FeedForwardLayer methods):
+        • self.add_input()
+        • self.get_filter_tau()
+        • self.save_to_history()
+        • self.get_state()
+        • self.update_filtered_inputs()
+        • self.update()
+        • self.plot_activation_function()
+        • self.plot_firingrate_distribution()
+        • self.plot_filtered()
     """
 
     default_params = {
@@ -45,13 +60,18 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer, util.ParamsManagerMi
     fixed_params = dict()  # type: dict[str, Any]
 
     def __init__(self, Agent: "ratinabox.Agent", params: dict[str, Any] = dict()):
-        """Initialise HebbianLayer(), takes as input a parameter
-        dictionary. Any values not provided by the params dictionary are
-        taken from a default dictionary below.
+        """
+        SmoothFeedForwardLayer(Agent)
+
+        Initialise a feedforward layer with smoothed inputs.
+
+        Attributes:
+        - Agent (agent.ResetableAgent): Associated agent.
+        - activation_params (dict): Activation function parameters.
 
         Args:
-        - Agent (ratinabox.Agent): Agent object.
-        - params (dict, optional). Default is dict().
+        - Agent (agent.ResetableAgent): Associated agent.
+        - params (dict, optional): Neuron layer parameters. Default is dict().
         """
 
         self.Agent = Agent
@@ -69,8 +89,34 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer, util.ParamsManagerMi
 
         return
 
+    def add_input(self, input_layer: riab_neurons.Neurons, **kwargs):
+        """
+        self.add_input(input_layer)
+
+        Add an input layer.
+
+        Also add variables tracking filtered inputs and trends for this input, and
+        history keys to store these values across steps.
+
+        Args:
+        - input_layer (riab_neurons.Neurons): Neuron layer to add as input.
+
+        Keyword args:
+        - **kwargs: Keyword arguments passed to FeedForwardLayer.add_input().
+        """
+
+        super().add_input(input_layer, **kwargs)
+
+        if self.input_filter_tau or self.input_trend_tau:  # type: ignore[attr-defined]
+            name_in, n_in = input_layer.name, input_layer.n  # type: ignore[attr-defined]
+            self.inputs[name_in]["filtered_inputs"] = np.full(n_in, np.nan)
+            self.inputs[name_in]["filtered_trends"] = np.zeros(n_in)
+
     def get_filter_tau(self, filter_tau: float | None = None) -> float:
-        """Returns an exponential filter time constant parameter.
+        """
+        self.get_filter_tau()
+
+        Obtain the exponential filter time constant parameter.
 
         Args:
         - filter_tau (float, optional): Filter time constant. If None, the agent's
@@ -94,86 +140,11 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer, util.ParamsManagerMi
 
         return filter_tau
 
-    def plot_activation_function(self, min_input_fr=-15, max_input_fr=15, sub_ax=None):
-        """Plot the activation function of the layer.
-
-        Args:
-        - min_input_fr (int, optional): Minimum input firing rate to plot from.
-            Default is -15.
-        - max_input_fr (int, optional): Maximum input firing rate to plot to.
-            Default is 15.
-        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
-            created. Default is None.
-
-        Returns:
-        - sub_ax (plt.Axes): Subplot with activation function plotted.
-        """
-
-        sub_ax = plot_util.plot_activation_function(
-            self.activation_function,
-            min_input_fr=min_input_fr,
-            max_input_fr=max_input_fr,
-            sub_ax=sub_ax,
-            color=self.color,
-        )
-
-        sub_ax.set_title("Activation function")
-
-        return sub_ax
-
-    def plot_firingrate_distribution(self, sub_ax=None, bins=50):
-        """Plot the firing rate distribution of the layer as a histogram.
-
-        Args:
-        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
-            created. Default is None.
-        - bins (int, optional): Number of histogram bins. Default is 50.
-
-        Returns:
-        - sub_ax (plt.Axes): Subplot with firing rate distribution plotted.
-        """
-
-        if sub_ax is None:
-            fig, sub_ax = plt.subplots(figsize=(4, 2))
-
-        firingrates = np.asarray(self.history["firingrate"]).ravel()
-        sub_ax.hist(firingrates, bins=bins, color=self.color, alpha=0.6, density=True)
-
-        sub_ax.axvline(0, color="k", lw=1, ls="dashed")
-
-        sub_ax.set_xlabel("Firing rate")
-        sub_ax.set_ylabel("Density")
-        sub_ax.set_title("Firing rate distribution")
-
-        sub_ax.spines[["right", "top"]].set_visible(False)
-
-        return sub_ax
-
-    def add_input(self, input_layer: riab_neurons.Neurons, **kwargs):
-        """Add an input layer.
-
-        Also add variables tracking filtered inputs and trends for this input, and
-        history keys to store these values across steps.
-
-        Args:
-        - input_layer (riab_neurons.Neurons): Neuron layer to add as input
-        - **kwargs: Keyword arguments for FeedForwardLayer.add_input().
-        """
-
-        super().add_input(input_layer, **kwargs)
-
-        if self.input_filter_tau or self.input_trend_tau:  # type: ignore[attr-defined]
-            name_in, n_in = input_layer.name, input_layer.n  # type: ignore[attr-defined]
-            self.inputs[name_in]["filtered_inputs"] = np.full(n_in, np.nan)
-            self.inputs[name_in]["filtered_trends"] = np.zeros(n_in)
-
-            for key in ["inputs", "trends"]:
-                if f"filtered_{key}_for_learning" not in self.history.keys():
-                    self.history[f"filtered_{key}"] = dict()
-                self.history[f"filtered_{key}"][name_in] = list()
-
     def save_to_history(self):
-        """Save the current state of the layer to the history, including the filtered
+        """
+        self.save_to_history()
+
+        Save the current state of the layer to the history, including the filtered
         inputs and trends for input layers.
         """
 
@@ -186,55 +157,19 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer, util.ParamsManagerMi
                         input_layer[f"filtered_{key}"].tolist()
                     )
 
-    def update_filtered_inputs(
-        self,
-        filter_tau: float | None = None,
-        trend_tau: float | None = None,
-        filter_key: str = "filtered_inputs",
-    ):
-        """Update the filtered inputs of the layer.
-
-        Args:
-        - filter_tau (float, optional): Filter time constant. Default is None.
-        - trend_tau (float, optional): Trend time constant. Default is None.
-        - filter_key (str, optional): Key of the filter to update.
-            Default is "filtered_inputs".
-        """
-
-        filter_tau = self.get_filter_tau(filter_tau)
-        effective_filter_tau = filter_tau / self.Agent.dt
-        filter_alpha = 1 - np.exp(-1 / effective_filter_tau)
-
-        trend_key = filter_key.replace("_inputs", "_trends")
-        trend_tau = self.get_filter_tau(trend_tau)
-        effective_trend_tau = trend_tau / self.Agent.dt
-        trend_alpha = 1 - np.exp(-1 / effective_trend_tau)
-
-        for input_layer in self.inputs.values():
-            I_t1 = input_layer["layer"].firingrate
-            X_t = input_layer[filter_key]
-            if not np.isfinite(X_t).all():
-                X_t = I_t1
-            T_t = input_layer[trend_key]
-
-            input_layer[filter_key] = filter_alpha * I_t1 + (1 - filter_alpha) * (
-                X_t + T_t
-            )
-            if trend_tau > self.Agent.dt:
-                input_layer[trend_key] = (
-                    trend_alpha * (input_layer[filter_key] - X_t)
-                    + (1 - trend_alpha) * T_t
-                )
-
-        return
-
     def get_state(self, evaluate_at="last", max_recurrence=None, **kwargs):
-        """Get the firing rate of the layer. Adapted from FeedForward.get_state().
+        """
+        self.get_state()
+
+        Obtain the firing rate of the layer. Adapted from FeedForward.get_state().
 
         Args:
         - evaluate_at (str, optional). Default is 'last'.
         - max_recurrence: The maximum number of time get_state() recursively calls
             recurrent inputs (prevents infinite recursion error). Default is None.
+
+        Keyword args:
+        - **kwargs: Keyword arguments passed to FeedForward.get_state().
 
         Returns:
            (1D np.ndarray): Array of firing rates
@@ -244,7 +179,7 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer, util.ParamsManagerMi
             V = np.zeros(self.n)
         elif evaluate_at == "all":
             V = np.zeros(
-               (self.n, self.Agent.Environment.flattened_discrete_coords.shape[0])
+                (self.n, self.Agent.Environment.flattened_discrete_coords.shape[0])
             )
         else:
             V = np.zeros((self.n, kwargs["pos"].shape[0]))
@@ -287,87 +222,57 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer, util.ParamsManagerMi
 
         return firingrate
 
-    def get_plotting_times(
-        self, t_start: float | None = None, t_end: float | None = None
-    ):
-        """Get the times to plot.
-
-        Args:
-        - t_start (float, optional): Start time. Default is None.
-        - t_end (float, optional): End time. Default is None.
-
-        Returns:
-        - t (1D np.ndarray): Times to plot.
-        - startid (int): Index of the start time.
-        - endid (int): Index of the end time.
-        """
-
-        t = np.array(self.history["t"])
-        startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
-        t = t[startid : endid + 1]
-
-        return t, startid, endid
-
-    def plot_rate_timeseries(
+    def update_filtered_inputs(
         self,
-        t_start: float | None = None,
-        t_end: float | None = None,
-        sub_ax: plt.Axes | None = None,
-        adjust_xlim: bool = True,
-        autosave: bool | None = None,
-        **kwargs,
-    ) -> plt.Axes:
-        """Plot the firing rate timeseries of the layer.
+        filter_tau: float | None = None,
+        trend_tau: float | None = None,
+        filter_key: str = "filtered_inputs",
+    ):
+        """
+        self.update_filtered_inputs()
 
-        See FeedForwardLayer.plot_rate_timeseries() for more information.
+        Update the filtered inputs for the layer.
 
         Args:
-        - t_start (float, optional): Time at which to start plotting data.
-            Default is None.
-        - t_end (float, optional): Time at which to stop plotting data.
-            Default is None.
-        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
-            created. Default is None.
-        - adjust_xlim (bool, optional): Whether to adjust the x limits to the start
-            and stop times. Default is True.
-        - autosave (bool, optional): Whether to autosave the figure. Default is None.
-
-        Keyword args:
-        - **kwargs: Keyword arguments for FeedForwardLayer.plot_rate_timeseries().
-
-        Returns:
-        - sub_ax (plt.Axes): Subplot with firing rate timeseries plotted.
+        - filter_tau (float, optional): Filter time constant. Default is None.
+        - trend_tau (float, optional): Trend time constant. Default is None.
+        - filter_key (str, optional): Key of the filter to update.
+            Default is "filtered_inputs".
         """
 
-        t, _, _ = self.get_plotting_times(t_start, t_end)
-        t_start = t[0]
-        t_end = t[-1]
+        filter_tau = self.get_filter_tau(filter_tau)
+        effective_filter_tau = filter_tau / self.Agent.dt
+        filter_alpha = 1 - np.exp(-1 / effective_filter_tau)
 
-        if sub_ax is not None:
-            kwargs["fig"] = sub_ax.figure
+        trend_key = filter_key.replace("_inputs", "_trends")
+        trend_tau = self.get_filter_tau(trend_tau)
+        effective_trend_tau = trend_tau / self.Agent.dt
+        trend_alpha = 1 - np.exp(-1 / effective_trend_tau)
 
-        _, sub_ax = super().plot_rate_timeseries(
-            t_start=t_start,
-            t_end=t_end,
-            sub_ax=sub_ax,
-            autosave=False,
-            **kwargs,
-        )
+        for input_layer in self.inputs.values():
+            I_t1 = input_layer["layer"].firingrate
+            X_t = input_layer[filter_key]
+            if not np.isfinite(X_t).all():
+                X_t = I_t1
+            T_t = input_layer[trend_key]
 
-        if adjust_xlim:
-            xlim = np.asarray([t_start, t_end]) / 60
-            sub_ax.set_xlim(*xlim)
+            input_layer[filter_key] = filter_alpha * I_t1 + (1 - filter_alpha) * (
+                X_t + T_t
+            )
+            if trend_tau > self.Agent.dt:
+                input_layer[trend_key] = (
+                    trend_alpha * (input_layer[filter_key] - X_t)
+                    + (1 - trend_alpha) * T_t
+                )
 
-            xticks = np.around(xlim, 2)
-            sub_ax.set_xticks(xticks)
-            sub_ax.set_xticklabels(xticks)
-
-        util.save_figure(fig, f"{self.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
-
-        return sub_ax
+        return
 
     def update(self):
-        """Update the layer, and filtered inputs."""
+        """
+        self.update()
+
+        Update the layer, and filtered inputs.
+        """
 
         if self.input_filter_tau or self.input_trend_tau:
             self.update_filtered_inputs(
@@ -376,6 +281,67 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer, util.ParamsManagerMi
                 filter_key="filtered_inputs",
             )
         super().update()
+
+    def plot_activation_function(self, min_input_fr=-15, max_input_fr=15, sub_ax=None):
+        """
+        self.plot_activation_function()
+
+        Plot the activation function of the layer.
+
+        Args:
+        - min_input_fr (int, optional): Minimum input firing rate to plot from.
+            Default is -15.
+        - max_input_fr (int, optional): Maximum input firing rate to plot to.
+            Default is 15.
+        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
+            created. Default is None.
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with activation function plotted.
+        """
+
+        sub_ax = plot_util.plot_activation_function(
+            self.activation_function,
+            min_input_fr=min_input_fr,
+            max_input_fr=max_input_fr,
+            sub_ax=sub_ax,
+            color=self.color,
+        )
+
+        sub_ax.set_title("Activation function")
+
+        return sub_ax
+
+    def plot_firingrate_distribution(self, sub_ax=None, bins=50):
+        """
+        self.plot_firingrate_distribution()
+
+        Plot the firing rate distribution of the layer as a histogram.
+
+        Args:
+        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
+            created. Default is None.
+        - bins (int, optional): Number of histogram bins. Default is 50.
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with firing rate distribution plotted.
+        """
+
+        if sub_ax is None:
+            fig, sub_ax = plt.subplots(figsize=(4, 2))
+
+        firingrates = np.asarray(self.history["firingrate"]).ravel()
+        sub_ax.hist(firingrates, bins=bins, color=self.color, alpha=0.6, density=True)
+
+        sub_ax.axvline(0, color="k", lw=1, ls="dashed")
+
+        sub_ax.set_xlabel("Firing rate")
+        sub_ax.set_ylabel("Density")
+        sub_ax.set_title("Firing rate distribution")
+
+        sub_ax.spines[["right", "top"]].set_visible(False)
+
+        return sub_ax
 
     def plot_filtered(
         self,
@@ -390,17 +356,20 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer, util.ParamsManagerMi
         sub_ax: plt.Axes | None = None,
         autosave: bool | None = None,
     ) -> tuple[plt.Axes, np.ndarray[tuple[int], np.dtype[np.float64]]]:
-        """Plot the filtered inputs or firingrates of the layer.
+        """
+        self.plot_filtered()
+
+        Plot the filtered inputs or firingrates of the layer.
 
         Args:
-        - input_layer_name (str): Name of the input layer to plot. If None, the layer
-            itself is used.
+        - input_layer_name (str, optional): Name of the input layer to plot. If None,
+            the layer itself is used.
         - filter_key (str, optional): Key of the filtered inputs to plot.
             Default is "filtered_inputs".
         - t_start (float, optional): Start time of the plot. Default is None.
         - t_end (float, optional): End time of the plot. Default is None.
         - title (str, optional): Title of the plot. Default is None.
-        - chosen_neurons (str, int, list or 1D array, optional): Neurons to plot.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
             Default is "all".
         - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
             created. Default is None.
@@ -478,20 +447,46 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer, util.ParamsManagerMi
 
 
 class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
-    """This trained class defines a population of neurons that tune their
-    activity through Hebbian learning.
-    This class is a subclass of SmoothFeedForwardLayer() and inherits its properties/plotting functions.
+    """
+    LearnLayer()
 
-    Must be initialised with an Agent, and a "params" dictionary, including input
-    layers.
+    Class extending SmoothFeedForwardLayer. Defines a population of neurons with
+    weights that can be updated through learning.
 
-    List of functions:
-        • get_state()
-        • set_learn()
-        • add_input()
-        • update()
-        • plot_rate_map()
-        • plot_loss()
+    Must be initialised with an Agent. A parameters dictionary can also be passed at
+    initialisation, with, for example, input layers.
+
+    default_params = {
+        "n": 10,
+        "name": "LearnLayer",
+        "lr": 1e-4,  # learning rate
+        "biases": None,
+        "use_targets": False,
+        "init_weights_zero": False,  # whether to initialise weights to 0
+        "w_init_loc": 0,  # mean of the initial weights
+        "w_init_scale": 1,  # scale of the initial weights
+        "use_targets": False,  # whether to use targets
+        "input_filter_tau": None,  # rise time constant
+        "input_trend_tau": None,  # decay time constant
+    }
+
+    List of properties (in addition to SmoothFeedForwardLayer properties).
+        • self.trainable_biases
+        • self.target
+        • self.learn
+        • self.input_layers_with_no_learning
+
+    List of methods (in addition to SmoothFeedForwardLayer methods):
+        • self.set_learn()
+        • self.add_input_layers_with_no_learning()
+        • self.add_input()
+        • self.save_to_history()
+        • self.update_weights()
+        • self.update()
+        • self.plot_rate_map()
+        • self.plot_rate_maps_across_learning()
+        • self.plot_loss()
+        • self.plot_histogram()
     """
 
     default_params = {
@@ -500,7 +495,7 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
         "lr": 1e-4,  # learning rate
         "biases": None,
         "use_targets": False,
-        "init_weights_zero": False,  # whether to initialize weights to 0
+        "init_weights_zero": False,  # whether to initialise weights to 0
         "w_init_loc": 0,  # mean of the initial weights
         "w_init_scale": 1,  # scale of the initial weights
         "use_targets": False,  # whether to use targets
@@ -514,13 +509,18 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
     fixed_params = dict()  # type: dict[str, Any]
 
     def __init__(self, Agent: "ratinabox.Agent", params: dict[str, Any] = dict()):
-        """Initialise HebbianLayer(), takes as input a parameter
-        dictionary. Any values not provided by the params dictionary are
-        taken from a default dictionary below.
+        """
+        LearnLayer(Agent)
+
+        Initialise a layer that can learn weight updates. MSE with target is added to
+        history.
+
+        Attributes:
+        - num_steps_total (int): Total number of update steps for the layer.
 
         Args:
-        - Agent (Agent): Agent object.
-        - params (dict, optional). Default is dict().
+        - Agent (agent.ResetableAgent): Associated agent.
+        - params (dict, optional): Neuron layer parameters. Default is dict().
         """
 
         self.Agent = Agent
@@ -533,6 +533,8 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
 
         super().__init__(Agent, self.params)
 
+        self.set_learn(True)
+
         self.history["target_mse"] = list()
         self.num_steps_total = 0
 
@@ -540,21 +542,28 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
 
     @property
     def trainable_biases(self) -> bool:
-        """Whether the biases of the layer are trainable.
+        """
+        self.trainable_biases
+
+        Whether the biases of the layer are trainable.
 
         Returns:
         - (bool): Whether the biases are trainable.
         """
+
         if not hasattr(self, "_trainable_biases"):
             self._trainable_biases = self.params["biases"] is not None
         return self._trainable_biases
 
     @property
     def target(self) -> np.ndarray[tuple[int], np.dtype[np.float64]] | None:
-        """Agent target, if it exists.
+        """
+        self.target
+
+        Agent target, if it exists.
 
         Returns:
-        - (np.ndarray or None): Agent's target position [x, y] or None.
+        - (1D np.ndarray or None): Agent's target position [x, y] or None.
         """
 
         if self.use_targets:  # type: ignore[attr-defined]
@@ -562,14 +571,75 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
         else:
             return None
 
+    @property
+    def learn(self) -> bool:
+        """
+        self.learn
+
+        Whether this layer is learning or not.
+
+        Returns:
+        - (bool): Whether the layer is learning or not.
+        """
+
+        return self._learn
+
+    @property
+    def input_layers_with_no_learning(self) -> list[str]:
+        """Obtain a list of input layer names that are not learning.
+
+        Returns:
+        - (list): List of input layer names that are not learning.
+        """
+        if hasattr(self, "_input_layers_with_no_learning"):
+            return self._input_layers_with_no_learning
+        else:
+            return list()
+
+    def set_learn(self, learn=None):
+        """
+        self.set_learn()
+
+        Set the layer to learn or not to.
+
+        Args:
+        - learn (bool, optional): Whether the layer should learn. If None, the
+            current setting remains unchanged. Default is None.
+        """
+
+        if learn is None:
+            pass
+        else:
+            self._learn = learn
+
+    def add_input_layers_with_no_learning(self, input_layers=list()) -> None:
+        """
+        self.add_input_layers_with_no_learning()
+
+        Add name of input layers that are not learning.
+
+        Args:
+        - input_layers (str or list): Name of the input layer(s) to add to list of
+            layers with no learning. Default is list().
+        """
+
+        if not hasattr(self, "_input_layers_with_no_learning"):
+            self._input_layers_with_no_learning = list()
+        if not isinstance(input_layers, list):
+            input_layers = [input_layers]
+        self._input_layers_with_no_learning.extend(input_layers)
+
     def add_input(self, input_layer: riab_neurons.Neurons, **kwargs):
-        """Add an input layer.
+        """
+        self.add_input()
+
+        Add an input layer.
 
         Args:
         - input_layer (riab_neurons.Neurons): Neuron layer to add as input
 
         Keyword args:
-        - **kwargs: Keyword arguments for FeedForwardLayer.add_input().
+        - **kwargs: Keyword arguments passed to SmoothFeedForward.add_input().
         """
 
         n_in, n_out = input_layer.n, self.n  # type: ignore[attr-defined]
@@ -586,16 +656,19 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
 
         super().add_input(input_layer, w_init_scale=self.w_init_scale, **kwargs)  # type: ignore[attr-defined]
 
-    def update(self):
-        """Update the layer, i.e. calculate the new firing rates, update the weights
-        and biases, if applicable, and update number of steps for the neuron layer."""
-
-        super().update()
-        self.num_steps_total += 1
+        if self.input_filter_tau or self.input_trend_tau:  # type: ignore[attr-defined]
+            name_in, n_in = input_layer.name, input_layer.n  # type: ignore[attr-defined]
+            for key in ["inputs", "trends"]:
+                if f"filtered_{key}_for_learning" not in self.history.keys():
+                    self.history[f"filtered_{key}"] = dict()
+                self.history[f"filtered_{key}"][name_in] = list()
 
     def save_to_history(self):
-        """Save the current state of the layer to the history, including the
-        loss.
+        """
+        self.save_to_history()
+
+        Save the current state of the layer to the history, including the MSE loss
+        with the target.
         """
 
         super().save_to_history()
@@ -605,6 +678,38 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
         else:
             target_mse = np.mean((self.target - self.firingrate) ** 2)
             self.history["target_mse"].append(target_mse)
+
+    def update_weights(self):
+        """
+        self.update_weights()
+
+        Update weights. (Method should be overwritten in subclasses.)
+        """
+
+        return
+
+    def update(self, **kwargs):
+        """
+        self.update()
+
+        Update the layer, i.e. calculate the new firing rates and update the
+        weights and biases, if applicable.
+
+        Keyword args:
+        - **kwargs: Keyword arguments passed to self.update_weights().
+
+        Attributes:
+        - num_steps_total (int): Total number of update steps for the layer.
+        """
+
+        super().update()
+
+        if self.learn:
+            self.update_weights(**kwargs)
+
+        self.num_steps_total += 1
+
+        return
 
     def plot_rate_map(
         self,
@@ -618,23 +723,26 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
         autosave: bool | None = None,
         **kwargs,
     ) -> plt.Axes | np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
-        """Plot the rate map of the layer, ensuring no more than 20 columns
-        are plotted.
+        """
+        self.plot_rate_map()
+
+        Plot the rate map of the layer, ensuring no more than 20 columns are plotted.
 
         See FeedForwardLayer.plot_rate_map() for more information.
 
         Args:
-        - chosen_neurons (str, int, list or 1D array, optional): Neurons to plot.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
             Default is "all".
         - shape (tuple, optional): Shape of the plot. Default is None.
         - target_num_col (int, optional): Aimed number of columns. Default is 15.
         - no_legend (bool, optional): Whether to remove the legend. Default is False.
         - ax (np.ndarray or plt.Axes, optional): Subplot or array of subplots to plot on
            (one per plotted neuron, if environment is 2D). Default is None.
-        - autosave (bool, optional): Whether to autosave the figure. Default is None.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the global
+        autosave setting for ratinabox is used. Default is None.
 
         Keyword args:
-        - **kwargs: Keyword arguments for FeedForwardLayer.plot_rate_map().
+        - **kwargs: Keyword arguments passed to FeedForwardLayer.plot_rate_map().
 
         Returns:
         - ax (np.ndarray or plt.Axes): Subplot or array of subplots with rate map
@@ -673,7 +781,10 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
         autosave: bool | None = None,
         **kwargs,
     ):
-        """Plot the rate maps of the layer across learning.
+        """
+        self.plot_rate_maps_across_learning()
+
+        Plot the rate maps of the layer across learning.
 
         Args:
         - num_maps (int, optional): Number of maps to plot. Default is 3.
@@ -682,24 +793,24 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
         - normalize_together (bool, optional): Whether to normalize the maps
             together. Default is True.
         - title (str, optional): Title of the plot. Default is None.
-        - chosen_neurons (str, int, list or 1D array, optional): Neurons to plot.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
             Default is "all".
-        - axes (2D np.ndarray, optional): Array of subplots
-           (number of ROIs x num_maps or v.v.). If None, a new array is created.
+        - axes (2D np.ndarray, optional): Array of subplots with shape
+           (number of ROIs, num_maps or v.v.). If None, a new array is created.
             Default is None.
         - autosave (bool, optional): Whether to save the figure. Default is None.
 
         Keyword args:
-        - **kwargs: Keyword arguments for LearnLayer.plot_rate_map().
+        - **kwargs: Keyword arguments passed to LearnLayer.plot_rate_map().
 
         Returns:
-        - axes (2D np.ndarray): Array of subplots. If input 'axes' was None,
-            shape is 2D (number of ROIs x num_maps or v.v. if only one ROI).
+        - axes (2D np.ndarray): Array of subplots. If input axes was None,
+            shape is 2D with shape (number of ROIs, num_maps or v.v. if only one ROI).
         """
 
         chosen_neurons = self.return_list_of_neurons(chosen_neurons=chosen_neurons)  # type: ignore[arg-type, attr-defined]
 
-        # initialize axes
+        # initialise axes
         if axes is None:
             if len(chosen_neurons) == 1:
                 ncols = num_maps
@@ -791,6 +902,8 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
         **loss_kwargs,
     ) -> plt.Axes:
         """
+        self.plot_loss()
+
         Plot the loss of the layer over time.
 
         Args:
@@ -807,7 +920,7 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
         - autosave (bool, optional): Whether to save the figure. Default is None.
 
         Keyword args:
-        - **loss_**kwargs: Keyword arguments for plot_util.plot_loss().
+        - **loss_**kwargs: Keyword arguments passed to plot_util.plot_loss().
 
         Returns:
         - sub_ax (plt.Axes): Subplot with loss plotted.
@@ -849,7 +962,10 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
         xlabel: str | None = None,
         autosave: bool | None = None,
     ) -> plt.Axes:
-        """Plot thehistogram of the layer.
+        """
+        self.plot_histogram()
+
+        Plot a histogram of the firing rates of the layer.
 
         Args:
         - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
@@ -891,19 +1007,39 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
 
 
 class HebbianLayer(LearnLayer):
-    """This trained class defines a population of neurons that tune their activity through Hebbian learning.
-    This class is a subclass of Neurons() and inherits its properties/plotting functions.
+    """
+    HebbianLayer()
 
-    Must be initialised with an Agent, and a "params" dictionary, including input layers.
+    Class extending LearnLayer. Defines a population of neurons that tune their
+    weights through Hebbian learning.
 
-    List of functions:
-        • get_state()
-        • set_learn()
-        • add_input()
-        • update()
-        • plot_rate_map()
-        • plot_loss()
+    Must be initialised with an Agent. A parameters dictionary can also be passed at
+    initialisation, with, for example, input layers.
 
+    default_params = {
+        "n": 10,
+        "name": "HebbianLayer",
+        "lr": 1e-4,  # learning rate
+        "biases": None,
+        "normalize_weights_divisively": False,
+        "apply_Ojas_rule": False,
+        "regularization_alpha": None,
+        "use_targets": False,
+        "init_weights_zero": False,  # whether to initialise weights to 0
+        "w_init_scale": 1,  # scale of the initial weights
+        "learning_filter_tau": None,
+        "learning_trend_tau": None,
+        "p": 1,  # power for normalization, if used
+    }
+
+    See LearnLayer for properties.
+
+    List of methods (in addition to LearnLayer methods):
+        • self.add_input()
+        • self.get_regularization_alpha()
+        • self.save_to_history()
+        • self.update_weights()
+        • self.update()
     """
 
     default_params = {
@@ -915,7 +1051,7 @@ class HebbianLayer(LearnLayer):
         "apply_Ojas_rule": False,
         "regularization_alpha": None,
         "use_targets": False,
-        "init_weights_zero": False,  # whether to initialize weights to 0
+        "init_weights_zero": False,  # whether to initialise weights to 0
         "w_init_scale": 1,  # scale of the initial weights
         "learning_filter_tau": None,
         "learning_trend_tau": None,
@@ -928,13 +1064,14 @@ class HebbianLayer(LearnLayer):
     fixed_params = dict()
 
     def __init__(self, Agent: "ratinabox.Agent", params: dict = dict()):
-        """Initialise HebbianLayer(), takes as input a parameter
-        dictionary. Any values not provided by the params dictionary are
-        taken from a default dictionary below.
+        """
+        HebbianLayer(Agent)
+
+        Initialise a layer that learns weight updates via Hebbian learning.
 
         Args:
-        - Agent (Agent): Agent object.
-        - params (dict, optional). Default is dict().
+        - Agent (agent.ResetableAgent): Associated agent.
+        - params (dict, optional): Neuron layer parameters. Default is dict().
         """
 
         self.Agent = Agent
@@ -946,108 +1083,42 @@ class HebbianLayer(LearnLayer):
 
         super().__init__(Agent, self.params)
 
-        self.set_learn(True)
-
         if self.apply_Ojas_rule and self.normalize_weights_divisively:  # type: ignore[attr-defined]
             raise ValueError("Can only set 'oja' or 'norm' to True, not both.")
 
         return
 
-    @property
-    def learn(self) -> bool:
-        """Whether this layer is learning or not.
-
-        Returns:
-        - (bool): Whether the layer is learning or not.
-        """
-
-        return self._learn
-
-    def set_learn(self, learn=None):
-        """Set the layer to learn or not to.
-
-        Args:
-        - learn (bool, optional): Whether the layer should learn. If None, the
-        - current setting remains unchanged. Default is None
-        """
-
-        if learn is None:
-            pass
-        else:
-            self._learn = learn
-
-    @property
-    def input_layers_with_no_learning(self) -> list[str]:
-        """Returns a list of input layer names that are not learning.
-
-        Returns:
-        - (list): List of input layer names that are not learning.
-        """
-        if hasattr(self, "_input_layers_with_no_learning"):
-            return self._input_layers_with_no_learning
-        else:
-            return list()
-
-    def add_input_layers_with_no_learning(self, input_layers=list()) -> None:
-        """Add name of input layers that are not learning.
-
-        Args:
-        - input_layers (str or list): Name of the input layer(s) to add to list of
-            layers with no learning. Default is list().
-        """
-
-        if not hasattr(self, "_input_layers_with_no_learning"):
-            self._input_layers_with_no_learning = list()
-        if not isinstance(input_layers, list):
-            input_layers = [input_layers]
-        self._input_layers_with_no_learning.extend(input_layers)
-
     def add_input(self, input_layer: riab_neurons.Neurons, **kwargs):
-        """Add an input layer.
+        """
+        self.add_input(input_layer)
+
+        Add an input layer.
 
         Args:
         - input_layer (riab_neurons.Neurons): Neuron layer to add as input layer
 
         Keyword args:
-        - **kwargs: Keyword arguments for FeedForwardLayer.add_input().
+        - **kwargs: Keyword arguments passed to FeedForwardLayer.add_input().
         """
 
         super().add_input(input_layer, **kwargs)
 
-        name_in, n_in = input_layer.name, input_layer.n  # type: ignore[attr-defined]
-        self.inputs[name_in]["filtered_inputs_for_learning"] = np.full(n_in, np.nan)
-        self.inputs[name_in]["filtered_trends_for_learning"] = np.zeros(n_in)
-
-        for key in ["inputs", "trends"]:
-            if f"filtered_{key}_for_learning" not in self.history.keys():
-                self.history[f"filtered_{key}_for_learning"] = dict()
-            self.history[f"filtered_{key}_for_learning"][name_in] = list()
-
         if self.normalize_weights_divisively:
+            name_in = input_layer.name  # type: ignore[attr-defined]
             self.update_weights(
                 filter_key="I", lr=0
             )  # normalize weights only (no update)
             self.inputs[name_in]["w_init"] = copy.deepcopy(self.inputs[name_in]["w"])
 
-    def save_to_history(self):
-        """Save the current state of the layer to the history including the filtered
-        input and trend data used for learning."
-        """
-
-        super().save_to_history()
-
-        for name, input_layer in self.inputs.items():
-            for key in ["inputs", "trends"]:
-                self.history[f"filtered_{key}_for_learning"][name].append(
-                    input_layer[f"filtered_{key}_for_learning"].tolist()
-                )
-
     def get_regularization_alpha(self, alpha=None):
-        """Returns the regularization factor for the Hebbian update.
+        """
+        self.get_regularization_alpha()
+
+        Obtain the regularization factor for the Hebbian update.
 
         Args:
         - alpha (float): Regularization factor. If None, the regularization attribute
-        - or a default value are used. Default is None.
+            or a default value are used. Default is None.
 
         Returns:
         - alpha (float): Regularization factor.
@@ -1064,6 +1135,22 @@ class HebbianLayer(LearnLayer):
 
         return alpha
 
+    def save_to_history(self):
+        """
+        self.save_to_history()
+
+        Save the current state of the layer to the history including the filtered
+        input and trend data used for learning.
+        """
+
+        super().save_to_history()
+
+        for name, input_layer in self.inputs.items():
+            for key in ["inputs", "trends"]:
+                self.history[f"filtered_{key}_for_learning"][name].append(
+                    input_layer[f"filtered_{key}_for_learning"].tolist()
+                )
+
     def update_weights(
         self,
         filter_key: str = "filtered_inputs_for_learning",
@@ -1077,23 +1164,26 @@ class HebbianLayer(LearnLayer):
         ]
         | None
     ):
-        """Update the weights of the layer.
+        """
+        self.update_weights()
+
+        Update the weights of the layer.
 
         Args:
         - filter_key (str, optional): Key of the input to use for a weight update.
             Default is "filtered_inputs_for_learning".
-        - O (np.ndarray, optional): Output values to use instead of targets or layer
+        - O (1D np.ndarray, optional): Output values to use instead of targets or layer
             firingrates. Default is None.
-        - lr (np.ndarray or float, optional): Learning rate. Default is None.
+        - lr (1D np.ndarray or float, optional): Learning rate, optionally per layer
+            neuron. Default is None.
         - calculate_only (bool, optional): If True, the update is only calculated and
             returned, but not applied. Default is False.
 
         Returns:
         - if calculate_only:
-            ws_delta (list): List of weight updates [O x I_i, ...]
-            b_delta (np.ndarray or None): Bias updates, if applicable.
-        - else:
-           (None)
+            ws_delta (list[2D np.ndarray]): List of weight updates, each
+                with shape (O, I_i)
+            b_delta (1D np.ndarray or None): Bias updates, if applicable.
         """
 
         if O is None:
@@ -1155,30 +1245,50 @@ class HebbianLayer(LearnLayer):
             filter_key="filtered_inputs_for_learning",
         )
 
-        super().update()
-
-        if self.learn:
-            self.update_weights(filter_key="filtered_inputs_for_learning")
-
-        return
+        super().update(filter_key="filtered_inputs_for_learning")
 
 
 class BTSPLayer(HebbianLayer):
-    """This trained class defines a population of neurons that tune their activity
-    through Hebbian learning with BTSP.
-    This class is a subclass of Neurons() and inherits its properties/plotting
-    functions.
+    """
+    BTSPLayer
 
-    Must be initialised with an Agent, and a "params" dictionary, including input
-    layers.
+    Class extending HebbianLayer. Defines a population of neurons that tune their
+    weights through Hebbian learning with BTSP.
 
-    List of functions:
-        • get_state()
-        • set_learn()
-        • add_input()
-        • update()
-        • plot_rate_map()
-        • plot_loss()
+    Must be initialised with an Agent. A parameters dictionary can also be passed at
+    initialisation, with, for example, input layers.
+
+    default_params = {
+        "n": 10,
+        "name": "BTSPLayer",
+        "BTSP_filter_tau": 4,
+        "BTSP_trend_tau": None,
+        "post_BTSP_filter_tau": "half",
+        "post_BTSP_trend_tau": None,
+        "BTSP_lr_fact": 300,
+        "single_BTSP": False,
+        "BTSP_distance_prop": None,  # None to remove constraint
+    }
+
+    List of properties (in addition to HebbianLayer properties):
+        • self.BTSP_learn
+
+    List of methods (in addition to HebbianLayer methods):
+        • self.set_BTSP_learn()
+        • self.add_input()
+        • self.save_to_history()
+        • self.log_num_steps_to_apply_BTSP()
+        • self.update_BTSP_buffer()
+        • self.reset_BTSP_buffer()
+        • self.compute_BTSP_update()
+        • self.check_apply_update_for_BTSP()
+        • self.update_for_BTSP()
+        • self.update()
+        • self.plot_filtered_for_BTSP()
+        • self.plot_BTSP_ramp()
+        • self.add_BTSP_markers_to_plots()
+        • self.plot_rate_map()
+        • self.plot_rate_timeseries()
     """
 
     default_params = {
@@ -1199,11 +1309,27 @@ class BTSPLayer(HebbianLayer):
     fixed_params = dict()
 
     def __init__(self, Agent: "ratinabox.Agent", params: dict[str, Any] = dict()):
-        """Initialise BTSPLayer().
+        """
+        BTSPLayer(Agent)
+
+        Initialise a layer that can learn weight updates using BTSP. BTSP variables are
+        added to the history.
+
+        Attributes:
+        - BTSP_buffer (dict): Buffer for BTSP updates, with keys and values:
+            - num_steps (1D np.ndarray): Number of steps to apply BTSP.
+            - pre_ws_delta (None or list): Weight updates before BTSP.
+                List of weight updates, each with shape (O, I_i)
+            - pre_b_delta (1D np.ndarray): Bias updates before BTSP.
+            - ws_delta (None or list): Weight updates after BTSP.
+                List of weight updates, each with shape (O, I_i)
+        - last_BTSP_pos (list): Last position at which a BTSP event occurred.
+        - last_BTSP_step (int): Last step at which a BTSP event occurred.
+        - num_BTSP_to_date (int): Number of BTSP events to date.
 
         Args:
-        - Agent (Agent): Agent object.
-        - params (dict, optional). Default is dict().
+        - Agent (agent.ResetableAgent): Associated agent.
+        - params (dict, optional): Neuron layer parameters. Default is dict().
         """
 
         self.Agent = Agent
@@ -1243,7 +1369,10 @@ class BTSPLayer(HebbianLayer):
 
     @property
     def BTSP_learn(self) -> bool:
-        """Returns the BTSP learning state of the layer.
+        """
+        self.BTSP_learn
+
+        Obtain the BTSP learning state of the layer.
 
         Returns:
         - (bool): BTSP learning state.
@@ -1251,25 +1380,23 @@ class BTSPLayer(HebbianLayer):
 
         return self._BTSP_learn
 
-    def set_BTSP_learn(self, learn=None):
-        """Set the layer to learn using BTSP.
-
-        Args:
-        - learn (bool, optional): Whether the layer should learn using BTSP. If None,
-            the current setting remains unchanged. Default is None.
-        """
-
-        if learn is None:
-            pass
-        else:
-            self._BTSP_learn = learn
-        return
-
     def _init_post_BTSP_filters(self):
-        """Initialise the filter parameters used to compute learning updates for
+        """
+        self._init_post_BTSP_filters()
+
+        Initialise the filter parameters used to compute learning updates for
         inputs activated after a BTSP (post BTSP kernel).
 
-        Also adds relevant keys to the history dictionary.
+        Also adds post BTSP filter keys to the history dictionary.
+
+        Attributes:
+        - filtered_post_BTSP_activity (1D np.ndarray): Filtered post BTSP activity.
+        - filtered_post_BTSP_activity_trend (1D np.ndarray): Filtered post BTSP
+            activity trend.
+        - post_BTSP_exp_AUC (float): Exponential AUC of the post BTSP filter.
+        - post_BTSP_filter_tau (float): Time constant of the post BTSP filter.
+        - post_BTSP_trend_tau (float): Time constant of the post BTSP trend.
+        - pre_BTSP_exp_AUC (float): Exponential AUC of the pre BTSP filter.
         """
 
         if isinstance(self.post_BTSP_filter_tau, str):
@@ -1302,15 +1429,35 @@ class BTSPLayer(HebbianLayer):
             if key not in self.history.keys():
                 self.history[key] = list()
 
+    def set_BTSP_learn(self, learn=None):
+        """
+        self.set_BTSP_learn()
+
+        Set the layer to learn using BTSP.
+
+        Args:
+        - learn (bool, optional): Whether the layer should learn using BTSP. If None,
+            the current setting remains unchanged. Default is None.
+        """
+
+        if learn is None:
+            pass
+        else:
+            self._BTSP_learn = learn
+        return
+
     def add_input(self, input_layer: riab_neurons.Neurons, **kwargs):
-        """Adds an input layer, and initialises variables storing BTSP filtered inputs,
+        """
+        self.add_input(input_layer)
+
+        Adds an input layer, and initialises variables storing BTSP filtered inputs,
         as well as corresponding history keys.
 
         Args:
         - input_layer (riab_neurons.Neurons): Neuron layer to add as input layer
 
         Keyword args:
-        - **kwargs: Keyword arguments for FeedForwardLayer.add_input().
+        - **kwargs: Keyword arguments passed to FeedForwardLayer.add_input().
         """
         super().add_input(input_layer, **kwargs)
 
@@ -1325,7 +1472,10 @@ class BTSPLayer(HebbianLayer):
             self.history[f"filtered_{key}_for_BTSP"][name_in] = list()
 
     def save_to_history(self):
-        """Save the current state of the layer to the history, including the filtered
+        """
+        self.save_to_history()
+
+        Save the current state of the layer to the history, including the filtered
         input and trend data used for learning
         """
 
@@ -1342,12 +1492,14 @@ class BTSPLayer(HebbianLayer):
                 )
 
     def log_num_steps_to_apply_BTSP(self, last=False):
-        """Log the number of steps required to apply BTSP.
+        """
+        self.log_num_steps_to_apply_BTSP()
+
+        Log the number of steps required to apply BTSP.
 
         Args:
         - last (bool, optional): Whether to log only the last recorded BTSP event
-            applied.
-            Default is False.
+            applied. Default is False.
         """
 
         if len(self.history["num_steps_to_apply_BTSP"]) == 0:
@@ -1373,68 +1525,18 @@ class BTSPLayer(HebbianLayer):
 
         print(log_str)
 
-    def check_apply_BTSP_update(self):
-        """
-        Checks whether BTSP updates should be applied. If so, computes and applies the
-        updates.
-        """
-
-        apply_BTSP = self.BTSP_buffer[
-            "num_steps"
-        ] * ~self.filtered_post_BTSP_activity.astype(bool)
-
-        if not apply_BTSP.any():
-            return
-
-        ws = [
-            input_layer["w"]
-            for name, input_layer in self.inputs.items()
-            if name not in self.input_layers_with_no_learning
-        ]
-
-        b = self.biases if self.trainable_biases else None
-
-        for i in np.where(apply_BTSP)[0]:
-            self.history["num_steps_to_apply_BTSP"].append(
-                int(self.BTSP_buffer["num_steps"][i])
-            )
-            self.BTSP_buffer["num_steps"][i] = 0
-
-            for w in range(len(ws)):
-                w_update = (
-                    self.BTSP_buffer["pre_ws_delta"][w][i] * self.pre_BTSP_exp_AUC
-                    + self.BTSP_buffer["ws_delta"][w][i]
-                ) / (self.pre_BTSP_exp_AUC + self.post_BTSP_exp_AUC)
-                ws[w][i] += w_update
-
-                self.BTSP_buffer["pre_ws_delta"][w][i] = 0
-                self.BTSP_buffer["ws_delta"][w][i] = 0
-
-            if self.trainable_biases:
-                b_update = (
-                    self.BTSP_buffer["pre_b_delta"][i]
-                    + self.BTSP_buffer["b_delta"][i] * self.post_BTSP_factor  # type: ignore[attr-defined]
-                ) / 2
-                b[i] += b_update
-
-                self.BTSP_buffer["pre_b_delta"][i] = 0
-                self.BTSP_buffer["b_delta"][i] = 0
-
-        if self.apply_Ojas_rule:  # type: ignore[attr-defined]
-            raise NotImplementedError("Oja's rule not implemented for BTSP.")
-        elif self.normalize_weights_divisively:  # type: ignore[attr-defined]
-            self.update_weights(
-                filter_key="I", lr=0
-            )  # normalize weights only (no update)
-
     def update_BTSP_buffer(self, ws_delta, b_delta=None, pre=False):
         """
+        self.update_BTSP_buffer(ws_delta)
+
         Update the BTSP buffer.
 
         Args:
-        - ws_delta (list): List of weight updates [O x I_i, ...]
-        - b_delta (np.ndarray or None): Bias updates, if applicable.
-        - pre (bool): Whether the update is pre or post BTSP.
+        - ws_delta (list): List of weight updates, each with shape (O, I_i).
+        - b_delta (1D np.ndarray, optional): Bias updates, if applicable.
+            Default is None.
+        - pre (bool, optional): Whether the update is pre or post BTSP.
+            Default is False.
         """
 
         pre_str = "pre_" if pre else ""
@@ -1453,13 +1555,221 @@ class BTSPLayer(HebbianLayer):
             self.BTSP_buffer["num_steps"][updated] + 1
         )
 
-    def BTSP_update(
-        self, BTSP_targets: list | np.ndarray[tuple[int], np.dtype[np.int64]] = list()
-    ):
-        """Update the layer using BTSP.
+    def reset_BTSP_buffer(self, i=0):
+        """
+        self.reset_BTSP_buffer()
+
+        Reset the BTSP buffer for a specific neuron.
 
         Args:
-        - BTSP_targets (list or 1D array, optional): List of BTSP targets.
+        - i (int, optional): Index of the neuron to reset. Default is 0.
+        """
+
+        ws = [
+            input_layer["w"]
+            for name, input_layer in self.inputs.items()
+            if name not in self.input_layers_with_no_learning
+        ]
+
+        for w in range(len(ws)):
+            self.BTSP_buffer["pre_ws_delta"][w][i] = 0
+            self.BTSP_buffer["ws_delta"][w][i] = 0
+
+        if self.trainable_biases:
+            self.BTSP_buffer["pre_b_delta"][i] = 0
+            self.BTSP_buffer["b_delta"][i] = 0
+
+        self.BTSP_buffer["num_steps"][i] = 0
+
+    def compute_BTSP_update(self, i=0, w=0, bias=False):
+        """
+        self.compute_BTSP_update()
+
+        Compute the BTSP update for a specific neuron and weight.
+
+        Args:
+        - i (int, optional): Index of the neuron. Default is 0.
+        - w (int, optional): Index of the weight. Default is 0.
+        - bias (bool, optional): Whether the update is for a bias instead of a weight.
+            Default is False.
+
+        Returns:
+        - BTSP_update (float or 1D np.ndarray): Computed BTSP update.
+        """
+
+        if bias:
+            BTSP_update = (
+                self.BTSP_buffer["pre_b_delta"][i]
+                + self.BTSP_buffer["b_delta"][i] * self.post_BTSP_factor  # type: ignore[attr-defined]
+            ) / 2
+
+        else:
+            BTSP_update = (
+                self.BTSP_buffer["pre_ws_delta"][w][i] * self.pre_BTSP_exp_AUC
+                + self.BTSP_buffer["ws_delta"][w][i]
+            ) / (self.pre_BTSP_exp_AUC + self.post_BTSP_exp_AUC)
+
+        return BTSP_update
+
+    def check_apply_update_for_BTSP(self):
+        """
+        self.check_apply_update_for_BTSP()
+
+        Checks whether BTSP updates should be applied. If so, computes and applies the
+        updates.
+        """
+
+        apply_BTSP = self.BTSP_buffer[
+            "num_steps"
+        ] * ~self.filtered_post_BTSP_activity.astype(bool)
+
+        if not apply_BTSP.any():
+            return
+
+        ws = [
+            input_layer["w"]
+            for name, input_layer in self.inputs.items()
+            if name not in self.input_layers_with_no_learning
+        ]
+        b = self.biases if self.trainable_biases else None
+
+        for i in np.where(apply_BTSP)[0]:
+            for w in range(len(ws)):
+                w_update = self.compute_BTSP_update(i=i, w=w)
+                ws[w][i] += w_update
+
+            if self.trainable_biases:
+                b_update = self.compute_BTSP_update(i=i, bias=True)
+                b[i] += b_update
+
+            self.history["num_steps_to_apply_BTSP"].append(
+                int(self.BTSP_buffer["num_steps"][i])
+            )
+
+            self.reset_BTSP_buffer(i=i)
+
+        if self.apply_Ojas_rule:  # type: ignore[attr-defined]
+            raise NotImplementedError("Oja's rule not implemented for BTSP.")
+        elif self.normalize_weights_divisively:  # type: ignore[attr-defined]
+            self.update_weights(
+                filter_key="I", lr=0
+            )  # normalize weights only (no learning update)
+
+    def get_BTSP_targets(
+        self,
+        BTSP_targets: list | np.ndarray[tuple[int], np.dtype[np.int64]] | None = list(),
+    ):
+        """
+        self.get_BTSP_targets()
+
+        Obtain the BTSP targets.
+
+        Args:
+        - BTSP_targets (list or 1D np.ndarray, optional): BTSP targets
+            (neuron indices). Default is list().
+
+        Returns:
+        - BTSP_targets (1D np.ndarray): BTSP targets (neuron indices).
+        """
+
+        if BTSP_targets is None:
+            BTSP_targets = list()
+
+        BTSP_targets = np.asarray(BTSP_targets)
+
+        if len(BTSP_targets) and BTSP_targets.max() >= self.n:
+            raise ValueError("BTSP target neuron index out of range.")
+
+        return BTSP_targets
+
+    def update_from_BTSP_targets(
+        self,
+        BTSP_targets: list | np.ndarray[tuple[int], np.dtype[np.int64]] = list(),
+    ):
+        """
+        self.update_from_BTSP_targets()
+
+        Update the layer using BTSP targets, if provided.
+
+        Args:
+        - BTSP_targets (list or 1D np.ndarray, optional): List of BTSP targets.
+            Default is list().
+        """
+
+        BTSP_targets = self.get_BTSP_targets(BTSP_targets)
+
+        if not self.BTSP_learn or len(BTSP_targets) == 0:
+            return
+
+        # cannot trigger a new BTSP event while one is on-going for the same neuron
+        BTSP_targets = np.asarray(
+            [targ for targ in BTSP_targets if not self.BTSP_buffer["num_steps"][targ]]
+        )
+
+        if self.single_BTSP:  # type: ignore[attr-defined]
+            keep_BTSP_targets = np.asarray(
+                [targ for targ in BTSP_targets if self.num_BTSP_to_date[targ] == 0]
+            )
+
+        elif self.BTSP_distance_prop is not None:  # type: ignore[attr-defined]
+            keep_BTSP_targets = list()
+            for targ in BTSP_targets:
+                closest_recent_BTSP_event = self.last_BTSP_pos[targ]
+                if closest_recent_BTSP_event is None:
+                    keep_BTSP_targets.append(targ)
+                else:
+                    dist = np.sqrt(
+                        np.sum(
+                            (self.Agent.pos - closest_recent_BTSP_event) ** 2,
+                            axis=-1,
+                        )
+                    )
+                    if dist > self.BTSP_distance_prop * self.Agent.dt:
+                        keep_BTSP_targets.append(targ)
+
+            keep_BTSP_targets = np.asarray(keep_BTSP_targets)
+
+        else:
+            keep_BTSP_targets = np.asarray(BTSP_targets)
+
+        if len(keep_BTSP_targets) == 0:
+            return
+
+        BTSP_targets = keep_BTSP_targets
+
+        lr = np.zeros(self.n)  # type: ignore[attr-defined]
+        lr[np.asarray(BTSP_targets)] = self.BTSP_lr_fact * self.lr  # type: ignore[attr-defined]
+
+        self.num_BTSP_to_date[np.asarray(BTSP_targets)] += +1
+        self.last_BTSP_step[np.asarray(BTSP_targets)] = self.num_steps_total - 1
+        for targ in BTSP_targets:
+            self.last_BTSP_pos[targ] = self.Agent.pos
+
+        ws_delta, b_delta = self.update_weights(
+            filter_key="filtered_inputs_for_BTSP", lr=lr, calculate_only=True
+        )
+        self.update_BTSP_buffer(ws_delta, b_delta, pre=True)
+        self.BTSP_buffer["num_steps"][BTSP_targets] = 1
+
+        self.history["BTSP_events"].append(
+            self.num_steps_total - 1
+        )  # recorded after update
+        self.history["BTSP_targets"].append(BTSP_targets)
+
+        self.filtered_post_BTSP_activity[BTSP_targets] = self.firingrate[BTSP_targets]
+
+        return
+
+    def update_for_BTSP(
+        self, BTSP_targets: list | np.ndarray[tuple[int], np.dtype[np.int64]] = list()
+    ):
+        """
+        self.update_for_BTSP()
+
+        Update the layer using BTSP, optionally using BTSP targets.
+
+        Args:
+        - BTSP_targets (list or 1D np.ndarray, optional): List of BTSP targets.
             Default is list().
         """
 
@@ -1480,69 +1790,7 @@ class BTSPLayer(HebbianLayer):
             self.update_BTSP_buffer(ws_delta, b_delta, pre=False)
 
         # main BTSP update
-        if self.BTSP_learn and BTSP_targets is not None and len(BTSP_targets):
-            # cannot trigger a new BTSP event while one is on-going for the same neuron
-            BTSP_targets = np.asarray(
-                [
-                    targ
-                    for targ in BTSP_targets
-                    if not self.BTSP_buffer["num_steps"][targ]
-                ]
-            )
-
-            if self.single_BTSP:  # type: ignore[attr-defined]
-                keep_BTSP_targets = np.asarray(
-                    [targ for targ in BTSP_targets if self.num_BTSP_to_date[targ] == 0]
-                )
-
-            elif self.BTSP_distance_prop is not None:  # type: ignore[attr-defined]
-                keep_BTSP_targets = list()
-                for targ in BTSP_targets:
-                    closest_recent_BTSP_event = self.last_BTSP_pos[targ]
-                    if closest_recent_BTSP_event is None:
-                        keep_BTSP_targets.append(targ)
-                    else:
-                        dist = np.sqrt(
-                            np.sum(
-                               (self.Agent.pos - closest_recent_BTSP_event) ** 2,
-                                axis=-1,
-                            )
-                        )
-                        if dist > self.BTSP_distance_prop * self.Agent.dt:
-                            keep_BTSP_targets.append(targ)
-
-                keep_BTSP_targets = np.asarray(keep_BTSP_targets)
-
-            else:
-                keep_BTSP_targets = np.asarray(BTSP_targets)
-
-            if len(keep_BTSP_targets) == 0:
-                return
-
-            BTSP_targets = keep_BTSP_targets
-
-            lr = np.zeros(self.n)  # type: ignore[attr-defined]
-            lr[np.asarray(BTSP_targets)] = self.BTSP_lr_fact * self.lr  # type: ignore[attr-defined]
-
-            self.num_BTSP_to_date[np.asarray(BTSP_targets)] += +1
-            self.last_BTSP_step[np.asarray(BTSP_targets)] = self.num_steps_total - 1
-            for targ in BTSP_targets:
-                self.last_BTSP_pos[targ] = self.Agent.pos
-
-            ws_delta, b_delta = self.update_weights(
-                filter_key="filtered_inputs_for_BTSP", lr=lr, calculate_only=True
-            )
-            self.update_BTSP_buffer(ws_delta, b_delta, pre=True)
-            self.BTSP_buffer["num_steps"][BTSP_targets] = 1
-
-            self.history["BTSP_events"].append(
-                self.num_steps_total - 1
-            )  # recorded after update
-            self.history["BTSP_targets"].append(BTSP_targets)
-
-            self.filtered_post_BTSP_activity[BTSP_targets] = self.firingrate[
-                BTSP_targets
-            ]
+        self.update_from_BTSP_targets(BTSP_targets)
 
         # calculate filtered signal for post BTSP
         X_t1, T_t1 = util.get_filtered_signal(
@@ -1558,22 +1806,25 @@ class BTSPLayer(HebbianLayer):
         self.filtered_post_BTSP_activity = X_t1
         self.filtered_post_BTSP_activity_trend = T_t1
 
-        self.check_apply_BTSP_update()
+        self.check_apply_update_for_BTSP()
 
     def update(
         self, BTSP_targets: list | np.ndarray[tuple[int], np.dtype[np.int64]] = list()
     ):
-        """Update the layer, i.e. calculate the new firing rates and update the
+        """
+        self.update()
+
+        Update the layer, i.e. calculate the new firing rates and update the
         weights and biases, if applicable.
 
         Args:
-        - BTSP_targets (list or 1D array, optional): List of BTSP targets to use in
+        - BTSP_targets (list or 1D np.ndarray, optional): List of BTSP targets to use in
             BTSP update. Default is list().
         """
 
         super().update()
 
-        self.BTSP_update(BTSP_targets)
+        self.update_for_BTSP(BTSP_targets)
 
         return
 
@@ -1588,18 +1839,21 @@ class BTSPLayer(HebbianLayer):
         autosave: bool | None = None,
         **kwargs,
     ) -> plt.Axes:
-        """Plot the filtered inputs of the layer.
+        """
+        self.plot_filtered_for_BTSP()
+
+        Plot the filtered inputs of the layer.
 
         Args:
-        - input_layer_name (str): Name of the input layer to plot.
+        - input_layer_name (str, optional): Name of the input layer to plot.
         - t_start (float, optional): Start time of the plot. Default is None.
         - title (str, optional): Title of the plot. Default is None.
-        - chosen_neurons (str, int, list or 1D array, optional): Neurons to plot.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
             Default is "all".
         - autosave (bool, optional): Whether to save the figure. Default is None.
 
         Keyword args:
-        - **kwargs: Keyword arguments for SmoothFeedForwardLayer.plot_filtered().
+        - **kwargs: Keyword arguments passed to HebbianLayer.plot_filtered().
 
         Returns:
         - sub_ax (plt.Axes): Subplot with filtered inputs or firingrates for BTSP
@@ -1613,8 +1867,8 @@ class BTSPLayer(HebbianLayer):
         else:
             if input_layer_name not in self.inputs.keys():
                 raise ValueError(
-                    f"Input layer '{input_layer_name}' not found. Available input layers: "
-                    f"{self.inputs.keys()}."
+                    f"Input layer '{input_layer_name}' not found. Available input "
+                    f"layers: {self.inputs.keys()}."
                 )
             layer = self.inputs[input_layer_name]["layer"]
             filter_key = "filtered_inputs_for_BTSP"
@@ -1675,227 +1929,23 @@ class BTSPLayer(HebbianLayer):
 
         return sub_ax
 
-    def _add_BTSP_markers_to_plots(
-        self,
-        ax: np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]] | plt.Axes,
-        t_start: float | None = None,
-        t_end: float | None = None,
-        chosen_neurons: (
-            str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
-        ) = "all",
-        timeseries: bool = False,
-        color: str | None = None,
-    ):
-        """Adds BTSP markers to timeseries or rate map plots.
-
-        Args:
-        - ax (np.ndarray or plt.Axes): Subplot or array of subplots. Single subplot
-            if plotting timeseries or 1D rate map. Otherwise, an array of subplots.
-        - t_start (float, optional): Start time of the plot. Default is None.
-        - t_end (float, optional): End time. Default is None.
-        - chosen_neurons (str, int, list or 1D array, optional): Neurons to plot.
-            Default is "all".
-        - timeseries (bool, optional): Whether the plot is timeseries (map expected, otherwise).
-        - color (str, optional): Color of the BTSP markers. Default is None.
-        """
-
-        if color is None:
-            color = self.color or "C1"
-
-        chosen_neurons = self.return_list_of_neurons(chosen_neurons=chosen_neurons)  # type: ignore[arg-type]
-        num_neurons = len(chosen_neurons)
-
-        t, startid, _ = self.get_plotting_times(t_start=t_start, t_end=t_end)
-
-        BTSP_events = np.asarray(self.history["BTSP_events"]) - startid
-        BTSP_targets = self.history["BTSP_targets"]
-
-        ax = np.asarray(ax).ravel()
-        if timeseries or self.Agent.Environment.dimensionality == "1D":
-            if len(ax) != 1:
-                raise ValueError(
-                    "Only one axis expected for timeseries or 1D rate map."
-                )
-            sub_ax = ax
-
-        for event, targets in zip(BTSP_events, BTSP_targets):
-            for target in targets:
-                if event >= len(t):
-                    continue
-                elif event < 0:
-                    alpha = 0.6
-                else:
-                    alpha = 1.0
-
-                if target not in chosen_neurons:
-                    continue
-
-                i = chosen_neurons.index(target)
-
-                if timeseries:
-                    if event < 0:
-                        continue
-                    x_pos = t[event] / 60
-                    line_sep = (sub_ax.get_ylim()[1] - 1) / num_neurons
-                    y_pos = 1 + line_sep * i + line_sep * 0.7
-                    pos = [x_pos, y_pos]
-                else:
-                    pos = self.Agent.history["pos"][event + startid]
-                    if self.Agent.Environment.dimensionality == "1D":
-                        line_sep = (sub_ax.get_ylim()[1] - 1) / num_neurons
-                        y_pos = 1 + line_sep * i + line_sep * 0.7
-                        pos = pos + [y_pos]
-                    else:
-                        sub_ax = ax[i]
-
-                sub_ax.scatter(
-                    *pos,
-                    color=color,
-                    alpha=alpha,
-                    marker=markers.MarkerStyle("x"),
-                    s=10,
-                )
-
-    def plot_rate_map(
-        self,
-        t_start: float | None = None,
-        t_end: float | None = None,
-        chosen_neurons: (
-            str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
-        ) = "all",
-        mark_BTSP: bool = True,
-        ax: np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]] | None = None,
-        autosave: bool | None = None,
-        **kwargs,
-    ) -> plt.Axes | np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
-        """Plot the rate map of the layer, ensuring no more than 20 columns
-        are plotted.
-
-        See FeedForwardLayer.plot_rate_map() for more information.
-
-        Args:
-        - t_start (float, optional): Start time of the plot. Default is None.
-        - t_end (float, optional): End time. Default is None.
-        - chosen_neurons (str, int, list or 1D array, optional): Neurons to plot.
-            Default is "all".
-        - mark_BTSP (bool, optional): Whether to include BTSP markers
-        - ax (np.ndarray or plt.Axes): Subplot or array of subplots. Single subplot
-            if plotting timeseries or 1D rate map. Otherwise, an array of subplots.
-        - autosave (bool, optional): Whether to autosave the figure. Default is None.
-
-        Keyword args:
-        - **kwargs: Keyword arguments for FeedForwardLayer.plot_rate_map().
-
-        Returns:
-        - ax (np.ndarray or plt.Axes): Subplot or array of subplots with rate maps
-            plotted.
-        """
-
-        ax = super().plot_rate_map(
-            t_start=t_start,
-            t_end=t_end,
-            chosen_neurons=chosen_neurons,
-            ax=ax,
-            autosave=False,
-            **kwargs,
-        )
-
-        if mark_BTSP:
-            self._add_BTSP_markers_to_plots(
-                ax=ax,
-                t_start=t_start,
-                t_end=t_end,
-                chosen_neurons=chosen_neurons,
-                timeseries=False,
-            )
-
-        fig = ax[0].figure
-        util.save_figure(fig, f"{self.name}_ratemaps", save=autosave)  # type: ignore[attr-defined]
-
-        return ax
-
-    def plot_rate_timeseries(
-        self,
-        t_start: float | None = None,
-        t_end: float | None = None,
-        sub_ax: plt.Axes | None = None,
-        chosen_neurons: (
-            str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
-        ) = "all",
-        xlim: tuple[float, float] | None = None,
-        color: str | None = None,
-        mark_BTSP: bool = True,
-        autosave: bool | None = None,
-        **kwargs,
-    ) -> plt.Axes:
-        """Plot the rate timeseries of the layer.
-
-        See SmoothFeedForwardLayer.plot_rate_timeseries() for more information.
-
-        Args:
-        - t_start (float, optional): Start time of the plot. Default is None.
-        - t_end (float, optional): End time. Default is None.
-        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
-            created. Default is None.
-        - chosen_neurons (str, int, list or 1D array, optional): Neurons to plot.
-            Default is "all".
-        - xlim (tuple[float, float], optional): The x limits of the plot. Default is None.
-        - color (str, optional): The color of the plot. Default is None.
-        - mark_BTSP (bool, optional): Whether to include BTSP markers
-        - autosave (bool, optional): Whether to autosave the figure. Default is None.
-
-        Keyword args:
-        - **kwargs: Keyword arguments for SmoothFeedForwardLayer.plot_rate_timeseries().
-
-        Returns:
-        - sub_ax (plt.Axes): Subplot withtimeseries plotted.
-        """
-
-        sub_ax = super().plot_rate_timeseries(
-            t_start=t_start,
-            t_end=t_end,
-            sub_ax=sub_ax,
-            chosen_neurons=chosen_neurons,
-            xlim=xlim,
-            color=color,
-            autosave=False,
-            **kwargs,
-        )
-
-        if xlim is not None:
-            xlim = sub_ax.get_xlim()
-
-        if mark_BTSP:
-            self._add_BTSP_markers_to_plots(
-                ax=sub_ax,
-                t_start=t_start,
-                t_end=t_end,
-                chosen_neurons=chosen_neurons,
-                timeseries=True,
-                color=color,
-            )
-
-        if xlim is not None:
-            sub_ax.set_xlim(xlim)
-
-        fig = sub_ax.figure
-        util.save_figure(fig, f"{self.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
-
-        return sub_ax
-
     def plot_BTSP_ramp(self, axes=None, plot_events=True, autosave=None):
-        """Plot the BTSP ramp variables of the layer.
+        """
+        self.plot_BTSP_ramp()
+
+        Plot the BTSP ramp variables of the layer.
 
         Args:
         - axes (1 or 2D np.ndarray): Array of subplots to plot on,
             with shape (2, 1) or (2, ). Default is None.
         - plot_events (bool, optional): Whether to plot BTSP event markers.
             Default is True.
-        - autosave (bool, optional): Whether to autosave the figure. Default is None.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the global
+        autosave setting for ratinabox is used. Default is None.
 
         Returns:
         - axes (1 or 2D np.ndarray): Array of subplots with BTSP ramp variables plotted.
-            If input 'axes' was None, shape is 2D (2, 1).
+            If input axes was None, shape is 2D (2, 1).
         """
 
         if axes is None:
@@ -1986,9 +2036,247 @@ class BTSPLayer(HebbianLayer):
 
         return axes
 
+    def add_BTSP_markers_to_plots(
+        self,
+        ax: np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]] | plt.Axes,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        chosen_neurons: (
+            str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
+        ) = "all",
+        timeseries: bool = False,
+        color: str | None = None,
+    ):
+        """
+        self.add_BTSP_markers_to_plots()
 
-class NMDACurrent:
-    """Class for the NMDA current."""
+        Adds BTSP markers to timeseries or rate map plots.
+
+        Args:
+        - ax (np.ndarray or plt.Axes): Subplot or array of subplots. Single subplot
+            if plotting timeseries or 1D rate map. Otherwise, an array of subplots.
+        - t_start (float, optional): Start time of the plot. Default is None.
+        - t_end (float, optional): End time. Default is None.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
+            Default is "all".
+        - timeseries (bool, optional): Whether the plot is timeseries (map expected,
+            otherwise). Default is False.
+        - color (str, optional): Color of the BTSP markers. Default is None.
+        """
+
+        if color is None:
+            color = self.color or "C1"
+
+        chosen_neurons = self.return_list_of_neurons(chosen_neurons=chosen_neurons)  # type: ignore[arg-type]
+        num_neurons = len(chosen_neurons)
+
+        t, startid, _ = self.get_plotting_times(t_start=t_start, t_end=t_end)
+
+        BTSP_events = np.asarray(self.history["BTSP_events"]) - startid
+        BTSP_targets = self.history["BTSP_targets"]
+
+        ax = np.asarray(ax).ravel()
+        if timeseries or self.Agent.Environment.dimensionality == "1D":
+            if len(ax) != 1:
+                raise ValueError(
+                    "Only one axis expected for timeseries or 1D rate map."
+                )
+            sub_ax = ax
+
+        for event, targets in zip(BTSP_events, BTSP_targets):
+            for target in targets:
+                if event >= len(t):
+                    continue
+                elif event < 0:
+                    alpha = 0.6
+                else:
+                    alpha = 1.0
+
+                if target not in chosen_neurons:
+                    continue
+
+                i = chosen_neurons.index(target)
+
+                if timeseries:
+                    if event < 0:
+                        continue
+                    x_pos = t[event] / 60
+                    line_sep = (sub_ax.get_ylim()[1] - 1) / num_neurons
+                    y_pos = 1 + line_sep * i + line_sep * 0.7
+                    pos = [x_pos, y_pos]
+                else:
+                    pos = self.Agent.history["pos"][event + startid]
+                    if self.Agent.Environment.dimensionality == "1D":
+                        line_sep = (sub_ax.get_ylim()[1] - 1) / num_neurons
+                        y_pos = 1 + line_sep * i + line_sep * 0.7
+                        pos = pos + [y_pos]
+                    else:
+                        sub_ax = ax[i]
+
+                sub_ax.scatter(
+                    *pos,
+                    color=color,
+                    alpha=alpha,
+                    marker=markers.MarkerStyle("x"),
+                    s=10,
+                )
+
+    def plot_rate_map(
+        self,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        chosen_neurons: (
+            str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
+        ) = "all",
+        mark_BTSP: bool = True,
+        ax: np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]] | None = None,
+        autosave: bool | None = None,
+        **kwargs,
+    ) -> plt.Axes | np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
+        """
+        self.plot_rate_map()
+
+        Plot the rate map of the layer, ensuring no more than 20 columns are plotted.
+
+        See SmoothFeedForwardLayer.plot_rate_map() for more information.
+
+        Args:
+        - t_start (float, optional): Start time of the plot. Default is None.
+        - t_end (float, optional): End time. Default is None.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
+            Default is "all".
+        - mark_BTSP (bool, optional): Whether to include BTSP markers
+        - ax (np.ndarray or plt.Axes): Subplot or array of subplots. Single subplot
+            if plotting timeseries or 1D rate map. Otherwise, an array of subplots.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the global
+        autosave setting for ratinabox is used. Default is None.
+
+        Keyword args:
+        - **kwargs: Keyword arguments passed to FeedForwardLayer.plot_rate_map().
+
+        Returns:
+        - ax (np.ndarray or plt.Axes): Subplot or array of subplots with rate maps
+            plotted.
+        """
+
+        ax_out = super().plot_rate_map(
+            t_start=t_start,
+            t_end=t_end,
+            chosen_neurons=chosen_neurons,
+            ax=ax,
+            autosave=False,
+            **kwargs,
+        )
+
+        if ax is not None:
+            ax = ax_out
+
+        if mark_BTSP:
+            self.add_BTSP_markers_to_plots(
+                ax=ax,
+                t_start=t_start,
+                t_end=t_end,
+                chosen_neurons=chosen_neurons,
+                timeseries=False,
+            )
+
+        fig = ax[0].figure
+        util.save_figure(fig, f"{self.name}_ratemaps", save=autosave)  # type: ignore[attr-defined]
+
+        return ax
+
+    def plot_rate_timeseries(
+        self,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        sub_ax: plt.Axes | None = None,
+        chosen_neurons: (
+            str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
+        ) = "all",
+        xlim: tuple[float, float] | None = None,
+        color: str | None = None,
+        mark_BTSP: bool = True,
+        autosave: bool | None = None,
+        **kwargs,
+    ) -> plt.Axes:
+        """
+        self.plot_rate_timeseries()
+
+        Plot the rate timeseries of the layer.
+
+        See SmoothFeedForwardLayer.plot_rate_timeseries() for more information.
+
+        Args:
+        - t_start (float, optional): Start time of the plot. Default is None.
+        - t_end (float, optional): End time. Default is None.
+        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
+            created. Default is None.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
+            Default is "all".
+        - xlim (tuple[float, float], optional): The x limits of the plot. Default is None.
+        - color (str, optional): The color of the plot. Default is None.
+        - mark_BTSP (bool, optional): Whether to include BTSP markers
+        - autosave (bool, optional): Whether to autosave the figure. If None, the global
+        autosave setting for ratinabox is used. Default is None.
+
+        Keyword args:
+        - **kwargs: Keyword arguments passed to SmoothFeedForwardLayer.plot_rate_timeseries().
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot withtimeseries plotted.
+        """
+
+        sub_ax = super().plot_rate_timeseries(
+            t_start=t_start,
+            t_end=t_end,
+            sub_ax=sub_ax,
+            chosen_neurons=chosen_neurons,
+            xlim=xlim,
+            color=color,
+            autosave=False,
+            **kwargs,
+        )
+
+        if mark_BTSP:
+            self.add_BTSP_markers_to_plots(
+                ax=sub_ax,
+                t_start=t_start,
+                t_end=t_end,
+                chosen_neurons=chosen_neurons,
+                timeseries=True,
+                color=color,
+            )
+
+        if xlim is not None:
+            sub_ax.set_xlim(xlim)
+
+        fig = sub_ax.figure
+        util.save_figure(fig, f"{self.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
+
+        return sub_ax
+
+
+class NMDACurrent(object):
+    """
+    NMDACurrent()
+
+    Class implementing an NMDA current to a layer of neurons
+
+    Must be initialised with an NMDA input layer that the current will apply to.
+
+    List of properties:
+        • self.activation_params
+        • self.activation_function
+        • self.binding_params
+        • self.binding_function
+
+    List of methods:
+        • self.get_decay()
+        • self.get_state()
+        • self.update()
+        • self.plot_function()
+        • self.plot_timeseries()
+    """
 
     def __init__(
         self,
@@ -2003,7 +2291,20 @@ class NMDACurrent:
         color="C5",
         save_history=True,
     ):
-        """Initialise an NMDA current object.
+        """
+        NMDACurrent(InputLayer)
+
+        Initialise an NMDA current object, with a history.
+
+        Attributes (in addition to the arguments below):
+        - self.n (int): Number of neurons in the input layer.
+        - self.firingrate (1D np.ndarray): Firing rates of the neurons.
+        - self.NMDA_receptor_binding (1D np.ndarray): NMDA receptor binding levels
+            for each neuron.
+        - self.NMDA_receptor_activation (1D np.ndarray): NMDA receptor activation
+            levels for each neuron.
+        - self.NMDA_receptor_desensitization (1D np.ndarray): NMDA receptor
+            desensitization levels for each neuron.
 
         Args:
         - InputLayer (NMDALayer): Input layer.
@@ -2064,10 +2365,18 @@ class NMDACurrent:
 
     @property
     def activation_params(self):
-        """Parameters for the activation function of the NMDA current.
+        """
+        self.activation_params
+
+        Obtain the parameters for the activation function of the NMDA current.
 
         Returns:
-        - (dict): Activation parameters.
+        - (dict): Activation parameters, with keys and values:
+            - "activation" (str): Type of activation function.
+            - "min_fr" (float): Minimum firing rate.
+            - "max_fr" (float): Maximum firing rate.
+            - "width_x" (float): Width of the sigmoid.
+            - "mid_x" (float): Midpoint of the sigmoid.
         """
 
         self._activation_params = {
@@ -2082,7 +2391,10 @@ class NMDACurrent:
 
     @property
     def activation_function(self):
-        """Activation function of the NMDA current.
+        """
+        self.activation_function
+
+        Obtain the activation function of the NMDA current.
 
         Returns:
         - (function): Activation function.
@@ -2094,10 +2406,17 @@ class NMDACurrent:
 
     @property
     def binding_params(self):
-        """Parameters of the NMDA current's NMDA receptor binding function.
+        """
+        self.binding_params
+
+        Obtain the parameters of the NMDA current's NMDA receptor binding function.
 
         Returns:
-        - (dict): NMDA receptor binding parameters.
+        - (dict): NMDA receptor binding parameters with keys and values:
+            - "activation" (str): Type of activation function.
+            - "min_fr" (float): Minimum firing rate.
+            - "max_fr" (float): Maximum firing rate.
+            - "width_x" (float): Width of the sigmoid.
         """
 
         self._binding_params = {
@@ -2112,7 +2431,10 @@ class NMDACurrent:
 
     @property
     def binding_function(self):
-        """NMDA receptor binding function for the NMDA current.
+        """
+        self.binding_function
+
+        Obtain NMDA receptor binding function for the NMDA current.
 
         Returns:
         - (function): NMDA receptor binding function.
@@ -2121,54 +2443,16 @@ class NMDACurrent:
             x, deriv=deriv, other_args=self.binding_params
         )
 
-    def plot_function(
-        self,
-        param_type="binding",
-        min_input_fr=-15,
-        max_input_fr=15,
-        sub_ax=None,
-    ):
-        """Plot the NMDA receptor binding or activation function.
-
-        Args:
-        - param_type (str, optional): Type of function to plot. Default is "binding".
-        - min_input_fr (int, optional): Minimum input firing rate to plot from.
-            Default is -15.
-        - max_input_fr (int, optional): Maximum input firing rate to plot from.
-            Default is 15.
-        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
-            created. Default is None.
-
-        Returns:
-        - sub_ax (plt.Axes): Subplot with binding or activation function plotted.
-        """
-
-        if param_type == "binding":
-            function = self.binding_function
-        elif param_type == "activation":
-            function = self.activation_function
-        else:
-            raise ValueError(f"Unknown param type {param_type}")
-
-        sub_ax = plot_util.plot_activation_function(
-            function,
-            min_input_fr=min_input_fr,
-            max_input_fr=max_input_fr,
-            sub_ax=sub_ax,
-            color=self.color,
-        )
-
-        sub_ax.set_title(f"{param_type.capitalize()} function")
-
-        return sub_ax
-
     def get_decay(self, decay_type: str = "activation", dt: float | None = None):
-        """Get the decay factor for the NMDA receptor activation or desensitization.
+        """
+        self.get_decay()
+
+        Obtain the decay factor for the NMDA receptor activation or desensitization.
 
         Args:
         - decay_type (str, optional): Type of decay
            ("activation" or "desensitization"). Default is "activation".
-        - dt (float, optional): Time step. If None, agent timestep is used.
+        - dt (float, optional): Time step. If None, agent time step is used.
             Default is None.
 
         Returns:
@@ -2194,9 +2478,12 @@ class NMDACurrent:
         evaluate_at="last",
         return_all: bool = False,
         dt: float | None = None,
-        **kwargs,
+        **catchall_kwargs,
     ):
-        """Get the state of the NMDA current.
+        """
+        self.get_state()
+
+        Obtain the state of the NMDA current.
 
         Args:
         - evaluate_at (str, optional): Whether to evaluate the state at the last time
@@ -2206,14 +2493,16 @@ class NMDACurrent:
         - dt (float, optional): Time step. Default is None.
 
         Keyword args:
-        - **kwargs: Keyword arguments (ignored)
+        - **catchall_kwargs: Ignored keyword arguments (hacky!)
 
         Returns:
-        - current (1D np.ndarray): State of the NMDA current.
-            if return_all:
-        - receptor_binding (1D np.ndarray): Receptor binding.
-        - receptor_activation (1D np.ndarray): Receptor activation.
-        - receptor_desensitization (1D np.ndarray): Receptor desensitization.
+        - current (1D np.ndarray): State of the NMDA current for each neuron.
+
+        and, if return_all:
+        - receptor_binding (1D np.ndarray): Receptor binding for each neuron.
+        - receptor_activation (1D np.ndarray): Receptor activation for each neuron.
+        - receptor_desensitization (1D np.ndarray): Receptor desensitization for each
+            neuron.
         """
 
         receptor_binding = self.binding_function(
@@ -2273,14 +2562,24 @@ class NMDACurrent:
             return current
 
     def update(self):
-        """Update the NMDA current."""
+        """
+        self.update()
 
-       (
-            current,
-            receptor_binding,
-            receptor_activation,
-            receptor_desensitization,
-        ) = self.get_state(evaluate_at="last", return_all=True)
+        Update the NMDA current, and history.
+
+        Attributes:
+        - self.firingrate (1D np.ndarray): Firing rates of the neurons.
+        - self.NMDA_receptor_binding (1D np.ndarray): NMDA receptor binding levels
+            for each neuron.
+        - self.NMDA_receptor_activation (1D np.ndarray): NMDA receptor activation
+            levels for each neuron.
+        - self.NMDA_receptor_desensitization (1D np.ndarray): NMDA receptor
+            desensitization levels for each neuron.
+        """
+
+        current, receptor_binding, receptor_activation, receptor_desensitization = (
+            self.get_state(evaluate_at="last", return_all=True)
+        )
 
         self.firingrate = current
         self.NMDA_receptor_binding = receptor_binding
@@ -2296,6 +2595,50 @@ class NMDACurrent:
                 receptor_desensitization.tolist()
             )
 
+    def plot_function(
+        self,
+        param_type="binding",
+        min_input_fr=-15,
+        max_input_fr=15,
+        sub_ax=None,
+    ):
+        """
+        self.plot_function()
+
+        Plot the NMDA receptor binding or activation function.
+
+        Args:
+        - param_type (str, optional): Type of function to plot. Default is "binding".
+        - min_input_fr (int, optional): Minimum input firing rate to plot from.
+            Default is -15.
+        - max_input_fr (int, optional): Maximum input firing rate to plot from.
+            Default is 15.
+        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
+            created. Default is None.
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with binding or activation function plotted.
+        """
+
+        if param_type == "binding":
+            function = self.binding_function
+        elif param_type == "activation":
+            function = self.activation_function
+        else:
+            raise ValueError(f"Unknown param type {param_type}")
+
+        sub_ax = plot_util.plot_activation_function(
+            function,
+            min_input_fr=min_input_fr,
+            max_input_fr=max_input_fr,
+            sub_ax=sub_ax,
+            color=self.color,
+        )
+
+        sub_ax.set_title(f"{param_type.capitalize()} function")
+
+        return sub_ax
+
     def plot_timeseries(
         self,
         t_start: float | None = None,
@@ -2304,29 +2647,32 @@ class NMDACurrent:
         chosen_neurons: (
             str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
         ) = "all",
-        axes: plt.Axes | np.ndarray[plt.Axes, np.dtype[np.int64]] | None = None,
+        ax: plt.Axes | np.ndarray[plt.Axes, np.dtype[np.int64]] | None = None,
         autosave: bool | None = None,
         **kwargs,
     ) -> np.ndarray[plt.Axes, np.dtype[np.int64]]:
-        """Plot the current, and optionally the receptor binding, activation and
+        """
+        self.plot_timeseries()
+
+        Plot the current, and optionally the receptor binding, activation and
         densensitization time series.
 
         Args:
-        - input_layer_name (str): Name of the input layer to plot.
+        - input_layer_name (str): Name of the input layer to plot. Default is None.
         - t_start (float, optional): Start time of the plot. Default is None.
         - title (str, optional): Title of the plot. Default is None.
         - datatypes (list or str, optional): Type of data to plot. Default is "current".
-        - chosen_neurons (str, int, list or 1D array, optional): Neurons to plot.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
             Default is "all".
-        - axes (plt.Axes or np.ndarray): Subplot of array of subplots to plot on
+        - ax (plt.Axes or np.ndarray): Subplot of array of subplots to plot on
            (one per datatype). Default is None.
         - autosave (bool, optional): Whether to save the plot. Default is None.
 
         Keyword args:
-        - **kwargs: Keyword arguments for plot_util.plot_timeseries().
+        - **kwargs: Keyword arguments passed to plot_util.plot_timeseries().
 
         Returns:
-        - axes (plt.Axes or np.ndarray): Subplot or array of subplots with timeseries
+        - ax (plt.Axes or np.ndarray): Subplot or array of subplots with timeseries
             plotted (one for each datatype).
         """
 
@@ -2349,10 +2695,10 @@ class NMDACurrent:
             self.InputLayer.return_list_of_neurons(chosen_neurons=chosen_neurons)  # type: ignore[arg-type, attr-defined]
         )
 
-        if axes is None:
+        if ax is None:
             n = len(chosen_neurons)
             height = max([1, min(n / 12.0 + 5 / 3, 8)]) * len(datatypes)
-            _, axes = plt.subplots(
+            _, ax = plt.subplots(
                 len(datatypes),
                 1,
                 sharex=True,
@@ -2361,7 +2707,7 @@ class NMDACurrent:
                 squeeze=False,
             )  # type: ignore[assignment]
 
-        axis1D = np.asarray(axes).ravel()
+        axis1D = np.asarray(ax).ravel()
 
         if len(axis1D) != len(datatypes):
             raise ValueError(
@@ -2394,25 +2740,35 @@ class NMDACurrent:
 
         util.save_figure(fig, f"{self.name}_NMDA_current_traces", save=autosave)  # type: ignore[attr-defined]
 
-        return axes
+        return ax
 
 
 class NMDALayer(BTSPLayer):
-    """This trained class defines a population of neurons that tune their activity
-    through Hebbian learning with BTSP and NMDA receptors.
-    This class is a subclass of Neurons() and inherits its properties/plotting
-    functions.
+    """
+    NMDALayer()
 
-    Must be initialised with an Agent, and a "params" dictionary, including input
-    layers.
+    Class extending BTSPLayer. Defines a population of neurons that tune their
+    weights through Hebbian learning with BTSP and NMDA receptors.
 
-    List of functions:
-        • get_state()
-        • set_learn()
-        • add_input()
-        • update()
-        • plot_rate_map()
-        • plot_loss()
+    Must be initialised with an Agent. A parameters dictionary can also be passed at
+    initialisation, with, for example, input layers.
+
+    default_params = {
+        "n": 10,
+        "name": "NMDALayer",
+        "NMDA_activation_threshold": 2,
+        "BTSP_induction_threshold": 8,
+        "BTSP_plateau_length": 0.12,  # seconds
+    }
+
+    See BTSPLayer for properties.
+
+    List of methods (in addition to BTSPLayer methods):
+        • self.save_to_history()
+        • self.get_incoming_firingrates()
+        • self.get_BTSP_targets()
+        • self.update()
+        • self.plot_BTSP_ramp()
     """
 
     default_params = {
@@ -2429,13 +2785,22 @@ class NMDALayer(BTSPLayer):
     fixed_params = dict()
 
     def __init__(self, Agent: "ratinabox.Agent", params: dict[str, Any] = dict()):
-        """Initialise HebbianLayer(), takes as input a parameter
+        """
+        NMDALayer(Agent)
+
+        Initialise HebbianLayer(), takes as input a parameter
         dictionary. Any values not provided by the params dictionary are
         taken from a default dictionary below.
 
+        Initialise a layer that can learn weight updates using BTSP and NMDA receptors.
+        BTSP ramp is added to the history.
+
+        Attributes:
+        - BTSP_ramp (1D np.ndarray): BTSP ramp of the layer.
+
         Args:
-        - params (dict, optional). Default is dict().
-        """
+        - Agent (agent.ResetableAgent): Associated agent.
+        - params (dict, optional): Neuron layer parameters. Default is dict()."""
 
         self.Agent = Agent
 
@@ -2453,6 +2818,16 @@ class NMDALayer(BTSPLayer):
         self.history["BTSP_ramp"] = list()
 
     def _check_BTSP_plateau_length(self):
+        """
+        self._check_BTSP_plateau_length()
+
+        Check that the BTSP plateau length is a multiple of the Agent's time step.
+
+        Raises:
+        - ValueError: If the BTSP plateau length is not a multiple of the Agent's
+            time step.
+        """
+
         num_steps = self.BTSP_plateau_length / self.Agent.dt
         if not np.isclose(num_steps, int(num_steps)):
             low_plateau_length = np.floor(num_steps) * self.Agent.dt
@@ -2463,7 +2838,14 @@ class NMDALayer(BTSPLayer):
             )
 
     def _add_NMDA_current(self):
-        """Set the NMDA intermediate layer."""
+        """
+        self._add_NMDA_current()
+
+        Add the NMDA current as a non-learning input to the layer.
+
+        Returns:
+        - NMDACurrent (NMDACurrent): NMDA current object.
+        """
 
         self.NMDACurrent = NMDACurrent(
             self,
@@ -2479,8 +2861,10 @@ class NMDALayer(BTSPLayer):
         return self.NMDACurrent
 
     def save_to_history(self):
-        """Save the current state of the layer to the history, including the
-        loss, if applicable.
+        """
+        self.save_to_history()
+
+        Save the current state of the layer to the history, including the BTSP ramp.
         """
 
         super().save_to_history()
@@ -2490,21 +2874,26 @@ class NMDALayer(BTSPLayer):
         return
 
     def get_incoming_firingrates(self, evaluate_at="last", **kwargs):
-        """Returns the firing rates coming into each neuron. By default this layer uses
-        the last savedfrom its input layers. Alternatively evaluate_at and
-        kwargs can be set to be anything else which will just be passed to the input
-        layer for evaluation.
+        """
+        self.get_incoming_firingrates()
 
-        Once the firing rate of the input layers is established these are multiplied by
-        a normalized weight matrix of 1s.
+        Obtain the firing rates coming into each of the layer's neurons. By default
+        this method uses the last saved firing rates from its input layers.
 
-        NOTE: This means that pre-synaptic plasticity is ignored, and all input neurons
-        are equipotent. May have to be rethought.
+        Alternatively 'evaluate_at' and 'kwargs' can be used to retrieve a different
+        state from the input layers.
+
+        NOTE: This means that pre-synaptic weights is ignored, and all input neurons
+        are equipotent. May have to be rethought?
 
         Args:
         - evaluate_at (str, optional). Default is 'last'.
+
+        Keyword args:
+        - **kwargs: Keyword arguments passed to each input layer's get_state() method.
+
         Returns:
-           (1D np.ndarray): Array of firing rates
+        - V (1D np.ndarray): Sum of input firing rates reaching each layer neuron.
         """
 
         n = int(self.n)  # type: ignore[attr-defined]
@@ -2529,31 +2918,22 @@ class NMDALayer(BTSPLayer):
 
         return V
 
-    def BTSP_update(
-        self, BTSP_targets: list | np.ndarray[tuple[int], np.dtype[np.int64]] = list()
+    def get_BTSP_targets(
+        self,
+        BTSP_targets: list | np.ndarray[tuple[int], np.dtype[np.int64]] | None = list(),
     ):
-        """Update the layer using BTSP.
+        """
+        self.get_BTSP_targets()
+
+        Obtain the BTSP targets for the layer.
 
         Args:
-        - BTSP_targets (list or 1D array, optional): List of BTSP targets.
-            Default is list().
+        - BTSP_targets (list or 1D np.ndarray, optional): BTSP targets
+            (neuron indices). Default is list().
+
+        Returns:
+        - BTSP_targets (1D np.ndarray): BTSP targets (neuron indices).
         """
-
-        self.update_filtered_inputs(
-            self.BTSP_filter_tau,
-            self.BTSP_trend_tau,
-            filter_key="filtered_inputs_for_BTSP",
-        )
-
-        if self.BTSP_buffer["num_steps"].any():
-            # compute post BTSP update
-            ws_delta, b_delta = self.update_weights(
-                filter_key="I",  # where most recent, unfiltered input is stored
-                O=self.filtered_post_BTSP_activity,
-                lr=self.BTSP_lr_fact * self.lr,
-                calculate_only=True,
-            )
-            self.update_BTSP_buffer(ws_delta, b_delta, pre=False)
 
         above_threshold = self.firingrate > self.BTSP_induction_threshold  # type: ignore[attr-defined]
         self.BTSP_ramp[~above_threshold] = 0
@@ -2563,104 +2943,33 @@ class NMDALayer(BTSPLayer):
             0
         ]  # only once per plateau
 
-        # main BTSP update
-        if self.BTSP_learn and len(BTSP_targets):
-            # cannot trigger a new BTSP event while one is on-going for the same neuron
-            BTSP_targets = np.asarray(
-                [
-                    targ
-                    for targ in BTSP_targets
-                    if not self.BTSP_buffer["num_steps"][targ]
-                ]
-            )
-
-            if self.single_BTSP:
-                keep_BTSP_targets = np.asarray(
-                    [targ for targ in BTSP_targets if self.num_BTSP_to_date[targ] == 0]
-                )
-
-            else:
-                keep_BTSP_targets = list()
-                for targ in BTSP_targets:
-                    closest_recent_BTSP_event = self.last_BTSP_pos[targ]
-                    if (
-                        self.BTSP_distance_prop is None
-                        or closest_recent_BTSP_event is None
-                    ):
-                        keep_BTSP_targets.append(targ)
-                    else:
-                        dist = np.sqrt(
-                            np.sum(
-                               (self.Agent.pos - closest_recent_BTSP_event) ** 2,
-                                axis=-1,
-                            )
-                        )
-                        if dist > self.BTSP_distance_prop * self.Agent.dt:
-                            keep_BTSP_targets.append(targ)
-
-                keep_BTSP_targets = np.asarray(keep_BTSP_targets)
-
-            if len(keep_BTSP_targets) == 0:
-                return
-            BTSP_targets = keep_BTSP_targets
-
-            lr = np.full(self.n, self.lr)  # type: ignore[attr-defined]
-            lr[np.asarray(BTSP_targets)] *= self.BTSP_lr_fact  # type: ignore[attr-defined]
-
-            self.num_BTSP_to_date[np.asarray(BTSP_targets)] += +1
-            self.last_BTSP_step[np.asarray(BTSP_targets)] = self.num_steps_total - 1
-            for targ in BTSP_targets:
-                self.last_BTSP_pos[targ] = self.Agent.pos
-
-            ws_delta, b_delta = self.update_weights(
-                filter_key="filtered_inputs_for_BTSP", lr=lr, calculate_only=True
-            )
-            self.update_BTSP_buffer(ws_delta, b_delta, pre=True)
-            self.BTSP_buffer["num_steps"][BTSP_targets] = 1
-
-            self.history["BTSP_events"].append(
-                self.num_steps_total - 1
-            )  # recorded after update
-            self.history["BTSP_targets"].append(BTSP_targets.tolist())
-
-            self.filtered_post_BTSP_activity[BTSP_targets] = self.firingrate[
-                BTSP_targets
-            ]
-
-        # calculate filtered signal for post BTSP
-        X_t1, T_t1 = util.get_filtered_signal(
-            np.zeros_like(self.filtered_post_BTSP_activity),
-            X_t=self.filtered_post_BTSP_activity,
-            T_t=self.filtered_post_BTSP_activity_trend,
-            filter_tau=self.post_BTSP_filter_tau,
-            trend_tau=self.post_BTSP_trend_tau,
-            dt=self.Agent.dt,
-            atol=1e-6,
-        )
-
-        self.filtered_post_BTSP_activity = X_t1
-        self.filtered_post_BTSP_activity_trend = T_t1
-
-        self.check_apply_BTSP_update()
+        return BTSP_targets
 
     def update(self):
-        self.NMDACurrent.update()
+        """
+        self.update()
 
+        Update the layer, starting with the input NMDA current.
+        """
+
+        self.NMDACurrent.update()
         super().update()
 
-        return
-
     def plot_BTSP_ramp(self, axes=None, autosave=None):
-        """Plot the BTSP ramp of the layer.
+        """
+        self.plot_BTSP_ramp()
+
+        Plot the BTSP ramp of the layer.
 
         Args:
         - axes (1 or 2D np.ndarray): Array of subplots to plot on,
             with shape (3, 1) or (3, ). Default is None.
-        - autosave (bool, optional): Whether to autosave the figure. Default is None.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the global
+        autosave setting for ratinabox is used. Default is None.
 
         Returns:
         - axes (1 or 2D np.ndarray): Array of subplots with BTSP ramp variables plotted.
-            If input 'axes' was None, shape is 2D (3, 1).
+            If input axes was None, shape is 2D (3, 1).
         """
 
         if axes is None:

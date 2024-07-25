@@ -13,6 +13,12 @@ if TYPE_CHECKING:
 
 
 class TorchNeuronModel(torch.nn.Module):
+    """
+    TorchNeuronModel()
+
+    Torch neuron model that updates weights of a ratinabox neuron layer.
+    """
+
     def __init__(
         self,
         seq_neuron_layers: list["trainable_neurons.TorchLayer"],
@@ -20,6 +26,28 @@ class TorchNeuronModel(torch.nn.Module):
         lr: float = 1e-4,
         RMSprop: bool = False,
     ):
+        """
+        TorchNeuronModel()
+
+        Initialise a PyTorch model with a sequence of TorchLayer objects.
+
+        Attributes:
+        - Agent (agent.ResetableAgent): Associated agent.
+        - criterion (torch.nn.MSELoss): Mean squared error loss.
+        - optimizer (torch.optim.Adam or torch.optim.RMSprop): Optimizer.
+        - device (str): Device to run model on.
+        - seq_layers (list[torch.nn.Module]): List of PyTorch layers.
+        - seq_neuron_layers (list[trainable_neurons.TorchLayer]):
+            List of torch neuron layers. Must feed into each other sequentially.
+
+        Args:
+        - seq_neuron_layers (list[neurons.TorchLayer]): List of TorchLayer objects.
+        - device (str, optional): Device to run model on. Default is "cpu".
+        - lr (float, optional): Learning rate. Default is 1e-4.
+        - RMSprop (bool, optional): If True, use RMSprop optimizer instead of Adam.
+            Default is False.
+        """
+
         super().__init__()
 
         self.seq_neuron_layers = (
@@ -39,19 +67,64 @@ class TorchNeuronModel(torch.nn.Module):
         optim_type = torch.optim.RMSprop if RMSprop else torch.optim.Adam
         self.optimizer = optim_type(self.parameters(), lr=lr)
 
+        self.Agent = self.seq_neuron_layers[0].Agent
+
     def set_device(self, device: str = "cpu"):
+        """
+        self.set_device()
+
+        Set the device to run the model on.
+
+        Attributes:
+        - device (str): Device to run model on.
+
+        Args:
+        - device (str, optional): Device to run model on. Default is "cpu".
+        """
+
         self.device = device
         self.to(self.device)
 
     def forward(self, x: torch.Tensor):
+        """
+        self.forward()
+
+        Run a forward pass through the model.
+
+        Args:
+        - x (3D torch.Tensor): Input tensor with shape
+            (time_steps, input_size).
+
+        Returns:
+        - x (torch.Tensor): Output tensor with shape
+            (time_steps, output_size).
+        """
+
         for layer in self.seq_layers:
             x = layer(x)
         return x
 
     def get_X(self, n):
+        """
+        self.get_X(n)
+
+        Get the input tensor for the last n time steps.
+
+        Args:
+        - n (int): Number of time steps (most recent) to get.
+
+        Raises:
+        - ValueError: If fewer than n steps recorded.
+
+        Returns:
+        - X (torch.Tensor): Input tensor with shape
+            (n time steps, input layer size).
+        """
+
         if len(self.seq_neuron_layers[0].history["firingrate"]) < n:
             raise ValueError(f"Fewer than {n} steps recorded.")
 
+        # shape (time, number of input neurons)
         X = torch.Tensor(
             np.concatenate(
                 [
@@ -65,6 +138,22 @@ class TorchNeuronModel(torch.nn.Module):
         return X
 
     def get_y(self, n: int) -> torch.Tensor:
+        """
+        self.get_y(n)
+
+        Get the output tensor for the last n time steps.
+
+        Args:
+        - n (int): Number of time steps (most recent) to get.
+
+        Raises:
+        - ValueError: If fewer than n steps recorded.
+
+        Returns:
+        - y (torch.Tensor): Output tensor with shape
+            (n time steps, output layer size).
+        """
+
         if len(self.seq_neuron_layers[0].history["firingrate"]) < n:
             raise ValueError(f"Fewer than {n} steps recorded.")
 
@@ -73,6 +162,17 @@ class TorchNeuronModel(torch.nn.Module):
         return y
 
     def run_train(self, n: int):
+        """
+        self.run_train(n)
+
+        Run a training step, computing the loss and updating the weights.
+
+        Args:
+        - n (int): Number of time steps (most recent) to train on.
+
+        Returns:
+        - (float): Loss value.
+        """
         self.train()
 
         pred = self(self.get_X(n).to(self.device))
@@ -92,8 +192,35 @@ class TorchNeuronModel(torch.nn.Module):
 
         return loss.item()
 
+    def run_eval(self, n: int):
+        """
+        self.run_eval(n)
+
+        Evaluate the model, computing the loss.
+
+        Args:
+        - n (int): Number of time steps (most recent) to use to evaluate model.
+
+        Returns:
+        - (float): Loss value.
+        """
+
+        self.eval()
+
+        with torch.no_grad():
+            pred = self(self.get_X(n).to(self.device))
+            loss = self.criterion(pred, self.get_y(n).to(self.device))
+
+        return loss.item()
+
 
 class PredHPC(torch.nn.Module):
+    """
+    PredHPC()
+
+    Torch predictive HPC model.
+    """
+
     def __init__(
         self,
         input_size: int = 300,
@@ -102,19 +229,28 @@ class PredHPC(torch.nn.Module):
         pred_size: int = 2,
         summary: bool = True,
     ):
-        """_summary_
+        """
+        PredHPC()
+
+        Initialise a predictive HPC model.
+
+        Attributes:
+        - CA1_dend_decoder (torch.nn.Linear): CA1 dendrite to predictive output layer.
+        - DG_CA3_to_CA1_soma (torch.nn.Linear): DG/CA3 to CA1 soma layer.
+        - input_size (int): Number of inputs to the network.
+        - input_to_CA1_dend (torch.nn.Linear): Input to CA1 dendrite layer.
+        - input_to_DG_CA3 (torch.nn.Linear): Input to DG/CA3 layer.
+        - n_CA1 (int): Size of the CA1 layer.
+        - n_DG_CA3 (int): Size of the DG/CA3 layer.
+        - pred_size (int): Size of the predictive output layer.
 
         Args:
-        - input_size (int, optional): Number of inputs to the network.
-            Default is 300.
-        - n_DG_CA3 (int, optional): Size of the DG/CA3 layer.
-            Default is 100.
-        - n_CA1 (int, optional): Size of the CA1 layer.
-            Default is 100.
-        - pred_size (int, optional): Size of the predictive output layer.
-            Default is 2.
-        - summary (bool, optional): If True, a summary of the model is
-            printed to the console. Default is True.
+        - input_size (int, optional): Number of inputs to the network. Default is 300.
+        - n_DG_CA3 (int, optional): Size of the DG/CA3 layer. Default is 100.
+        - n_CA1 (int, optional): Size of the CA1 layer. Default is 100.
+        - pred_size (int, optional): Size of the predictive output layer. Default is 2.
+        - summary (bool, optional): If True, a summary of the model is printed to the
+            console. Default is True.
         """
 
         super().__init__()
@@ -138,14 +274,17 @@ class PredHPC(torch.nn.Module):
         if summary:
             tsummary(self, (input_size,))
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward definition
+    def forward(self, X: torch.Tensor) -> torch.Tensor:
+        """
+        self.forward(X)
+
+        Run a forward pass through the model.
 
         Args:
-        - x (2D Torch tensor): Input activations with shape (batch_size, input_size).
+        - X (2D Torch tensor): Input activations with shape (batch_size, input_size).
 
         Returns:
-        - prediction (2D Torch tensor): Model predictions with shape
+        - predictions (2D Torch tensor): Model predictions with shape
             (batch_size, pred_size).
         """
 
@@ -154,15 +293,15 @@ class PredHPC(torch.nn.Module):
         # self.CA1_soma = F.relu(self.DG_CA3_to_CA1_soma(self.DG_CA3)) # dead-end for now
 
         # direct path
-        self.CA1_dend = F.relu(self.input_to_CA1_dend(x))
+        self.CA1_dend = F.relu(self.input_to_CA1_dend(X))
 
         # convergence
         self.CA1 = self.CA1_dend
 
         # prediction
-        prediction = F.relu(self.CA1_dend_decoder(self.CA1))
+        predictions = F.relu(self.CA1_dend_decoder(self.CA1))
 
-        return prediction
+        return predictions
 
 
 def save_model(
@@ -171,7 +310,10 @@ def save_model(
     epoch_n: int = 0,
     optimizer: torch.optim.Optimizer | None = None,
 ):
-    """Saves model.
+    """
+    save_model(model)
+
+    Save model.
 
     Args:
     - model (torch.nn.Module): Torch model
@@ -194,18 +336,21 @@ def save_model(
 
 
 def load_model(model, filepath: str | Path = "model.pth.tar") -> dict:
-    """Loads model from path.
+    """
+    load_model(model)
+
+    Load model from path.
 
     Args:
     - model (torch.nn.Module): Torch model
-    - filepath (str, optional): Path to the stored model. Default is
+    - filepath (str or Path, optional): Path to the stored model. Default is
         "model.pth.tar".
 
     Raises:
-    - OSError: Filepath doesn't exist
+    - OSError: If filepath doesn't exist.
 
     Returns:
-    - checkpoint (dict): Checkpoint used to load model
+    - checkpoint (dict): Checkpoint dictionary with model stored under "state_dict".
     """
 
     if not Path(filepath).is_file():
@@ -226,7 +371,10 @@ def run_train(
     log_freq: int = 10,
     filepath: str | Path | None = None,
 ) -> dict[str, list]:
-    """Runs training epochs.
+    """
+    run_train(model, train_dl, val_dl)
+
+    Runs training epochs.
 
     Args:
     - model (torch.nn.Module): Model.
@@ -239,8 +387,10 @@ def run_train(
         if applicable. Default is None.
 
     Returns:
-    - history (dict): Dictionary storing 'epoch_n', 'train_loss' and
-        'val_loss' lists.
+    - history (dict): Dictionary with keys and values:
+        - "epoch_n" (list): Epoch numbers.
+        - "train_loss" (list): Train loss for each epoch.
+        - "val_loss" (list): Validation loss for each epoch.
     """
 
     criterion = torch.nn.MSELoss()
@@ -312,7 +462,10 @@ def run_train(
 def predict(
     model: torch.nn.Module, X: torch.Tensor
 ) -> np.ndarray[tuple[int, int], np.dtype[np.float64]]:
-    """Predict from inputs, using the model.
+    """
+    predict(model, X)
+
+    Predict from inputs, using provided model.
 
     Args:
     - model (torch.nn.Module): Model.
@@ -336,17 +489,25 @@ def get_prediction_step_idxs(
     ordered: bool = True,
     minimum_num_examples: int = 10,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Returns indices for training and validation sets.
+    """
+    get_prediction_step_idxs(n)
+
+    Obtain indices of training and validation sets for a specific number of prediction
+    steps.
 
     Args:
     - n (int): Number of examples.
-    - num_prediction_steps (int, optional): Number of prediction steps. Default is 1.
+    - num_prediction_steps (int, optional): Number of prediction steps for which to
+        get indices. Default is 1.
     - prop_val (float, optional): Proportion of examples to use for validation set.
         Default is 0.2.
     - ordered (bool, optional): Whether to use only the last examples for the
         validation set. Default is True.
     - minimum_num_examples (int, optional): Minimum number of examples to use for
         validation set.
+
+    Raises:
+    - ValueError: If validation set has fewer than minimum_num_examples examples.
 
     Returns:
     - training_idxs (torch.IntTensor): Indices for training set.
@@ -403,18 +564,21 @@ def get_indices(n: int, prop_val: float = 0.2, ordered: bool = True) -> tuple[
     np.ndarray[tuple[int], np.dtype[np.int64]],
     np.ndarray[tuple[int], np.dtype[np.int64]],
 ]:
-    """Returns indices for training and validation sets.
+    """
+    get_indices(n)
+
+    Obtain indices for training and validation sets.
 
     Args:
-    - n (int): Number of examples.
+    - n (int): Number of examples for which to obtain indices.
     - prop_val (float, optional): Proportion of examples to use for validation set.
         Default is 0.2.
     - ordered (bool, optional): Whether to use only the last examples for the
         validation set. Default is True.
 
     Returns:
-    - training_idxs (1D np.ndarray): Indices for training set
-    - validation_idxs (1D np.ndarray): Indices for validation set
+    - training_idxs (1D np.ndarray): Indices for training set.
+    - validation_idxs (1D np.ndarray): Indices for validation set.
     """
 
     num_val = int(n * prop_val)
@@ -440,12 +604,15 @@ def get_dataloaders(
     prop_val: float = 0.2,
     ordered: bool = True,
 ) -> tuple[DataLoader, DataLoader]:
-    """Returns dataloaders built from the input data.
+    """
+    get_dataloaders(X)
+
+    Obtain dataloaders from input data.
 
     Args:
     - X (2D Tensor): Model input with shape (num_examples, input_size).
     - y (2D Tensor, optional): Model target with shape (num_examples, output_size).
-        Default is None.
+        If None, no y data is included in the dataloaders. Default is None.
     - num_prediction_steps (int, optional): Number of steps ahead to predict, if y is
         None. Default is 0.
     - batch_size (int, optional): Batch size. Default is 32.
@@ -454,7 +621,7 @@ def get_dataloaders(
         Default is True.
 
     Raises:
-    - ValueError: If X and y do not have the same length
+    - ValueError: If X and y do not have the same length.
 
     Returns:
     - train_dl (torch.util.data.DataLoader): Training dataloader.

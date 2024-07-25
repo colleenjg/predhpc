@@ -24,23 +24,34 @@ def plot_T_maze(
     method: str = "groundtruth",
     autosave: bool | None = None,
 ):
-    """Plot the T-maze environment, agent trajectory, CA3 place cell locations and
-    CA1 rate map.
+    """
+    plot_T_maze(Ag, CA3_PCs, CA1s_or_ECs)
+
+    Plot the T-maze environment:
+        (1) Agent trajectories,
+        (2) CA3 place cell locations, and
+        (3) CA1 or EC overlayed rate maps.
 
     Args:
     - Ag (agent.Agent): Agent.
     - CA3_PCs (riab_neurons.PlaceCells): CA3 place cells.
-    - CA1s (learning_neurons.BTSPLayer): CA1s layer.
+    - CA1s_or_ECs (learning_neurons.BTSPLayer or object_neurons.ObjectCells):
+        CA1s layer.
+    - method (str, optional): Method to use for plotting the CA1 rate map. Default
+        is "groundtruth".
+    - autosave (bool, optional): Whether to autosave the figure. If None, the global
+        autosave setting for ratinabox is used. Default is None.
 
     Returns:
-    - axes (2D np.ndarray): Array of subplots with T maze information plotted.
+    - axes (2D np.ndarray): Array of subplots with T maze information plotted, with
+        shape (3, 1). See description for details.
     """
 
     fig, axes = plt.subplots(ncols=3, figsize=(9, 3), squeeze=False)
     ax1D = np.asarray(axes).ravel()
 
     # Plot trajectories on T-maze
-    Ag.plot_trajectory(scale_cmap_per=False, ms_2D=5, alpha=0.3, sub_ax=ax1D[0])
+    Ag.plot_trajectories(scale_cmap_per=False, s_2D=5, alpha=0.3, sub_ax=ax1D[0])
     ax1D[0].set_title("Trajectories")
 
     # Plot CA3 place cell locations on T-maze
@@ -88,10 +99,13 @@ def plot_time_series_with_BTSP_events(
     CA1s: learning_neurons.BTSPLayer,
     sub_ax: plt.Axes | None = None,
 ) -> plt.Axes:
-    """Plot the time series of the CA1s layer with BTSP events marked.
+    """
+    plot_time_series_with_BTSP_events(CA1s)
+
+    Plot the time series of the CA1s layer with BTSP events marked.
 
     Args:
-    - CA1s (neurons.BTSPLayer): CA1s layer.
+    - CA1s (learning_neurons.BTSPLayer): CA1s layer.
     - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
         created. Default is None.
 
@@ -100,7 +114,7 @@ def plot_time_series_with_BTSP_events(
     """
 
     if sub_ax is None:
-        fig, sub_ax = plt.subplots(figsize=(6, 1.2**CA1s.n))
+        _, sub_ax = plt.subplots(figsize=(6, 1.2**CA1s.n))
 
     CA1s.plot_rate_timeseries(chosen_neurons="all", spikes=True, sub_ax=sub_ax)
     lo, hi = sub_ax.get_ylim()
@@ -158,29 +172,32 @@ def learn_T_maze_BTSP(
     riab_neurons.PlaceCells,
     learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer,
 ]:
-    """Run a T-maze learning experiment with BTSP learning.
+    """
+    learn_T_maze_BTSP()
+
+    Run a T-maze learning experiment with BTSP learning.
 
     Args:
-    - env_params (dict): Parameters for the environment. Default is None.
-    - agent_params (dict): Parameters for the agent. Default is None.
-    - CA3_PC_params (dict): Parameters for the CA3 place cells. Default is
+    - env_params (dict, optional): Parameters for the environment. Default is None.
+    - agent_params (dict, optional): Parameters for the agent. Default is None.
+    - CA3_PC_params (dict, optional): Parameters for the CA3 place cells. Default is
         None.
-    - CA1_params (dict): Parameters for the CA1 neurons. Default is None.
+    - CA1_params (dict, optional): Parameters for the CA1 neurons. Default is None.
     - num_rwd (int, optional): Target number of rewards to reach. Default is 200.
     - max_steps (int, optional): Maximum number of steps to run. Default is 10000.
     - weight_recording_freq (int, optional): Frequency at which to record weights.
         Default is 100.
     - use_Hebbian (bool, optional): Whether to use Hebbian learning. Default is False.
-    - BTSP_after_num_target_reaches (int, optional): Number of times to reach target before
-        enabling BTSP learning. Default is 2.
+    - BTSP_after_num_target_reaches (int, optional): Number of times to reach target
+        before enabling BTSP learning. Default is 2.
     - autosave (bool, optional): Whether to autosave. Default is None.
 
     Returns:
-    - Env (Environment): Environment
-    - Ag (Agent): Agent
-    - ECs (ObjectCells): EC cells
-    - CA3_PCs (PlaceCells): Place cell layer
-    - CA1s (BTSPLayer | TwoCompLayer): CA1 neuron layer
+    - Env (env.Environment): Environment
+    - Ag (agent.ResetableAgent): Agent
+    - CA3_PCs (riab_neurons.PlaceCells): Place cell layer
+    - CA1s (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
+        CA1 neuron layer
     """
 
     env_params = env_params or params_util.get_env_params(environment="tmaze")
@@ -290,25 +307,35 @@ def learn_T_maze_BTSP(
 ### 1D (LINEAR TRACK) FUNCTIONS ###
 
 
-def plot_1D_env_info(
+def plot_1D_spatial_info(
     Ag: agent.ResetableAgent,
     CA3_PCs: riab_neurons.PlaceCells,
     CA1s: learning_neurons.BTSPLayer,
     CA1_weights: list[np.ndarray[tuple[int, int], np.dtype[np.float64]]] | None = None,
     autosave: bool | None = None,
 ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
-    """Plot environment info for a 1D experiment:
-        environment, place cell locations, rate map, CA1 weights, CA1 rate map
+    """
+    plot_1D_spatial_info(Ag, CA3_PCs, CA1s)
+
+    Plot spatial info for a 1D environment experiment:
+        (1) Environment,
+        (2) CA3 place cell locations,
+        (3) CA1 overlayed rate map,
+        (4, optional) CA1 input weights (if provided),
+        (5-7) CA1 rate map across learning
+        (8) Environment (again).
 
     Args:
     - Ag (agent.ResetableAgent): Agent.
     - CA3_PCs (riab_neurons.PlaceCells): CA3 place cells.
-    - CA1s (neurons.BTSPLayer): CA1 neurons.
+    - CA1s (learning_neurons.BTSPLayer): CA1 neurons.
     - CA1_weights (list): List of CA1 weights with shape (num_epochs, num_cells, num_PCs).
-    - autosave (bool, optional): Whether to autosave the figure. Default is None.
+    - autosave (bool, optional): Whether to autosave the figure. If None, the global
+        autosave setting for ratinabox is used. Default is None.
 
     Returns:
-    - Axes (np.ndarray): Array of subplots.
+    - Axes (2D np.ndarray): Array of subplots with 1D environment experiment info
+        plotted, with shape (7 or 8, 1). See description for details.
     """
 
     # 7 or 8 plots
@@ -379,17 +406,24 @@ def plot_1D_time_info(
     CA1s: learning_neurons.BTSPLayer,
     autosave: bool | None = None,
 ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
-    """Plot time info for a 1D experiment:
-        trajectories, CA1 rate timeseries, CA3 rate timeseries
+    """
+    plot_1D_time_info(Ag, CA3_PCs, CA1s)
+
+    Plot time info for a 1D experiment:
+        (1) Trajectories,
+        (2) CA3 rate timeseries,
+        (3) CA1 rate timeseries
 
     Args:
     - Ag (agent.ResetableAgent): Agent.
     - CA3_PCs (riab_neurons.PlaceCells): CA3 place cells.
-    - CA1s (neurons.BTSPLayer): CA1 neurons.
-    - autosave (bool, optional): Whether to autosave the figure. Default is None.
+    - CA1s (learning_neurons.BTSPLayer): CA1 neurons.
+    - autosave (bool, optional): Whether to autosave the figure. If None, the global
+        autosave setting for ratinabox is used. Default is None.
 
     Returns:
-    - Axes (np.ndarray): Array of subplots.
+    - Axes (2D np.ndarray): Array of subplots with 1D time info plotted,
+        with shape (3, 1). See description for details.
     """
 
     # 3 plots
@@ -406,7 +440,9 @@ def plot_1D_time_info(
     ax1D = np.asarray(axes).ravel()
 
     # Plot trajectories
-    Ag.plot_trajectory_resets(framerate=1 / Ag.dt, sub_ax=ax1D[0], autosave=False)
+    Ag.plot_trajectories_across_time(
+        framerate=1 / Ag.dt, sub_ax=ax1D[0], autosave=False
+    )
     ax1D[0].set_title("Trajectories")
 
     # Plot CA3 rate timeseries
@@ -426,7 +462,7 @@ def plot_1D_time_info(
     )
     ax1D[2].set_title("CA1 rate timeseries")
 
-    plot_util.add_target_reset_points(Ag, CA1s, sub_ax=ax1D[2])
+    plot_util.mark_target_and_reset_points(Ag, CA1s, sub_ax=ax1D[2])
 
     for sub_ax in ax1D[:-1]:
         sub_ax.set_xlabel("")
@@ -454,13 +490,17 @@ def learn_1D_BTSP(
     riab_neurons.PlaceCells,
     learning_neurons.BTSPLayer,
 ]:
-    """Run a 1D learning experiment with BTSP learning.
+    """
+    learn_1D_BTSP()
+
+    Run a 1D learning experiment with BTSP learning. Plot spatial and time information.
 
     Args:
-    - env_params (dict): Parameters for the environment. Default is None.
-    - agent_params (dict): Parameters for the agent. Default is None.
-    - CA3_PC_params (dict): Parameters for the CA3 place cells. Default is None.
-    - CA1_params (dict): Parameters for the CA1 neurons. Default is None.
+    - env_params (dict, optional): Parameters for the environment. Default is None.
+    - agent_params (dict, optional): Parameters for the agent. Default is None.
+    - CA3_PC_params (dict, optional): Parameters for the CA3 place cells.
+        Default is None.
+    - CA1_params (dict, optional): Parameters for the CA1 neurons. Default is None.
     - num_rewards (int, optional): Target number of rewards to reach.
         Default is 200.
     - max_num_steps (int, optional): Maximum number of steps to run.
@@ -473,13 +513,20 @@ def learn_1D_BTSP(
         apply BTSP event. Default is 5.
     - two_compartment (bool, optional): Whether to use two-compartment model.
         Default is False.
-    - autosave (bool, optional): Whether to autosave the figure. Default is None.
+    - autosave (bool, optional): Whether to autosave the figure. If None, the global
+        autosave setting for ratinabox is used. Default is None.
 
     Returns:
-    - Env (Environment): Environment
-    - Ag (Agent): Agent
-    - CA3_PCs (PlaceCells): Place cell layer
-    - CA1s (BTSPLayer | TwoCompLayer): CA1 neuron layer
+    - Env (env.Environment): Environment
+    - Ag (agent.ResetableAgent): Agent
+    - CA3_PCs (riab_neurons.PlaceCells): Place cell layer
+    - CA1s (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
+        CA1 neuron layer
+    - spatial_axes (2D np.ndarray): Array of subplots with 1D environment experiment
+        info plotted, with shape (8, 1). See run_manager.plot_1D_spatial_info() for
+        details.
+    - time_axes (2D np.ndarray): Array of subplots with 1D time info plotted, with
+        shape (3, 1). See run_manager.plot_1D_time_info() for details.
     """
 
     env_params = env_params or params_util.get_env_params(environment="linear")
@@ -556,14 +603,16 @@ def learn_1D_BTSP(
     Ag.log_trajectory_stats_to_date()
     Ag.log_trajectory_stats_to_date(log_as_time=False)
 
-    plot_1D_env_info(Ag, CA3_PCs, CA1s, CA1_weights, autosave=autosave)
+    spatial_axes = plot_1D_spatial_info(
+        Ag, CA3_PCs, CA1s, CA1_weights, autosave=autosave
+    )
 
-    plot_1D_time_info(Ag, CA3_PCs, CA1s, autosave=autosave)
+    time_axes = plot_1D_time_info(Ag, CA3_PCs, CA1s, autosave=autosave)
 
-    return Env, Ag, CA3_PCs, CA1s
+    return Env, Ag, CA3_PCs, CA1s, spatial_axes, time_axes
 
 
 if __name__ == "__main__":
-    Env, Ag, CA3_PCs, CA1s = learn_1D_BTSP()
+    Env, Ag, CA3_PCs, CA1s, spatial_axes, time_axes = learn_1D_BTSP()
 
     breakpoint()
