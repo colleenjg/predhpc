@@ -321,75 +321,18 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
 
         self.target_df.loc[len(self.target_df)] = target_data  # type: ignore[assignment]
 
-    def _correct_velocity_stats_after_manual_changes(self, dt: float | None = None):
+    def _check_and_adjust_current_velocity_for_1D(self, dt: float | None = None):
         """
-        self. _correct_velocity_stats_after_manual_changes()
+        self._check_and_adjust_current_velocity_for_1D(prev_velocity)
 
-        If applicable, correct values computed based on the velocity and rotational
-        velocity (if 2D environment), after a manual update of these variables.
-        If applicable, record updated values in history for velocity and rotational
-        velocity.
+        Check if velocity is opposite to the current fixed direction in a 1D
+        environment. If so, since the current recorded velocity is used to determine
+        the next position update, adjust it to better match the fixed direction.
 
         Attributes:
-        - average_measured_speed (float): Corrected average measured speed.
-        - stats_before_correction (dict): Originally recorded statistics, with keys and values:
-            - "average_measured_speed" (float): Original average measured speed.
-            - "distance_travelled" (float): Original distance travelled.
-        - distance_travelled (float): Corrected distance travelled.
+        - velocity (1D np.ndarray): Adjusted velocity.
 
         Args:
-        - dt (float, optional): Time step. If None, agent time step is used.
-            Default is None.
-
-        """
-
-        if not hasattr(self, "stats_before_correction"):
-            return
-
-        self.stats_before_correction = {
-            "average_measured_speed": self.average_measured_speed,  # type: ignore[has-type]
-            "distance_travelled": self.distance_travelled,  # type: ignore[has-type]
-        }
-
-        if dt is None:
-            dt = float(self.dt)  # type: ignore[has-type]
-
-        velocity = np.asarray(self.velocity).astype(np.float64)  # type: ignore[has-type]
-
-        tau_speed = 10
-        self.average_measured_speed = self.stats_before_correction[
-            "average_measured_speed"
-        ] + dt / tau_speed * (  # type: ignore[has-type]
-            np.linalg.norm(velocity, ord=2)
-        )
-
-        self.distance_travelled = (
-            self.stats_before_correction["distance_travelled"]
-            + np.linalg.norm(velocity, ord=2) * dt
-        )
-
-        if self.save_history is True and len(self.history["vel"]):  # type: ignore[attr-defined]
-            self.history["vel"][-1] = velocity.tolist()
-            if self.Environment.dimensionality == "2D":
-                rotational_velocity = float(self.rotational_velocity)  # type: ignore[has-type]
-                self.history["rot_vel"][-1] = rotational_velocity
-
-    def _check_and_correct_velocity_for_1D(
-        self,
-        prev_velocity: np.ndarray[tuple[int], np.dtype[np.float64]],
-        dt: float | None = None,
-    ):
-        """
-        self._check_and_correct_velocity_for_1D(prev_velocity)
-
-        Check if velocity is negative in a 1D environment with a fixed direction.
-        If so, correct velocity, if needed.
-
-        Attributes:
-        - velocity (1D np.ndarray): Corrected velocity.
-
-        Args:
-        - prev_velocity (1D np.ndarray): Previous velocity.
         - dt (float, optional): Time step. If None, agent time step is used.
             Default is None.
         """
@@ -416,7 +359,7 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
             if np.sign(new_velocity) != trajectory_sign:  # type: ignore[has-type]
                 new_velocity = self.velocity + rutils.ornstein_uhlenbeck(
                     dt=dt,
-                    x=prev_velocity,
+                    x=self.velocity,
                     drift=self.speed_mean,
                     noise_scale=self.speed_std,  # type: ignore[attr-defined]
                     coherence_time=self.speed_coherence_time,  # type: ignore[attr-defined]
@@ -426,10 +369,9 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
 
         # if resampling failed, set to 0
         if np.sign(new_velocity) != trajectory_sign:  # type: ignore[has-type]
-            new_velocity = prev_velocity * 0  # set to 0
+            new_velocity = self.velocity * 0  # set to 0
 
         self.velocity = new_velocity
-        self._correct_velocity_stats_after_manual_changes(dt=dt)
 
     def format_position(
         self,
@@ -532,13 +474,18 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
         environment extent.
 
         If start_position is not None, set the agent's position and velocity.
+
+        Attributes:
+        - manual_pos (bool): Whether position was set manually.
+        - start_position (1D np.ndarray): Start position.
+        - reset_position (1D np.ndarray): Reset position.
         """
 
         self.start_position = self.format_position(self.start_position)
         self.reset_position = self.format_position(self.reset_position)
         self.set_target_position(self.target_position)
 
-        self._must_correct_velocity_stats_after_manual_changes = False
+        self.manual_pos = False
         if self.start_position is not None:
             self.set_position_and_velocity(position=self.start_position, velocity=0)
 
@@ -584,8 +531,7 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
         Adapted from Agent.__init__() in ratinabox/agent.py
 
         Attributes:
-        - _must_correct_velocity_stats_after_manual_changes (bool): Whether to correct
-            velocity statistics after manual changes.
+        - manual_pos (bool): Whether position was set manually.
         - pos (1D np.ndarray): Position.
         - rotational_velocity (float): Rotational velocity.
         - velocity (1D np.ndarray): Velocity.
@@ -629,7 +575,7 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
             self.velocity = np.asarray(velocity).reshape(2)
             self.rotational_velocity = rotational_velocity
 
-        self._must_correct_velocity_stats_after_manual_changes = True
+        self.manual_pos = True
 
     def sample_position_within_tolerance(
         self,
@@ -992,8 +938,7 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
 
         Attributes:
         - current_trajectory_length (int): Current trajectory length to date.
-        - _must_correct_velocity_stats_after_manual_changes (bool): Whether to correct
-            velocity statistics after manual changes.
+        - manual_pos (bool): Whether position was set manually.
         - num_steps_total (int): Total number of steps taken to date.
         - pos (1D np.ndarray): Position.
         - t (float): Current time.
@@ -1014,39 +959,18 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
             if self.check_if_trajectory_end_reached():
                 self.reset()
 
-        self.stats_before_correction = {
-            "average_measured_speed": self.average_measured_speed,
-            "distance_travelled": self.distance_travelled,
-            "position": self.pos,
-            "velocity": self.velocity,
-        }
-
+        # check for a forced next position
         if new_pos is not None:
-            if dt is not None:
-                self.dt = dt
-            self.t += dt
-            if not self.Environment.check_if_position_is_in_environment(new_pos):
-                raise ValueError(
-                    f"New position {new_pos} is not within the environment."
-                )
-            self.pos = new_pos
-            self._must_correct_velocity_stats_after_manual_changes = True
+            kwargs["forced_next_position"] = new_pos
+        elif self.manual_pos:
+            kwargs["forced_next_position"] = self.pos
 
-            # write to history
-            if self.save_history is True:  # type: ignore[attr-defined]
-                self.save_to_history()
-        else:
-            super().update(dt=dt, **kwargs)
+        super().update(dt=dt, **kwargs)
+
+        self.manual_pos = False
 
         if self.Environment.dimensionality == "1D" and self.fixed_direction:
-            self._check_and_correct_velocity_for_1D(
-                prev_velocity=self.stats_before_correction["velocity"], dt=dt
-            )
-
-        elif self._must_correct_velocity_stats_after_manual_changes:
-            self._correct_velocity_stats_after_manual_changes(dt=dt)
-
-        self._must_correct_velocity_stats_after_manual_changes = False
+            self._check_and_adjust_current_velocity_for_1D(dt=dt)
 
         self.current_trajectory_length += 1
         self.num_steps_total += 1
@@ -1814,8 +1738,6 @@ class TAgent(ResetableAgent):
 
         Attributes:
         - left_reset_position (1D np.ndarray): Left arm reset position for the agent.
-        - _must_correct_velocity_stats_after_manual_changes (bool): Whether to correct
-            velocity stats after manual changes.
         - reset_position (list): List of reset positions.
         - right_reset_position (1D np.ndarray): Right arm reset position for the agent.
         - start_position (1D np.ndarray): Start position of the agent.
@@ -1853,7 +1775,6 @@ class TAgent(ResetableAgent):
         # set initial position and velocity
         if self.start_position is not None:
             self.set_position_and_velocity(position=self.start_position, velocity=0)
-            self._must_correct_velocity_stats_after_manual_changes = False
 
     def set_current_trajectory_arm(self, arm: str = "random"):
         """
@@ -2334,30 +2255,6 @@ class OpenFieldAgent(ResetableAgent):
         self._add_new_target_to_df()
         self._set_random_walk()
 
-    def _correct_velocity_stats_after_manual_changes(self, dt: float | None = None):
-        """
-        self. _correct_velocity_stats_after_manual_changes()
-
-        Correct values computed and recorded based on the velocity, if applicable.
-        Applies to position resets and teleportation events, for example.
-
-        Args:
-        - dt (float, optional): The time step to use. Default is None.
-        """
-
-        if not hasattr(self, "stats_before_correction"):
-            return
-
-        if dt is None:
-            dt = self.dt
-
-        prev_pos_recorded = np.asarray(self.history["pos"][-2])
-        prev_pos_used = np.asarray(self.stats_before_correction["position"])
-        if not (prev_pos_recorded == prev_pos_used).any():
-            self.velocity = (self.pos - prev_pos_used) / dt
-
-        super()._correct_velocity_stats_after_manual_changes(dt=dt)
-
     def set_all_positions(self, first_setting: bool = True, target: str | None = None):
         """
         self.set_all_positions()
@@ -2365,8 +2262,7 @@ class OpenFieldAgent(ResetableAgent):
         Set all the positions for the agent.
 
         Attributes:
-        - _must_correct_velocity_stats_after_manual_changes (bool): Whether velocity
-            stats must be corrected.
+        - manual_pos (bool): Whether the agent's position was set manually.
         - start_position (1D np.ndarray): Start position of the agent.
         - steps_before_checking_for_target (int): Number of steps to wait before
         - target_position (1D np.ndarray): Target position of the agent.
@@ -2381,8 +2277,6 @@ class OpenFieldAgent(ResetableAgent):
         # set initial position and velocity
         self.start_position = self.Environment.sample_coords()
         self.set_position_and_velocity(position=self.start_position, velocity=0)
-        if first_setting:
-            self._must_correct_velocity_stats_after_manual_changes = False
 
         self.target_position = None
         if not first_setting:
@@ -2863,7 +2757,7 @@ class OpenFieldAgent(ResetableAgent):
         coordinates and adds teleportation data to the teleportation dataframe.
 
         Attributes:
-        - pos (1D np.ndarray): The agent's current position.
+        - pos (1D np.ndarray): The agent's teleported position.
 
         Args:
         - sample (bool, optional): Whether to sample teleport out position instead of
