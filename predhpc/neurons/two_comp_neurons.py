@@ -256,7 +256,7 @@ class TwoCompLayer(object):
         """
         self.set_learn()
 
-        Set the learning status for the soma, dendrite and inhibitory compartments.
+        Set, for each compartment, whether it should learn during self.update() calls.
         Only affects input weights that are learnable.
 
         Args:
@@ -282,8 +282,8 @@ class TwoCompLayer(object):
         """
         self.set_BTSP_learn()
 
-        Set the BTSP learning status for the soma and dendrite compartments.
-        Only affects input weights that are learnable.
+        Set whether the soma and dendrite compartments should learn using BTSP during
+        self.update() calls. Only affects input weights that are learnable.
 
         Args:
         - learn (bool, optional): Whether to learn learnable weights into both

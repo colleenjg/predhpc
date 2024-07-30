@@ -5,7 +5,7 @@ import warnings
 
 import numpy as np
 from matplotlib import pyplot as plt  # type: ignore[import]
-from matplotlib import markers
+from matplotlib import figure as mpl_figure  # type: ignore[import]
 import pandas as pd  # type: ignore[import]
 
 from ratinabox import Environment as riabEnv  # type: ignore[import]
@@ -22,7 +22,7 @@ class EnvironmentWarning(UserWarning):
 warnings.simplefilter("once", EnvironmentWarning)
 
 
-class Environment(riabEnv):
+class Environment(riabEnv, util.ParamsManagerMixin):
     """
     Environment()
 
@@ -30,12 +30,39 @@ class Environment(riabEnv):
 
     A parameters dictionary can be passed at initialisation.
 
+    See ratinabox.Environment for default parameters.
+
     See ratinabox.Environment for properties.
 
     List of methods (in addition to ratinabox.Environment methods):
         • self.get_environment_figsize()
         • self.plot_environment()
     """
+
+    default_params = dict()  # type: dict[str, Any]
+
+    ignored_param_keys = list()  # type: list[str]
+    ignored_params = {key: None for key in ignored_param_keys}
+
+    fixed_params = dict()  # type: dict[str, Any]
+
+    def __init__(self, params=dict()):
+        """
+        Environment()
+
+        Initialise an environment.
+
+        Args:
+        - params (dict, optional): Environment parameters. Default is dict().
+        """
+
+        self.check_if_ignored_params(params)
+        params = self.add_fixed_params(params)
+
+        self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
+        self.params.update(params)
+
+        super().__init__(params=params)
 
     def get_environment_figsize(self, size_fact=1.0):
         """
@@ -66,20 +93,28 @@ class Environment(riabEnv):
 
         return figsize
 
-    def plot_environment(self, sub_ax=None, **kwargs):
+    def plot_environment(self, fig=None, sub_ax=None, return_env_fig=False, **kwargs):
         """
         self.plot_environment()
 
         Plot the environment.
 
         Args:
+        - fig (mpl_figure.Figure, optional): Figure with subplot to plot on. If None,
+            a new figure is created. Kept for compatibility and inferred if missing.
+            Default is None.
         - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
             created.
+        - return_env_fig (bool, optional): Whether to return the figure
+            (for compatibility). Default is False.
 
         Keyword args:
         - **kwargs: Keyword arguments passed to ratinabox.Environment.plot_environment().
 
         Returns:
+        if return_fig:
+        - fig (mpl_figure.Figure): Figure with environment plotted
+
         - sub_ax (plt.Axes): Subplot with environment plotted.
         """
 
@@ -88,13 +123,17 @@ class Environment(riabEnv):
 
         if "ax" in kwargs.keys():
             kwargs["fig"] = kwargs["ax"].figure
+            if fig is not None and fig != kwargs["fig"]:
+                raise ValueError("fig and ax are not from the same figure.")
 
-        _, sub_ax = super().plot_environment(**kwargs)
+        fig, sub_ax = super().plot_environment(**kwargs)
+        if return_env_fig:
+            return fig, sub_ax
+        else:
+            return sub_ax
 
-        return sub_ax
 
-
-class TEnv(Environment, util.ParamsManagerMixin):
+class TEnv(Environment):
     """
     TEnv()
 
@@ -160,7 +199,6 @@ class TEnv(Environment, util.ParamsManagerMixin):
         """
 
         self.check_if_ignored_params(params)
-        params = self.add_fixed_params(params)
 
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
@@ -303,34 +341,6 @@ class TEnv(Environment, util.ParamsManagerMixin):
 
         return top_arms_prop_of_area
 
-    def add_fixed_params(self, params: dict[str, Any] = dict()) -> dict[str, Any]:
-        """
-        self.add_fixed_params()
-
-        Set fixed parameters.
-
-        Args:
-        - params (dict, optional): Environment parameters. Default is dict().
-
-        Returns:
-        - params (dict): Environment parameters with fixed parameters added.
-        """
-
-        all_fixed_params = self.get_all_fixed_params()
-
-        params = copy.copy(
-            params
-        )  # avoid deep copy to preserve reference to input layers
-        for key, value in all_fixed_params.items():
-            if key in params.keys() and value != params[key]:
-                raise ValueError(
-                    f"'{key}' parameter should not be passed, unless it is set to "
-                    f"'{value}'."
-                )
-            params[key] = value
-
-        return params
-
     def get_scale_x(self):
         """
         self.get_scale_x()
@@ -434,7 +444,9 @@ class TEnv(Environment, util.ParamsManagerMixin):
 
     def plot_environment(
         self,
+        fig: mpl_figure.Figure | None = None,
         sub_ax: plt.Axes | None = None,
+        return_env_fig: bool = False,
         autosave: bool | None = None,
         **kwargs,
     ) -> plt.Axes:
@@ -444,23 +456,33 @@ class TEnv(Environment, util.ParamsManagerMixin):
         Plot the environment.
 
         Args:
+        - fig (mpl_figure.Figure, optional): Figure with subplot to plot on. If None,
+            a new figure is created. Kept for compatibility and inferred if missing.
+            Default is None.
         - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
             created.
+        - return_env_fig (bool, optional): Whether to return the figure
+            (for compatibility). Default is False.
         - autosave (bool, optional): Whether to save the figure. Default is None.
 
         Keyword args:
         - **kwargs: Keyword arguments passed to ratinabox.Environment.plot_environment().
 
         Returns:
+        if return_fig:
+        - fig (mpl_figure.Figure): Figure with environment plotted
+
         - sub_ax (plt.Axes): Subplot with environment plotted.
         """
 
-        sub_ax = super().plot_environment(
-            ax=sub_ax, autosave=False, plot_objects=False, **kwargs
+        env_out = super().plot_environment(
+            fig=fig, ax=sub_ax, autosave=False, plot_objects=False, **kwargs
         )
 
-        if sub_ax is None:
-            raise RuntimeError("sub_ax is None.")
+        if return_env_fig:
+            fig, sub_ax = env_out
+        else:
+            sub_ax = env_out
 
         start_kwargs = plot_util.get_plot_marker_kwargs("start")
         sub_ax.scatter(*self.T_start, zorder=5, label="start", **start_kwargs)
@@ -481,10 +503,13 @@ class TEnv(Environment, util.ParamsManagerMixin):
         fig = sub_ax.figure
         util.save_figure(fig, "Environment", save=autosave)
 
-        return sub_ax
+        if return_env_fig:
+            return fig, sub_ax
+        else:
+            return sub_ax
 
 
-class OpenField(Environment, util.ParamsManagerMixin):
+class OpenField(Environment):
     """
     OpenField()
 
@@ -563,7 +588,6 @@ class OpenField(Environment, util.ParamsManagerMixin):
         """
 
         self.check_if_ignored_params(params)
-        params = self.add_fixed_params(params)
 
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
@@ -838,35 +862,6 @@ class OpenField(Environment, util.ParamsManagerMixin):
         for dict_attr_name in dict_attr_names:
             if hasattr(self, dict_attr_name):
                 delattr(self, dict_attr_name)
-
-    def add_fixed_params(self, params: dict[str, Any] = dict()) -> dict[str, Any]:
-        """
-        self.add_fixed_params()
-
-        Add fixed parameters.
-
-        Args:
-        - params (dict, optional): Environment parameters. Default is dict().
-
-        Returns:
-        - params (dict): Environment parameters with fixed parameters added.
-        """
-
-        all_fixed_params = self.get_all_fixed_params()
-
-        params = copy.copy(
-            params
-        )  # avoid deep copy to preserve reference to input layers
-        for key, value in all_fixed_params.items():
-            if key in params.keys() and value != params[key]:
-                raise ValueError(
-                    f"'{key}' parameter should not be passed, unless it is set to "
-                    f"'{value}'."
-                )
-
-            params[key] = value
-
-        return params
 
     def check_if_walls_ends_too_close(
         self,
@@ -1439,9 +1434,11 @@ class OpenField(Environment, util.ParamsManagerMixin):
 
     def plot_environment(
         self,
+        fig: mpl_figure.Figure | None = None,
         sub_ax: plt.Axes | None = None,
         plot_objects: bool = True,
         no_legend: bool = False,
+        return_env_fig: bool = False,
         autosave: bool | None = None,
         **kwargs,
     ) -> plt.Axes:
@@ -1451,16 +1448,24 @@ class OpenField(Environment, util.ParamsManagerMixin):
         Plot the environment.
 
         Args:
+        - fig (mpl_figure.Figure, optional): Figure with subplot to plot on. If None,
+            a new figure is created. Kept for compatibility and inferred if missing.
+            Default is None.
         - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
             created.
         - plot_objects (bool, optional): Whether to plot objects in environment.
             Default is True.
         - no_legend (bool, optional): Whether to remove legend from plot.
             Default is False.
+        - return_env_fig (bool, optional): Whether to return the figure
+            (for compatibility). Default is False.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
         global autosave setting for ratinabox is used. Default is None.
 
         Returns:
+        if return_env_fig:
+        - fig (mpl_figure.Figure): Figure with environment plotted.
+
         - sub_ax (plt.Axes): Subplot with environment plotted.
         """
 
@@ -1473,9 +1478,14 @@ class OpenField(Environment, util.ParamsManagerMixin):
                 figsize=(3 * env_width + add_x, 3 * (self.extent[3] - self.extent[2]))
             )
 
-        sub_ax = super().plot_environment(
-            ax=sub_ax, autosave=False, plot_objects=False, **kwargs
+        env_out = super().plot_environment(
+            fig=fig, ax=sub_ax, autosave=False, plot_objects=False, **kwargs
         )
+
+        if return_env_fig:
+            fig, sub_ax = env_out
+        else:
+            sub_ax = env_out
 
         if sub_ax is None:
             raise RuntimeError("sub_ax is None.")
@@ -1505,4 +1515,7 @@ class OpenField(Environment, util.ParamsManagerMixin):
         fig = sub_ax.figure
         util.save_figure(fig, "Environment", save=autosave)
 
-        return sub_ax
+        if return_env_fig:
+            return fig, sub_ax
+        else:
+            return sub_ax

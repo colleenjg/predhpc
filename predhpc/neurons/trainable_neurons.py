@@ -43,8 +43,8 @@ class RegressionLayer(learning_neurons.LearnLayer):
 
     List of methods (in addition to learning_neurons.LearnLayer methods):
         • self.init_model()
-        • self.check_X_y()
-        • self.get_X_y()
+        • self.check_Xs_y()
+        • self.get_Xs_y()
         • self.fit()
         • self.plot_loss()
         • self.plot_histogram()
@@ -57,6 +57,7 @@ class RegressionLayer(learning_neurons.LearnLayer):
         "solver": "auto",
         "fit_intercept": False,
         "max_iter": 1000,
+        "activation_function": {"activation": "linear"},  # overwrite parent default
     }
 
     ignored_param_keys = [
@@ -65,9 +66,7 @@ class RegressionLayer(learning_neurons.LearnLayer):
     ignored_params = {key: None for key in ignored_param_keys}
 
     fixed_params = {
-        "activation_function": {
-            "activation": "linear"
-        },  # keep regression output exactly
+        "activation_function": {"activation": "linear"},  # keep regression output
         "biases": None,
     }
 
@@ -93,6 +92,8 @@ class RegressionLayer(learning_neurons.LearnLayer):
         self.params.update(params)
 
         super().__init__(Agent, self.params)
+
+        self.set_learn(False)  # learning handled manually
 
         self.init_model()
 
@@ -133,13 +134,13 @@ class RegressionLayer(learning_neurons.LearnLayer):
         if self.n > 1:  # type: ignore[attr-defined]
             self.model = MultiOutputRegressor(self.model)
 
-    def check_X_y(
+    def check_Xs_y(
         self,
         Xs: list[np.ndarray[tuple[int, int], np.dtype[np.float64]]],
         y: np.ndarray[tuple[int], np.dtype[np.float64]],
     ):
         """
-        self.check_X_y(Xs, y)
+        self.check_Xs_y(Xs, y)
 
         Check that input and output data are of the correct shapes for one another and
         for the layer's neurons and inputs.
@@ -189,9 +190,9 @@ class RegressionLayer(learning_neurons.LearnLayer):
                     f"size of the second dimension of the {i}th Xs array ({num_in})."
                 )
 
-    def get_X_y(self):
+    def get_Xs_y(self):
         """
-        self.get_X_y()
+        self.get_Xs_y()
 
         Get the input and output data for the layer, as the recorded firing rates of
         the input layers, and the recorded positions of the agent.
@@ -210,18 +211,17 @@ class RegressionLayer(learning_neurons.LearnLayer):
 
         y = np.asarray(self.Agent.history["pos"])
 
-        if y.shape[1] != self.n:
+        num_steps, num_coords = y.shape
+        if num_coords != self.n:
             raise ValueError(
                 f"Cannot infer targets, as the size of the second dimension of the "
-                f"agent's position data ({y.shape[1]}) does not match number of "
+                f"agent's position data ({num_coords}) does not match number of "
                 f"neurons in the layer ({self.n})."
             )
 
-        num_steps = len(self.inputs)
-
         Xs = list()
         for i, input_layer in enumerate(self.inputs.values()):
-            firingrates = np.asarray(input_layer["history"]["firingrate"])
+            firingrates = np.asarray(input_layer["layer"].history["firingrate"])
             if len(firingrates) != num_steps:
                 raise ValueError(
                     f"Number of steps recorded for the input layer {i} "
@@ -257,9 +257,9 @@ class RegressionLayer(learning_neurons.LearnLayer):
             raise ValueError("Xs and y must both be provided or both be None.")
 
         if Xs is None:
-            Xs, y = self.get_X_y(Xs, y)
+            Xs, y = self.get_Xs_y()
         else:
-            self.check_X_y(Xs, y)
+            self.check_Xs_y(Xs, y)
 
         X = np.concatenate(Xs, axis=1)
 
@@ -337,6 +337,9 @@ class RegressionLayer(learning_neurons.LearnLayer):
                 raise ValueError(
                     "'t_start' is overridden if the layer has been fitted."
                 )
+            elif self.last_fit_step == self.num_steps_total:
+                raise ValueError("Layer has not been updated since last fit step.")
+
             kwargs["t_start"] = self.history["t"][self.last_fit_step]
             fit_str = " (fitted)"
 
@@ -419,6 +422,8 @@ class TorchLayer(learning_neurons.LearnLayer):
         self.params.update(params)
 
         super().__init__(Agent, self.params)
+
+        self.set_learn(False)  # learning handled manually
 
         self.train_steps = list()  # type: list[int]
 
@@ -580,8 +585,10 @@ class TorchLayer(learning_neurons.LearnLayer):
         if len(self.train_steps) != 0:
             if "t_start" in kwargs.keys():
                 raise ValueError(
-                    "'t_start' is overridden if the layer has been fitted."
+                    "'t_start' is overridden if the layer has been trained."
                 )
+            elif self.train_steps[-1] == self.num_steps_total:
+                raise ValueError("Layer has not been updated since last training step.")
 
             kwargs["t_start"] = self.history["t"][self.train_steps[-1]]
             train_str = " (trained)"

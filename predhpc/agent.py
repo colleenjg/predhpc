@@ -14,7 +14,7 @@ from ratinabox import utils as rutils
 from predhpc import env, util, plot_util
 
 
-class ResetableAgent(riabAgent):
+class ResetableAgent(riabAgent, util.ParamsManagerMixin):
     """
     ResetableAgent()
 
@@ -84,6 +84,11 @@ class ResetableAgent(riabAgent):
         "fixed_direction": False,  # keep same direction (1D environment only)
     }
 
+    ignored_param_keys = list()  # type: list[str]
+    ignored_params = {key: None for key in ignored_param_keys}
+
+    fixed_params = dict()  # type: dict[str, Any]
+
     def __init__(self, Env: "env.Environment", params: dict[str, Any] = dict()):
         """
         ResetableAgent(Env)
@@ -92,9 +97,9 @@ class ResetableAgent(riabAgent):
 
         Attributes:
         - _last_stop_step (int): Last step at which the agent stopped.
-        - _most_recent_target_reached_step (int): Last step at which the target was 
+        - _most_recent_target_reached_step (int): Last step at which the target was
             reached.
-        
+
         Args:
         - Env (env.Environment): The environment in which the agent is placed.
         - params (dict, optional): Agent parameters. Default is dict().
@@ -102,6 +107,9 @@ class ResetableAgent(riabAgent):
         Raises:
         - ValueError: If passing iterable for trajectory_length, must have length > 0.
         """
+
+        self.check_if_ignored_params(params)
+        params = self.add_fixed_params(params)
 
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
@@ -204,7 +212,7 @@ class ResetableAgent(riabAgent):
         """
         self._init_trajectory_lengths()
 
-        Initialise the trajectory lengths, either from the passed value, or by sampling 
+        Initialise the trajectory lengths, either from the passed value, or by sampling
         from the exponential distribution.
 
         Attributes:
@@ -421,7 +429,7 @@ class ResetableAgent(riabAgent):
             new_velocity = prev_velocity * 0  # set to 0
 
         self.velocity = new_velocity
-        self. _correct_velocity_stats_after_manual_changes(dt=dt)
+        self._correct_velocity_stats_after_manual_changes(dt=dt)
 
     def format_position(
         self,
@@ -435,14 +443,14 @@ class ResetableAgent(riabAgent):
         Obtain formatted position. If input position is None, None is returned.
 
         Args:
-        - position (1D np.ndarray or list, optional): Position to format. 
+        - position (1D np.ndarray or list, optional): Position to format.
             Default is None.
 
         Raises:
         - ValueError: If position is not within the environment extent.
 
         Returns:
-        - position (1D np.ndarray or None): Formatted position. If input position is 
+        - position (1D np.ndarray or None): Formatted position. If input position is
             None, None is returned.
         """
 
@@ -583,9 +591,9 @@ class ResetableAgent(riabAgent):
         - velocity (1D np.ndarray): Velocity.
 
         Args:
-        - position (1D np.ndarray, optional): Position to set. If None, a random 
+        - position (1D np.ndarray, optional): Position to set. If None, a random
             position is sampled. Default is None.
-        - velocity (float or 1D np.ndarray, optional): Velocity to set. If None, a 
+        - velocity (float or 1D np.ndarray, optional): Velocity to set. If None, a
             random velocity is sampled. Default is None.
         - rotational_velocity (float, optional): Rotational velocity to set.
             Default is 0.0.
@@ -1036,7 +1044,7 @@ class ResetableAgent(riabAgent):
             )
 
         elif self._must_correct_velocity_stats_after_manual_changes:
-            self. _correct_velocity_stats_after_manual_changes(dt=dt)
+            self._correct_velocity_stats_after_manual_changes(dt=dt)
 
         self._must_correct_velocity_stats_after_manual_changes = False
 
@@ -1494,12 +1502,12 @@ class ResetableAgent(riabAgent):
                 ends = np.append(ends, len(trajectory) - 1)
                 s[ends] = s_2D * 2
                 # set last colormap value to dark red
-                c[ends] = mpl_colors.to_rgba("darkred")  # type: ignore[arg-type]
+                colors[ends] = mpl_colors.to_rgba("darkred")  # type: ignore[arg-type]
 
             if plot_agent == True:
                 s[-1] = s_2D * 2.75
                 # set last colormap value to red
-                c[-1] = mpl_colors.to_rgba(agent_color)  # type: ignore[arg-type]
+                colors[-1] = mpl_colors.to_rgba(agent_color)  # type: ignore[arg-type]
 
             sub_ax.scatter(
                 *trajectory.T,
@@ -1667,7 +1675,7 @@ class ResetableAgent(riabAgent):
         return sub_ax
 
 
-class TAgent(ResetableAgent, util.ParamsManagerMixin):
+class TAgent(ResetableAgent):
     """
     TAgent()
 
@@ -1685,7 +1693,7 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
         • self.near_branch_point
         • self.at_branch_point
         • self.target_df_columns
-        
+
     List of methods (in addition to ResetableAgent methods):
         • self.set_all_positions()
         • self.set_current_trajectory_arm()
@@ -1694,7 +1702,7 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
         • self.check_if_left_reset_position_reached()
         • self.check_if_right_reset_position_reached()
         • self.update()
-        • self.reset()  
+        • self.reset()
     """
 
     default_params = {
@@ -1720,9 +1728,6 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
         Raises:
         - ValueError: If passing iterable for trajectory_length, must have length > 0.
         """
-
-        self.check_if_ignored_params(params)
-        params = self.add_fixed_params(params)
 
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
@@ -2022,7 +2027,7 @@ class TAgent(ResetableAgent, util.ParamsManagerMixin):
         )
 
 
-class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
+class OpenFieldAgent(ResetableAgent):
     """
     OpenFieldAgent()
 
@@ -2105,9 +2110,6 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
         Raises:
         - ValueError: If passing iterable for trajectory_length, must have length > 0.
         """
-
-        self.check_if_ignored_params(params)
-        params = self.add_fixed_params(params)
 
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
@@ -2354,7 +2356,7 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
         if not (prev_pos_recorded == prev_pos_used).any():
             self.velocity = (self.pos - prev_pos_used) / dt
 
-        super(). _correct_velocity_stats_after_manual_changes(dt=dt)
+        super()._correct_velocity_stats_after_manual_changes(dt=dt)
 
     def set_all_positions(self, first_setting: bool = True, target: str | None = None):
         """
@@ -2941,10 +2943,14 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
                 ][direction][1]
                 vector = coords - teleport_coords
 
-                add_data = [("position", coords), ("vector", vector), ("velocity", velocity)]
+                add_data = [
+                    ("position", coords),
+                    ("vector", vector),
+                    ("velocity", velocity),
+                ]
                 for key, data in add_data:
                     for i, axis in enumerate(["x", "y"]):
-                    teleportation_data[f"{direction}_{key}_{axis}"] = data[i]
+                        teleportation_data[f"{direction}_{key}_{axis}"] = data[i]
 
             self.teleportation_df.loc[len(self.teleportation_df)] = teleportation_data  # type: ignore[assignment]
 
@@ -2997,8 +3003,8 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
     def reset(self, target: str | None = None):
         """
         self.reset()
-        
-        Reset the agent to a random location, end the current trajectory and updating 
+
+        Reset the agent to a random location, end the current trajectory and updating
         all positions, including target.
 
         Attributes:
@@ -3037,8 +3043,8 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
         self.update()
 
         Update the agent's position. Checks whether target or trajectory end are
-        reached, and if so, resets the agent. Also, checks whether a random walk 
-        should start or end. 
+        reached, and if so, resets the agent. Also, checks whether a random walk
+        should start or end.
 
         Args:
         - dt (float): The time step to use.
@@ -3100,7 +3106,7 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
         specified by the specified time point.
 
         Colors:
-        - lavenderblush: Trajectory had no target or time corresponds exactly to the 
+        - lavenderblush: Trajectory had no target or time corresponds exactly to the
             reach time.
         - red: Target not yet reached in the trajectory.
         - violet: Target was in a random walk.
@@ -3191,7 +3197,7 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
         Plot the agent's trajectories.
 
         Args:
-        - t_end (float, optional): Time point to plot the trajectory until. 
+        - t_end (float, optional): Time point to plot the trajectory until.
             Default is None.
         - target_alpha (float, optional): Alpha value for the target.
         - no_legend (bool, optional): Whether to remove the legend. Default is False.
@@ -3242,7 +3248,7 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
             a new subplot is created using self.Environment.plot_environment().
             This can be used to plot trajectory on top of receptive fields etc.
         - alpha (float, optional): Alpha value of the targets.
-        - plot_env (bool, optional): Whether to plot the environment, if sub_ax is not 
+        - plot_env (bool, optional): Whether to plot the environment, if sub_ax is not
             None. Default is True.
         - no_legend (bool, optional): Whether to remove the legend. Default is False.
         - colormap (str, optional): Colormap to use. Default is None.
@@ -3476,7 +3482,7 @@ class OpenFieldAgent(ResetableAgent, util.ParamsManagerMixin):
         Args:
         - additional_plot_func: A function that is called after each frame of the
             animation is plotted. It takes sub_ax, t and **kwargs and returns sub_ax.
-        
+
         Keyword args:
         - **kwargs: Keyword arguments passed to self.plot_trajectories().
 

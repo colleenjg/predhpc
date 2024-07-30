@@ -83,6 +83,8 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
                 "the environment."
             )
 
+        self.check_if_ignored_params(params)
+
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         params = copy.deepcopy(params)
 
@@ -324,6 +326,8 @@ class FixedObjectCells(ObjectCells):
         if not isinstance(self.Agent.Environment, env.OpenField):
             raise ValueError("Environment must be an OpenField to use FixedObjectCells")
 
+        self.check_if_ignored_params(params)
+
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
 
@@ -422,6 +426,8 @@ class WeightedObjectCells(ObjectCells):
             raise ValueError(
                 "Environment must be an OpenField to use WeightedObjectCells"
             )
+
+        self.check_if_ignored_params(params)
 
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
@@ -555,6 +561,8 @@ class FixedObjectVectorCells(riab_neurons.ObjectVectorCells):
         self.num_teleport = self.params["num_teleport"]
 
         n = self._get_num_neurons()
+
+        self.check_if_ignored_params(params)
 
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
@@ -765,6 +773,8 @@ class WeightedObjectVectorCells(riab_neurons.ObjectVectorCells):
             raise ValueError(
                 "Environment must be an OpenField to use WeightedObjectCells"
             )
+
+        self.check_if_ignored_params(params)
 
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)

@@ -176,7 +176,7 @@ class SimpleValueNeuron(riab_neurons.PlaceCells):
 
         _, ax_out = super().plot_rate_map(ax=ax, **kwargs)
 
-        if ax is not None:
+        if ax is None:
             ax = ax_out
 
         ax1D = np.asarray(ax).ravel()

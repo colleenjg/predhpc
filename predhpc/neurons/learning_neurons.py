@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     import ratinabox  # type: ignore[import]
 
 
-class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer, util.ParamsManagerMixin):
+class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer):
     """
     SmoothFeedForwardLayer()
 
@@ -54,11 +54,6 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer, util.ParamsManagerMi
         "input_trend_tau": None,  # in sec
     }
 
-    ignored_param_keys = list()  # type: list[str]
-    ignored_params = {key: None for key in ignored_param_keys}
-
-    fixed_params = dict()  # type: dict[str, Any]
-
     def __init__(self, Agent: "ratinabox.Agent", params: dict[str, Any] = dict()):
         """
         SmoothFeedForwardLayer(Agent)
@@ -77,7 +72,6 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer, util.ParamsManagerMi
         self.Agent = Agent
 
         self.check_if_ignored_params(params)
-        params = self.add_fixed_params(params)
 
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
@@ -150,7 +144,7 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer, util.ParamsManagerMi
 
         super().save_to_history()
 
-        if self.input_filter_tau:  # type: ignore[attr-defined]
+        if self.input_filter_tau or self.input_trend_tau:  # type: ignore[attr-defined]
             for name, input_layer in self.inputs.items():
                 for key in ["inputs", "trends"]:
                     self.history[f"filtered_{key}"][name].append(
@@ -328,7 +322,7 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer, util.ParamsManagerMi
         """
 
         if sub_ax is None:
-            fig, sub_ax = plt.subplots(figsize=(4, 2))
+            _, sub_ax = plt.subplots(figsize=(4, 2))
 
         firingrates = np.asarray(self.history["firingrate"]).ravel()
         sub_ax.hist(firingrates, bins=bins, color=self.color, alpha=0.6, density=True)
@@ -446,7 +440,7 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer, util.ParamsManagerMi
         return sub_ax, t
 
 
-class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
+class LearnLayer(SmoothFeedForwardLayer):
     """
     LearnLayer()
 
@@ -526,7 +520,6 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
         self.Agent = Agent
 
         self.check_if_ignored_params(params)
-        params = self.add_fixed_params(params)
 
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
@@ -576,10 +569,11 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
         """
         self.learn
 
-        Whether this layer is learning or not.
+        Whether this layer learns during self.update() calls. Only reflects input
+        weights that are learnable.
 
         Returns:
-        - (bool): Whether the layer is learning or not.
+        - (bool): Whether the layer learns during self.update() calls.
         """
 
         return self._learn
@@ -600,11 +594,12 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
         """
         self.set_learn()
 
-        Set the layer to learn or not to.
+        Set whether this layer learns during self.update() calls. Only affects input
+        weights that are learnable.
 
         Args:
-        - learn (bool, optional): Whether the layer should learn. If None, the
-            current setting remains unchanged. Default is None.
+        - learn (bool, optional): Whether the layer should learn during self.update()
+            calls. If None, the current setting remains unchanged. Default is None.
         """
 
         if learn is None:
@@ -656,12 +651,15 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
 
         super().add_input(input_layer, w_init_scale=self.w_init_scale, **kwargs)  # type: ignore[attr-defined]
 
-        if self.input_filter_tau or self.input_trend_tau:  # type: ignore[attr-defined]
-            name_in, n_in = input_layer.name, input_layer.n  # type: ignore[attr-defined]
-            for key in ["inputs", "trends"]:
-                if f"filtered_{key}_for_learning" not in self.history.keys():
-                    self.history[f"filtered_{key}"] = dict()
-                self.history[f"filtered_{key}"][name_in] = list()
+        name_in, n_in = input_layer.name, input_layer.n  # type: ignore[attr-defined]
+        self.inputs[name_in]["filtered_inputs_for_learning"] = np.full(n_in, np.nan)
+        self.inputs[name_in]["filtered_trends_for_learning"] = np.zeros(n_in)
+
+        name_in, n_in = input_layer.name, input_layer.n  # type: ignore[attr-defined]
+        for key in ["inputs", "trends"]:
+            if f"filtered_{key}_for_learning" not in self.history.keys():
+                self.history[f"filtered_{key}_for_learning"] = dict()
+            self.history[f"filtered_{key}_for_learning"][name_in] = list()
 
     def save_to_history(self):
         """
@@ -754,7 +752,7 @@ class LearnLayer(SmoothFeedForwardLayer, util.ParamsManagerMixin):
             shape = plot_util.get_plot_shape(n, target_num_col=target_num_col)
 
         kwargs["chosen_neurons"] = chosen_neurons
-        kwargs["shape"] = shape
+        kwargs["shape"] = shape[::-1]
 
         ax = super().plot_rate_map(autosave=False, ax=ax, **kwargs)
 
@@ -1372,7 +1370,8 @@ class BTSPLayer(HebbianLayer):
         """
         self.BTSP_learn
 
-        Obtain the BTSP learning state of the layer.
+        Whether this layer undergoes BTSP learning during self.update() calls. Only
+        reflects input weights that are learnable.
 
         Returns:
         - (bool): BTSP learning state.
@@ -1433,7 +1432,8 @@ class BTSPLayer(HebbianLayer):
         """
         self.set_BTSP_learn()
 
-        Set the layer to learn using BTSP.
+        Set the layer to learn using BTSP during self.update() calls. Only affects 
+        input weights that are learnable.
 
         Args:
         - learn (bool, optional): Whether the layer should learn using BTSP. If None,
@@ -2168,7 +2168,7 @@ class BTSPLayer(HebbianLayer):
             **kwargs,
         )
 
-        if ax is not None:
+        if ax is None:
             ax = ax_out
 
         if mark_BTSP:

@@ -1,3 +1,5 @@
+import copy
+
 from matplotlib import pyplot as plt
 import numpy as np
 
@@ -11,18 +13,49 @@ from ratinabox.contribs import ValueNeuron as riabValueNeuron
 from predhpc import plot_util, util
 
 
-class Neurons(riabNeurons):
+class Neurons(riabNeurons, util.ParamsManagerMixin):
     """
     Neurons()
 
     Class extending ratinabox.Neurons.Neurons to add some functionalities to the
     plotting functions.
 
+    See ratinabox.Neurons.Neurons for default parameters.
+
     List of methods (in addition ratinabox.Neurons.Neurons methods):
         • self.get_plotting_times()
         • self.plot_rate_map()
         • self.plot_rate_timeseries()
     """
+
+    default_params = dict()  # type: dict[str, Any]
+
+    ignored_param_keys = list()  # type: list[str]
+    ignored_params = {key: None for key in ignored_param_keys}
+
+    fixed_params = dict()  # type: dict[str, Any]
+
+    def __init__(self, Agent, params=dict()):
+        """
+        Neurons(Agent)
+
+        Initialise a neuron layer.
+
+        Attributes:
+        - Agent (agent.ResetableAgent): Associated agent.
+
+        Args:
+        - Agent (agent.ResetableAgent): Associated agent.
+        - params (dict, optional): Neuron layer parameters. Default is dict().
+        """
+
+        self.check_if_ignored_params(params)
+        params = self.add_fixed_params(params)
+
+        self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
+        self.params.update(params)
+
+        super().__init__(Agent, params=params)
 
     def get_plotting_times(
         self, t_start: float | None = None, t_end: float | None = None
@@ -66,12 +99,14 @@ class Neurons(riabNeurons):
            (one per plotted ROI, if environment is 2D).
         """
 
-        if ax is not None:
+        if ax is None:
+            kwargs["return_env_fig"] = True  # avoid internal error
+        else:
             kwargs["fig"] = np.asarray(ax).ravel()[0].figure
 
         _, ax_out = super().plot_rate_map(ax=ax, **kwargs)
 
-        if ax is not None:
+        if ax is None:
             ax = ax_out
 
         return ax
@@ -114,6 +149,8 @@ class Neurons(riabNeurons):
 
         if "ax" in kwargs.keys():
             kwargs["fig"] = kwargs["ax"].figure
+        else:
+            kwargs["return_env_fig"] = True  # avoid internal error
 
         t, _, _ = self.get_plotting_times(t_start, t_end)
         t_start = t[0]
@@ -122,7 +159,6 @@ class Neurons(riabNeurons):
         _, sub_ax = super().plot_rate_timeseries(
             t_start=t_start,
             t_end=t_end,
-            ax=sub_ax,
             autosave=False,
             **kwargs,
         )
@@ -135,17 +171,20 @@ class Neurons(riabNeurons):
             sub_ax.set_xticks(xticks)
             sub_ax.set_xticklabels(xticks)
 
+        fig = sub_ax.figure
         util.save_figure(fig, f"{self.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
 
         return sub_ax
 
 
-class PlaceCells(riabPlaceCells):
+class PlaceCells(riabPlaceCells, util.ParamsManagerMixin):
     """
     PlaceCells()
 
     Class extending ratinabox.Neurons.PlaceCells to add some functionalities to the
     plotting functions.
+
+    See ratinabox.Neurons.PlaceCells for default parameters.
 
     List of methods (in addition ratinabox.Neurons.PlaceCells methods):
         • self.get_plotting_times()
@@ -153,6 +192,35 @@ class PlaceCells(riabPlaceCells):
         • self.plot_rate_timeseries()
         • self.plot_place_cell_locations()
     """
+
+    default_params = dict()  # type: dict[str, Any]
+
+    ignored_param_keys = list()  # type: list[str]
+    ignored_params = {key: None for key in ignored_param_keys}
+
+    fixed_params = dict()  # type: dict[str, Any]
+
+    def __init__(self, Agent, params=dict()):
+        """
+        PlaceCells(Agent)
+
+        Initialise a place cell layer.
+
+        Attributes:
+        - Agent (agent.ResetableAgent): Associated agent.
+
+        Args:
+        - Agent (agent.ResetableAgent): Associated agent.
+        - params (dict, optional): Neuron layer parameters. Default is dict().
+        """
+
+        self.check_if_ignored_params(params)
+        params = self.add_fixed_params(params)
+
+        self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
+        self.params.update(params)
+
+        super().__init__(Agent, params=params)
 
     def get_plotting_times(
         self, t_start: float | None = None, t_end: float | None = None
@@ -196,12 +264,14 @@ class PlaceCells(riabPlaceCells):
            (one per plotted ROI, if environment is 2D).
         """
 
-        if ax is not None:
+        if ax is None:
+            kwargs["return_env_fig"] = True  # avoid internal error
+        else:
             kwargs["fig"] = np.asarray(ax).ravel()[0].figure
 
         _, ax_out = super().plot_rate_map(ax=ax, **kwargs)
 
-        if ax is not None:
+        if ax is None:
             ax = ax_out
 
         return ax
@@ -244,6 +314,8 @@ class PlaceCells(riabPlaceCells):
 
         if "ax" in kwargs.keys():
             kwargs["fig"] = kwargs["ax"].figure
+        else:
+            kwargs["return_env_fig"] = True  # avoid internal error
 
         t, _, _ = self.get_plotting_times(t_start, t_end)
         t_start = t[0]
@@ -252,7 +324,6 @@ class PlaceCells(riabPlaceCells):
         _, sub_ax = super().plot_rate_timeseries(
             t_start=t_start,
             t_end=t_end,
-            ax=sub_ax,
             autosave=False,
             **kwargs,
         )
@@ -265,50 +336,92 @@ class PlaceCells(riabPlaceCells):
             sub_ax.set_xticks(xticks)
             sub_ax.set_xticklabels(xticks)
 
+        fig = sub_ax.figure
         util.save_figure(fig, f"{self.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
 
         return sub_ax
 
-    def plot_place_cell_locations(self, sub_ax=None, **kwargs):
+    def plot_place_cell_locations(self, sub_ax=None, autosave=None):
         """
         self.plot_place_cell_locations()
 
-        Plot place cell locations for the layer.
+        Plot place cell locations for the layer. Taken from
+        ratinabox.PlaceCells.plot_place_cell_locations().
 
         Args:
         - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
             created. Default is None.
-
-        Keyword args:
-        - **kwargs: Keyword arguments passed to ratinabox.PlaceCells.plot_place_cell_locations().
+        - autosave (bool, optional): Whether to autosave the figure. If None, the
+            global autosave setting for ratinabox is used. Default is None.
 
         Returns:
         - sub_ax (plt.Axes): Subplot with place cell locations plotted.
         """
 
+        fig = None
         if sub_ax is not None:
-            kwargs["ax"] = sub_ax
+            fig = sub_ax.figure
 
-        if "ax" in kwargs.keys():
-            kwargs["fig"] = kwargs["ax"].figure
+        sub_ax = self.Agent.Environment.plot_environment(sub_ax=sub_ax, autosave=False)
 
-        _, sub_ax = super().plot_place_cell_locations(**kwargs)
+        place_cell_centres = self.place_cell_centres
+
+        x = place_cell_centres[:, 0]
+        if self.Agent.Environment.dimensionality == "1D":
+            y = np.zeros_like(x)
+        elif self.Agent.Environment.dimensionality == "2D":
+            y = place_cell_centres[:, 1]
+
+        sub_ax.scatter(x, y, c="C1", marker="x", s=15, zorder=2)
+
+        util.save_figure(fig, f"{self.name}_place_cell_locations", save=autosave)  # type: ignore[attr-defined]
 
         return sub_ax
 
 
-class GridCells(riabGridCells):
+class GridCells(riabGridCells, util.ParamsManagerMixin):
     """
     GridCells()
 
     Class extending ratinabox.Neurons.GridCells to add some functionalities to the
     plotting functions.
 
+    See ratinabox.Neurons.GridCells for default parameters.
+
     List of methods (in addition ratinabox.Neurons.GridCells methods):
         • self.get_plotting_times()
         • self.plot_rate_map()
         • self.plot_rate_timeseries()
     """
+
+    default_params = dict()  # type: dict[str, Any]
+
+    ignored_param_keys = list()  # type: list[str]
+    ignored_params = {key: None for key in ignored_param_keys}
+
+    fixed_params = dict()  # type: dict[str, Any]
+
+    def __init__(self, Agent, params=dict()):
+        """
+        GridCells(Agent)
+
+        Initialise a grid cell layer.
+
+        Attributes:
+        - Agent (agent.ResetableAgent): Associated agent.
+
+        Args:
+        - Agent (agent.ResetableAgent): Associated agent.
+        - params (dict, optional): Neuron layer parameters. Default is dict().
+        """
+
+        self.check_if_ignored_params(params)
+        params = self.add_fixed_params(params)
+
+        self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
+        self.params.update(params)
+
+        super().__init__(Agent, params=params)
 
     def get_plotting_times(
         self, t_start: float | None = None, t_end: float | None = None
@@ -352,12 +465,14 @@ class GridCells(riabGridCells):
            (one per plotted ROI, if environment is 2D).
         """
 
-        if ax is not None:
+        if ax is None:
+            kwargs["return_env_fig"] = True  # avoid internal error
+        else:
             kwargs["fig"] = np.asarray(ax).ravel()[0].figure
 
         _, ax_out = super().plot_rate_map(ax=ax, **kwargs)
 
-        if ax is not None:
+        if ax is None:
             ax = ax_out
 
         return ax
@@ -400,6 +515,8 @@ class GridCells(riabGridCells):
 
         if "ax" in kwargs.keys():
             kwargs["fig"] = kwargs["ax"].figure
+        else:
+            kwargs["return_env_fig"] = True  # avoid internal error
 
         t, _, _ = self.get_plotting_times(t_start, t_end)
         t_start = t[0]
@@ -408,7 +525,6 @@ class GridCells(riabGridCells):
         _, sub_ax = super().plot_rate_timeseries(
             t_start=t_start,
             t_end=t_end,
-            ax=sub_ax,
             autosave=False,
             **kwargs,
         )
@@ -421,23 +537,55 @@ class GridCells(riabGridCells):
             sub_ax.set_xticks(xticks)
             sub_ax.set_xticklabels(xticks)
 
+        fig = sub_ax.figure
         util.save_figure(fig, f"{self.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
 
         return sub_ax
 
 
-class ObjectVectorCells(riabObjectVectorCells):
+class ObjectVectorCells(riabObjectVectorCells, util.ParamsManagerMixin):
     """
     ObjectVectorCells()
 
     Class extending ratinabox.Neurons.ObjectVectorCells to add some functionalities to
     the plotting functions.
 
+    See ratinabox.Neurons.ObjectVectorCells for default parameters.
+
     List of methods (in addition ratinabox.Neurons.ObjectVectorCells methods):
         • self.get_plotting_times()
         • self.plot_rate_map()
         • self.plot_rate_timeseries()
     """
+
+    default_params = dict()  # type: dict[str, Any]
+
+    ignored_param_keys = list()  # type: list[str]
+    ignored_params = {key: None for key in ignored_param_keys}
+
+    fixed_params = dict()  # type: dict[str, Any]
+
+    def __init__(self, Agent, params=dict()):
+        """
+        ObjectVectorCells(Agent)
+
+        Initialise an object vector cell layer.
+
+        Attributes:
+        - Agent (agent.ResetableAgent): Associated agent.
+
+        Args:
+        - Agent (agent.ResetableAgent): Associated agent.
+        - params (dict, optional): Neuron layer parameters. Default is dict().
+        """
+
+        self.check_if_ignored_params(params)
+        params = self.add_fixed_params(params)
+
+        self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
+        self.params.update(params)
+
+        super().__init__(Agent, params=params)
 
     def get_plotting_times(
         self, t_start: float | None = None, t_end: float | None = None
@@ -481,12 +629,14 @@ class ObjectVectorCells(riabObjectVectorCells):
            (one per plotted ROI, if environment is 2D).
         """
 
-        if ax is not None:
+        if ax is None:
+            kwargs["return_env_fig"] = True  # avoid internal error
+        else:
             kwargs["fig"] = np.asarray(ax).ravel()[0].figure
 
         _, ax_out = super().plot_rate_map(ax=ax, **kwargs)
 
-        if ax is not None:
+        if ax is None:
             ax = ax_out
 
         return ax
@@ -529,6 +679,8 @@ class ObjectVectorCells(riabObjectVectorCells):
 
         if "ax" in kwargs.keys():
             kwargs["fig"] = kwargs["ax"].figure
+        else:
+            kwargs["return_env_fig"] = True  # avoid internal error
 
         t, _, _ = self.get_plotting_times(t_start, t_end)
         t_start = t[0]
@@ -537,7 +689,6 @@ class ObjectVectorCells(riabObjectVectorCells):
         _, sub_ax = super().plot_rate_timeseries(
             t_start=t_start,
             t_end=t_end,
-            ax=sub_ax,
             autosave=False,
             **kwargs,
         )
@@ -550,23 +701,55 @@ class ObjectVectorCells(riabObjectVectorCells):
             sub_ax.set_xticks(xticks)
             sub_ax.set_xticklabels(xticks)
 
+        fig = sub_ax.figure
         util.save_figure(fig, f"{self.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
 
         return sub_ax
 
 
-class FeedForwardLayer(riabFeedForwardLayer):
+class FeedForwardLayer(riabFeedForwardLayer, util.ParamsManagerMixin):
     """
     FeedForwardLayer()
 
     Class extending ratinabox.Neurons.FeedForwardLayer to add some functionalities to
     the plotting functions.
 
+    See ratinabox.Neurons.FeedForwardLayer for default parameters.
+
     List of methods (in addition ratinabox.Neurons.FeedForwardLayer methods):
         • self.get_plotting_times()
         • self.plot_rate_map()
         • self.plot_rate_timeseries()
     """
+
+    default_params = dict()  # type: dict[str, Any]
+
+    ignored_param_keys = list()  # type: list[str]
+    ignored_params = {key: None for key in ignored_param_keys}
+
+    fixed_params = dict()  # type: dict[str, Any]
+
+    def __init__(self, Agent, params=dict()):
+        """
+        FeedForwardLayer(Agent)
+
+        Initialise a feedforward layer.
+
+        Attributes:
+        - Agent (agent.ResetableAgent): Associated agent.
+
+        Args:
+        - Agent (agent.ResetableAgent): Associated agent.
+        - params (dict, optional): Neuron layer parameters. Default is dict().
+        """
+
+        self.check_if_ignored_params(params)
+        params = self.add_fixed_params(params)
+
+        self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
+        self.params.update(params)
+
+        super().__init__(Agent, params=params)
 
     def get_plotting_times(
         self, t_start: float | None = None, t_end: float | None = None
@@ -610,12 +793,14 @@ class FeedForwardLayer(riabFeedForwardLayer):
            (one per plotted ROI, if environment is 2D).
         """
 
-        if ax is not None:
+        if ax is None:
+            kwargs["return_env_fig"] = True  # avoid internal error
+        else:
             kwargs["fig"] = np.asarray(ax).ravel()[0].figure
 
         _, ax_out = super().plot_rate_map(ax=ax, **kwargs)
 
-        if ax is not None:
+        if ax is None:
             ax = ax_out
 
         return ax
@@ -658,6 +843,8 @@ class FeedForwardLayer(riabFeedForwardLayer):
 
         if "ax" in kwargs.keys():
             kwargs["fig"] = kwargs["ax"].figure
+        else:
+            kwargs["return_env_fig"] = True  # avoid internal error
 
         t, _, _ = self.get_plotting_times(t_start, t_end)
         t_start = t[0]
@@ -666,7 +853,6 @@ class FeedForwardLayer(riabFeedForwardLayer):
         _, sub_ax = super().plot_rate_timeseries(
             t_start=t_start,
             t_end=t_end,
-            ax=sub_ax,
             autosave=False,
             **kwargs,
         )
@@ -679,23 +865,55 @@ class FeedForwardLayer(riabFeedForwardLayer):
             sub_ax.set_xticks(xticks)
             sub_ax.set_xticklabels(xticks)
 
+        fig = sub_ax.figure
         util.save_figure(fig, f"{self.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
 
         return sub_ax
 
 
-class ValueNeuron(riabValueNeuron):
+class ValueNeuron(riabValueNeuron, util.ParamsManagerMixin):
     """
     ValueNeuron()
 
     Class extending ratinabox.contribs.ValueNeuron to add some functionalities to
     the plotting functions.
 
+    See ratinabox.contribs.ValueNeuron for default parameters.
+
     List of methods (in addition ratinabox.contribs.ValueNeuron methods):
         • self.get_plotting_times()
         • self.plot_rate_map()
         • self.plot_rate_timeseries()
     """
+
+    default_params = dict()  # type: dict[str, Any]
+
+    ignored_param_keys = list()  # type: list[str]
+    ignored_params = {key: None for key in ignored_param_keys}
+
+    fixed_params = dict()  # type: dict[str, Any]
+
+    def __init__(self, Agent, params=dict()):
+        """
+        ValueNeuron(Agent)
+
+        Initialise a value neuron layer.
+
+        Attributes:
+        - Agent (agent.ResetableAgent): Associated agent.
+
+        Args:
+        - Agent (agent.ResetableAgent): Associated agent.
+        - params (dict, optional): Neuron layer parameters. Default is dict().
+        """
+
+        self.check_if_ignored_params(params)
+        params = self.add_fixed_params(params)
+
+        self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
+        self.params.update(params)
+
+        super().__init__(Agent, params=params)
 
     def get_plotting_times(
         self, t_start: float | None = None, t_end: float | None = None
@@ -740,12 +958,14 @@ class ValueNeuron(riabValueNeuron):
            (one per plotted ROI, if environment is 2D).
         """
 
-        if ax is not None:
+        if ax is None:
+            kwargs["return_env_fig"] = True  # avoid internal error
+        else:
             kwargs["fig"] = np.asarray(ax).ravel()[0].figure
 
         _, ax_out = super().plot_rate_map(ax=ax, **kwargs)
 
-        if ax is not None:
+        if ax is None:
             ax = ax_out
 
         return ax
@@ -788,6 +1008,8 @@ class ValueNeuron(riabValueNeuron):
 
         if "ax" in kwargs.keys():
             kwargs["fig"] = kwargs["ax"].figure
+        else:
+            kwargs["return_env_fig"] = True  # avoid internal error
 
         t, _, _ = self.get_plotting_times(t_start, t_end)
         t_start = t[0]
@@ -796,7 +1018,6 @@ class ValueNeuron(riabValueNeuron):
         _, sub_ax = super().plot_rate_timeseries(
             t_start=t_start,
             t_end=t_end,
-            ax=sub_ax,
             autosave=False,
             **kwargs,
         )
@@ -809,6 +1030,7 @@ class ValueNeuron(riabValueNeuron):
             sub_ax.set_xticks(xticks)
             sub_ax.set_xticklabels(xticks)
 
+        fig = sub_ax.figure
         util.save_figure(fig, f"{self.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
 
         return sub_ax
