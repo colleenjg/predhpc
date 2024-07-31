@@ -58,7 +58,7 @@ def plot_T_maze(
     plot_util.plot_overlayed_rate_maps(
         CA3_PCs, sub_ax=ax1D[1], method="max", colorbar=False
     )
-    CA3_PCs.plot_place_cell_locations(ax=ax1D[1])
+    CA3_PCs.plot_place_cell_locations(sub_ax=ax1D[1])
     ax1D[1].scatter(
         *Ag.target_position,
         marker=".",
@@ -357,9 +357,11 @@ def plot_1D_spatial_info(
     plot_util.plot_1D_reset_environment(Ag, sub_ax=ax1D[0], autosave=False)
 
     # Plot CA3 place cell locations
-    CA3_PCs.plot_place_cell_locations(ax=ax1D[1], autosave=False)
+    CA3_PCs.plot_place_cell_locations(
+        sub_ax=ax1D[1], autosave=False, plot_objects=False
+    )
     plot_util.plot_overlayed_rate_maps(
-        CA3_PCs, fsub_ax=ax1D[1], method="max", autosave=False
+        CA3_PCs, sub_ax=ax1D[1], method="max", autosave=False
     )
     ymin, ymax = ax1D[1].get_ylim()
     ymin = min(ymin, 0)
@@ -376,7 +378,7 @@ def plot_1D_spatial_info(
         plot_util.plot_1D_input_place_cell_weights(
             np.asarray(CA1_weights),
             CA3_PCs,
-            sub_ax=ax1D[3],
+            sub_ax=ax1D[i],
             autosave=False,
         )
         i += 1

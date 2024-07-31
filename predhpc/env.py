@@ -93,7 +93,7 @@ class Environment(riabEnv, util.ParamsManagerMixin):
 
         return figsize
 
-    def plot_environment(self, fig=None, sub_ax=None, return_env_fig=False, **kwargs):
+    def plot_environment(self, fig=None, ax=None, return_env_fig=False, **kwargs):
         """
         self.plot_environment()
 
@@ -103,8 +103,8 @@ class Environment(riabEnv, util.ParamsManagerMixin):
         - fig (mpl_figure.Figure, optional): Figure with subplot to plot on. If None,
             a new figure is created. Kept for compatibility and inferred if missing.
             Default is None.
-        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
-            created.
+        - ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is created.
+            Default is None.
         - return_env_fig (bool, optional): Whether to return the figure
             (for compatibility). Default is False.
 
@@ -118,13 +118,7 @@ class Environment(riabEnv, util.ParamsManagerMixin):
         - sub_ax (plt.Axes): Subplot with environment plotted.
         """
 
-        if sub_ax is not None:
-            kwargs["ax"] = sub_ax
-
-        if "ax" in kwargs.keys():
-            kwargs["fig"] = kwargs["ax"].figure
-            if fig is not None and fig != kwargs["fig"]:
-                raise ValueError("fig and ax are not from the same figure.")
+        kwargs = plot_util.organize_fig_ax_kwargs(fig=fig, ax=ax, **kwargs)
 
         fig, sub_ax = super().plot_environment(**kwargs)
         if return_env_fig:
@@ -150,6 +144,8 @@ class TEnv(Environment):
     }
 
     List of properties (in addition to Environment properties):
+        • self.stem_left
+        • self.stem_right
         • self.branch_y
         • self.left_T_end
         • self.right_T_end
@@ -219,6 +215,40 @@ class TEnv(Environment):
 
         if self.arm_height_as_prop_of_y is None:  # type: ignore[attr-defined,has-type]
             self.arm_height_as_prop_of_y = prop_env
+
+    @property
+    def stem_left(self) -> float:
+        """
+        self.stem_left
+
+        Obtain the left x-coordinate of the T-shape stem.
+
+        Returns:
+        - (float): Left x-coordinate of the T-shape stem.
+        """
+
+        if not hasattr(self, "_stem_left"):
+            self._stem_left = (
+                0.5 - self.stem_width_as_prop_of_x / 2
+            ) * self.get_scale_x()
+        return self._stem_left
+
+    @property
+    def stem_right(self) -> float:
+        """
+        self.stem_right
+
+        Obtain the right x-coordinate of the T-shape stem.
+
+        Returns:
+        - (float): Right x-coordinate of the T-shape stem.
+        """
+
+        if not hasattr(self, "_stem_right"):
+            self._stem_right = (
+                0.5 + self.stem_width_as_prop_of_x / 2
+            ) * self.get_scale_x()
+        return self._stem_right
 
     @property
     def branch_y(self) -> float:
@@ -475,14 +505,9 @@ class TEnv(Environment):
         - sub_ax (plt.Axes): Subplot with environment plotted.
         """
 
-        env_out = super().plot_environment(
-            fig=fig, ax=sub_ax, autosave=False, plot_objects=False, **kwargs
-        )
+        kwargs = plot_util.organize_fig_ax_kwargs(fig=fig, sub_ax=sub_ax, **kwargs)
 
-        if return_env_fig:
-            fig, sub_ax = env_out
-        else:
-            sub_ax = env_out
+        sub_ax = super().plot_environment(autosave=False, plot_objects=False, **kwargs)
 
         start_kwargs = plot_util.get_plot_marker_kwargs("start")
         sub_ax.scatter(*self.T_start, zorder=5, label="start", **start_kwargs)
@@ -1158,7 +1183,7 @@ class OpenField(Environment):
         end_coords = None
         for wall_ori, wall_direc in wall_ori_direcs:
             c = 0 if wall_ori == "x" else 1
-            end_coords = np.asarray(start_coords)  # new array
+            end_coords = copy.deepcopy(np.asarray(start_coords))
             end_coords[c] += wall_length * wall_direc
 
             # check that end_coords are within bounds
@@ -1469,26 +1494,18 @@ class OpenField(Environment):
         - sub_ax (plt.Axes): Subplot with environment plotted.
         """
 
-        if sub_ax is None:
+        kwargs = plot_util.organize_fig_ax_kwargs(fig=fig, sub_ax=sub_ax, **kwargs)
+
+        if "ax" not in kwargs.keys():
             env_width = self.extent[1] - self.extent[0]
             add_x = 0
             if plot_objects:
                 add_x = 3 * env_width  # for legend and labels
-            _, sub_ax = plt.subplots(
+            kwargs["fig"], kwargs["ax"] = plt.subplots(
                 figsize=(3 * env_width + add_x, 3 * (self.extent[3] - self.extent[2]))
             )
 
-        env_out = super().plot_environment(
-            fig=fig, ax=sub_ax, autosave=False, plot_objects=False, **kwargs
-        )
-
-        if return_env_fig:
-            fig, sub_ax = env_out
-        else:
-            sub_ax = env_out
-
-        if sub_ax is None:
-            raise RuntimeError("sub_ax is None.")
+        sub_ax = super().plot_environment(autosave=False, plot_objects=False, **kwargs)
 
         if plot_objects:
             object_type_num_to_plot_params_dict = copy.deepcopy(

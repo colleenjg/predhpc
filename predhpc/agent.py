@@ -5,6 +5,7 @@ import copy
 from matplotlib import pyplot as plt  # type: ignore[import]
 from matplotlib import animation, markers
 from matplotlib import colors as mpl_colors
+from matplotlib import figure as mpl_figure
 import numpy as np
 import pandas as pd  # type: ignore[import]
 import seaborn as sns  # type: ignore[import]
@@ -158,7 +159,11 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
             self._target_df_columns = [
                 "position_x",
                 "set_step",
+                "set_time",
                 "reached_step",
+                "reached_time",
+                "num_steps_total",
+                "time_total",
             ]
 
             if self.Environment.D == 2:
@@ -183,12 +188,16 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
             if self.Environment.D == 2:
                 trajectory_df_columns.append("start_position_y")
 
-            trajectory_df_columns.extend(["start_step", "stop_position_x"])
+            trajectory_df_columns.extend(
+                ["start_step", "start_time", "stop_position_x"]
+            )
 
             if self.Environment.D == 2:
                 trajectory_df_columns.append("stop_position_y")
 
-            trajectory_df_columns.extend(["stop_step", "num_steps_total"])
+            trajectory_df_columns.extend(
+                ["stop_step", "stop_time", "num_steps_total", "time_total"]
+            )
 
             self._trajectory_df_columns = trajectory_df_columns
 
@@ -261,6 +270,7 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
         trajectory_data = {
             "start_position_x": self.pos[0],
             "start_step": self.num_steps_total,
+            "start_time": self.t,
         }
 
         if self.Environment.D == 2:
@@ -277,12 +287,15 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
 
         idx = len(self.trajectory_df) - 1
         start_step = int(self.trajectory_df.loc[idx, "start_step"])  # type: ignore[assignment]
+        start_time = self.trajectory_df.loc[idx, "start_time"]  # type: ignore[assignment]
 
         self.trajectory_df.loc[idx, "stop_position_x"] = self.pos[0]
         self.trajectory_df.loc[idx, "stop_step"] = self.num_steps_total
+        self.trajectory_df.loc[idx, "stop_time"] = self.t
         self.trajectory_df.loc[idx, "num_steps_total"] = (
             self.num_steps_total - start_step
         )
+        self.trajectory_df.loc[idx, "time_total"] = self.t - start_time
 
         if self.Environment.D == 2:
             self.trajectory_df["stop_position_y"] = self.pos[1]
@@ -301,6 +314,24 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
         self.target_df = pd.DataFrame(columns=self.target_df_columns)
         self._add_new_target_to_df()
 
+    def _end_target_df_line(self):
+        """
+        self._end_target_df_line()
+
+        End the current target dataframe line by adding the total number of steps and
+        time taken (whether target was reached or not).
+        """
+
+        if len(self.target_df) == 0:
+            return
+
+        df_idx = len(self.target_df) - 1
+
+        num_steps = self.num_steps_total - self.target_df.loc[df_idx, "set_step"]  # type: ignore[operator]
+        self.target_df.loc[df_idx, "num_steps_total"] = num_steps
+        time_total = self.t - self.target_df.loc[df_idx, "set_time"]  # type: ignore[operator]
+        self.target_df.loc[df_idx, "time_total"] = time_total
+
     def _add_new_target_to_df(self):
         """
         self._add_new_target_to_df()
@@ -311,9 +342,12 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
         if self.target_position is None:
             return
 
+        self._end_target_df_line()
+
         target_data = {
             "position_x": self.target_position[0],
             "set_step": self.num_steps_total,
+            "set_time": self.t,
         }
 
         if self.Environment.D == 2:
@@ -355,6 +389,7 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
             dt = self.dt  # type: ignore[has-type]
 
         # resample velocity until it has the correct sign
+        new_velocity = self.velocity
         for _ in range(10):
             if np.sign(new_velocity) != trajectory_sign:  # type: ignore[has-type]
                 new_velocity = self.velocity + rutils.ornstein_uhlenbeck(
@@ -446,6 +481,8 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
             checking for target.
         - target_position (1D np.ndarray or None): Target position.
 
+        Args:
+        - position (1D np.ndarray or list): Target position.
         """
 
         self.target_position = self.format_position(position)
@@ -842,9 +879,8 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
             df_idx = len(self.target_df) - 1
             self._most_recent_target_reached_step = self.num_steps_total
             self.target_df.loc[df_idx, "reached_step"] = self.num_steps_total
+            self.target_df.loc[df_idx, "reached_time"] = self.t
 
-            num_steps = self.num_steps_total - self.target_df.loc[df_idx, "set_step"]  # type: ignore[operator]
-            self.target_df.loc[df_idx, "num_steps"] = num_steps
             self._add_new_target_to_df()
 
         return self.reached_target
@@ -974,6 +1010,43 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
 
         self.current_trajectory_length += 1
         self.num_steps_total += 1
+
+    def plot_trajectory(self, return_traj_fig=False, **kwargs) -> plt.Axes:
+        """
+        self.plot_trajectory()
+
+        Redirects to plot agent trajectories. Used to enable
+        ratinabox.Agent.animate_trajectory() to work.
+
+        Args:
+        - return_traj_fig (bool, optional): Whether to return the figure as well.
+
+        Keyword args:
+        - **kwargs: Keyword arguments passed to ratinabox.Agent.plot_trajectory().
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot axis with the agent's trajectory plotted.
+        """
+
+        kwargs = plot_util.organize_fig_ax_kwargs(**kwargs)
+
+        if "additional_plot_func" in kwargs.keys():
+            kwargs.pop("additional_plot_func")
+
+        if "return_env_fig" in kwargs.keys():
+            kwargs.pop("return_env_fig")
+
+        if "ax" in kwargs.keys():
+            kwargs["sub_ax"] = kwargs.pop("ax")
+            kwargs.pop("fig")
+
+        sub_ax = self.plot_trajectories(**kwargs)
+
+        if return_traj_fig:
+            fig = sub_ax.figure
+            return fig, sub_ax
+        else:
+            return sub_ax
 
     def plot_trajectories_to_date(
         self, in_minutes: bool = True, autosave: bool | None = None
@@ -1177,9 +1250,8 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
         xs = [t[x] for x in indices if x >= startid and x < endid]
         ys = [position[dim_idx]] * len(xs)
 
-        plot_kwargs = plot_util.get_plot_marker_kwargs(
-            position_name, base_s=base_s
-        ).update(kwargs)
+        plot_kwargs = plot_util.get_plot_marker_kwargs(position_name, base_s=base_s)
+        plot_kwargs.update(kwargs)
         sub_ax.scatter(xs, ys, **plot_kwargs)
 
     def plot_trajectories_across_time(
@@ -1299,6 +1371,71 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
 
         return sub_ax
 
+    def add_agent_to_plot(
+        self,
+        sub_ax,
+        coords=None,
+        agent_color="r",
+        head_direction=None,
+        zorder=None,
+        s=40,
+        alpha=1,
+    ):
+        """
+        self.add_agent_to_plot()
+
+        Add the agent to a subplot.
+
+        Args:
+        - sub_ax (plt.Axes): Subplot to plot on.
+        - coords (1D np.ndarray, optional): Agent coordinates to plot. If None,
+            current position is used. Default is None.
+        - agent_color (str, optional): Agent color. Default is 'r'.
+        - head_direction (1D np.ndarray, optional): Agent head direction.
+            If None and coords is None, current head direction is plotted. Otherwise,
+            head direction is not plotted. Default is None.
+        - zorder (int, optional): Z order. Default is None.
+        - s (int, optional): Marker size. Default is 40.
+        - alpha (float, optional): Marker transparency. Default is 1.
+        """
+
+        if coords is None:
+            coords = self.pos
+            if head_direction is None:
+                head_direction = self.head_direction
+        else:
+            coords = self.format_position(coords)
+
+        sub_ax.scatter(
+            *coords,
+            s=s,
+            zorder=3,
+            c=agent_color,
+            linewidth=0,
+            marker="o",
+            alpha=alpha,
+        )
+
+        # plot head direction
+        if head_direction is not None:
+            rotated_agent_marker = markers.MarkerStyle(
+                marker=[(-1, 0), (1, 0), (0, 4)]
+            )  # a triangle
+            rotated_agent_marker._transform = (
+                rotated_agent_marker.get_transform().rotate_deg(
+                    -rutils.get_bearing(head_direction) * 180 / np.pi
+                )
+            )
+            sub_ax.scatter(
+                *coords,
+                s=s * 5,
+                alpha=alpha,
+                zorder=zorder,
+                c=agent_color,
+                linewidth=0,
+                marker=rotated_agent_marker,
+            )
+
     def plot_trajectories(
         self,
         t_start: float | None = None,
@@ -1306,8 +1443,10 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
         framerate: int | float = 10,
         sub_ax: plt.Axes | None = None,
         decay_point_size: bool = False,
+        decay_point_timescale: float = 10,
         plot_agent: bool = True,
         agent_color: str = "r",
+        plot_head_direction: bool = False,
         colormap: str | None | mpl_colors.Colormap = None,
         alpha: float = 0.7,
         xlim: float | None = None,
@@ -1339,10 +1478,14 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
         - decay_point_size (bool, optional): Whether to decay trajectory point size
             over time, with recent timepoints being plotted largest. Only applies to 2D
             environments. Default is False.
-        - plot_agent (bool, optional): Whether to plot agent's current position.
+        - decay_point_timescale (float, optional): Time scale over which to decay
+            point size. Default is 10.
+        - plot_agent (bool, optional): Whether to plot agent's last position.
             Default is True.
         - agent_color (str, optional): Color for agent point, if applicable.
             Default is 'r'.
+        - plot_head_direction (bool, optional): Whether to plot the agent's last head
+            direction. Default is False.
         - colormap (str, optional): Colormap to use to plot trajectories.
             Default is None.
         - alpha (float, optional): Trajectory point transparency. Default is 0.6.
@@ -1418,8 +1561,8 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
 
             s = s_2D * np.ones_like(time)
             if decay_point_size == True:
-                s = s_2D * np.exp((time - time[-1]) / 10)
-                s[(time[-1] - time) > s_2D] *= 0
+                s = s_2D * np.exp((time - time[-1]) / decay_point_timescale)
+                s[(time[-1] - time) > 1.5 * decay_point_timescale] *= 0
 
             if plot_traj_ends == True and len(self.trajectory_df) - 1 > 0:
                 ends = np.where(np.diff(traj_idx) > 0)[0]
@@ -1427,11 +1570,6 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
                 s[ends] = s_2D * 2
                 # set last colormap value to dark red
                 colors[ends] = mpl_colors.to_rgba("darkred")  # type: ignore[arg-type]
-
-            if plot_agent == True:
-                s[-1] = s_2D * 2.75
-                # set last colormap value to red
-                colors[-1] = mpl_colors.to_rgba(agent_color)  # type: ignore[arg-type]
 
             sub_ax.scatter(
                 *trajectory.T,
@@ -1441,6 +1579,22 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
                 c=colors,
                 linewidth=0,
             )
+
+            if plot_agent == True:
+                head_direction = None
+                if plot_head_direction:
+                    head_direction = self.history["head_direction"][time_idx[-1]]
+
+                self.add_agent_to_plot(
+                    sub_ax,
+                    coords=trajectory[-1],
+                    agent_color=agent_color,
+                    head_direction=head_direction,
+                    zorder=3,
+                    s=s_2D * 2.75,
+                    alpha=0.9,
+                )
+
         if self.Environment.dimensionality == "1D":
             sub_ax = self.plot_trajectories_across_time(
                 t_start=t_start,
@@ -1621,7 +1775,7 @@ class TAgent(ResetableAgent):
     List of methods (in addition to ResetableAgent methods):
         • self.set_all_positions()
         • self.set_current_trajectory_arm()
-        • self.get_direction_to_target()
+        • self.get_direction_to_end()
         • self.check_if_reset_position_reached()
         • self.check_if_left_reset_position_reached()
         • self.check_if_right_reset_position_reached()
@@ -1706,8 +1860,11 @@ class TAgent(ResetableAgent):
                 "position_x",
                 "position_y",
                 "set_step",
+                "set_time",
                 "reached_step",
-                "num_steps",
+                "reached_time",
+                "num_steps_total",
+                "time_total",
             ]
 
         return self._target_df_columns
@@ -1722,11 +1879,14 @@ class TAgent(ResetableAgent):
         if self.target_position is None:
             raise RuntimeError("Target position is None.")
 
+        self._end_target_df_line()
+
         target_data = {
             "target_arm": self.target_arm,  # type: ignore[attr-defined]
             "position_x": self.target_position[0],
             "position_y": self.target_position[1],
             "set_step": self.num_steps_total,
+            "set_time": self.t,
         }
         self.target_df.loc[len(self.target_df)] = target_data  # type: ignore[assignment]
 
@@ -1737,6 +1897,7 @@ class TAgent(ResetableAgent):
         Set all the positions for the agent.
 
         Attributes:
+        - _target_object_idx (int): Index of the target object in the environment.
         - left_reset_position (1D np.ndarray): Left arm reset position for the agent.
         - reset_position (list): List of reset positions.
         - right_reset_position (1D np.ndarray): Right arm reset position for the agent.
@@ -1769,12 +1930,47 @@ class TAgent(ResetableAgent):
         ]
         self.target_position = self.format_position(target_position)
         self.Environment.add_object(self.target_position)
+        self._target_object_idx = len(self.Environment.objects["objects"]) - 1
 
         self.steps_before_checking_for_target = 0
 
         # set initial position and velocity
         if self.start_position is not None:
             self.set_position_and_velocity(position=self.start_position, velocity=0)
+
+    def set_target_position(self, position):
+        """
+        self.set_target_position(position)
+
+        Set the target position.
+
+        Attributes:
+        - target_arm (str): Arm of the target.
+        - target_in_branch (bool): Whether the target is in the branch.
+        - target_position (1D np.ndarray): Target position of the agent.
+
+        Args:
+        - position (1D np.ndarray): Position to set the target to.
+        """
+
+        super().set_target_position(position)
+
+        if self.target_position is None:
+            self.target_arm = None
+            self.target_in_branch = False
+        else:
+            x, y = self.target_position
+            if y < self.Environment.branch_y:
+                self.target_arm = None
+                self.target_in_branch = False
+            else:
+                self.target_in_branch = True
+                if x > self.Environment.stim_right:
+                    self.target_arm = "right"
+                elif x < self.Environment.stim_left:
+                    self.target_arm = "left"
+                else:
+                    self.target_arm = None
 
     def set_current_trajectory_arm(self, arm: str = "random"):
         """
@@ -1802,15 +1998,15 @@ class TAgent(ResetableAgent):
         else:
             raise ValueError(f"Arm must be 'random', 'left' or 'right', but got {arm}.")
 
-    def get_direction_to_target(self) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
+    def get_direction_to_end(self) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
         """
-        self.get_direction_to_target()
+        self.get_direction_to_end()
 
-        Obtain the direction from the current agent position to the target.
+        Obtain the direction from the current agent position to the trajectory end.
 
         Returns:
         - direction (1D np.ndarray): Direction from the current agent position to the
-            target [x, y].
+            end of the trajectory arm.
         """
 
         if self.current_arm == "left":
@@ -1909,10 +2105,10 @@ class TAgent(ResetableAgent):
         """
         self.update()
 
-        Update the agent's position. Checks whether target or trajectory end are
-        reached, and if so, resets the agent. If agent is near the branch point, the
-        agent drifts towards the target. Otherwise, the agent drifts towards the
-        branch point.
+        Update the agent's position. Checks whether target is reached. Checks whether
+        trajectory has ended, and if so, resets the agent. If agent is near the branch
+        point and the target is in a branch, the agent drifts towards the target.
+        Otherwise, the agent drifts towards the branch point.
 
         Args:
         - dt (float, optional): Time step. Default is None.
@@ -1930,7 +2126,7 @@ class TAgent(ResetableAgent):
 
         # calculate drift_velocity
         if self.near_branch_point:
-            direction = self.get_direction_to_target()
+            direction = self.get_direction_to_end()
         else:
             direction = self.Environment.T_split - self.pos
         drift_velocity = (
@@ -1994,7 +2190,7 @@ class OpenFieldAgent(ResetableAgent):
         • self.plot_trajectories()
         • self.plot_trajectory_targets()
         • self.plot_trajectory_target_coords_over_time()
-        • self.animate_trajectory()
+        • self.animate_trajectories()
     """
 
     default_params = {
@@ -2059,10 +2255,14 @@ class OpenFieldAgent(ResetableAgent):
                 "position_x",
                 "position_y",
                 "set_step",
+                "set_time",
                 "random_walk_periods",
                 "reached_step",
-                "num_steps",
+                "reached_time",
                 "num_random_walk_steps",
+                "random_walk_time",
+                "num_steps_total",
+                "time_total",
             ]
 
             # add a target in sight column with lists?
@@ -2085,6 +2285,7 @@ class OpenFieldAgent(ResetableAgent):
             teleportation_columns = [
                 "teleport_pair_num",
                 "step_num",
+                "time",
             ]
 
             for direction in ["in", "out"]:
@@ -2157,6 +2358,34 @@ class OpenFieldAgent(ResetableAgent):
 
         self._end_random_walk()
 
+    def _end_target_df_line(self):
+        """
+        self._end_target_df_line()
+
+        End the current target dataframe line by adding the total number of steps and
+        time taken (whether target was reached or not). Also checks whether a current
+        random walk should end, and computes random walk values for the dataframe line.
+        """
+
+        if len(self.target_df) == 0:
+            return
+
+        super()._end_target_df_line()
+
+        # add random walk steps
+        self.check_target_reached_during_random_walk()
+        self._end_random_walk()
+
+        df_idx = len(self.target_df) - 1
+        random_walk_periods = np.asarray(
+            self.target_df.loc[df_idx, "random_walk_periods"]
+        )
+        num_random_walk_steps = 0
+        if len(random_walk_periods) > 0:
+            num_random_walk_steps = np.sum(np.diff(random_walk_periods, axis=1))
+        self.target_df.loc[df_idx, "num_random_walk_steps"] = num_random_walk_steps
+        self.target_df.loc[df_idx, "random_walk_time"] = num_random_walk_steps * self.dt
+
     def _add_new_target_to_df(self, target: str | None = None):
         """
         self._add_new_target_to_df()
@@ -2174,19 +2403,7 @@ class OpenFieldAgent(ResetableAgent):
             randomly. Default is None.
         """
 
-        # add random walk steps
-        if len(self.target_df) != 0:
-            self.check_target_reached_during_random_walk()
-            self._end_random_walk()
-            random_walk_periods = np.asarray(
-                self.target_df.loc[len(self.target_df) - 1, "random_walk_periods"]
-            )
-            num_random_walk_steps = 0
-            if len(random_walk_periods) > 0:
-                num_random_walk_steps = np.sum(np.diff(random_walk_periods, axis=1))
-            self.target_df.loc[len(self.target_df) - 1, "num_random_walk_steps"] = (
-                num_random_walk_steps
-            )
+        self._end_target_df_line()
 
         target_probability_df = self.get_target_probability_df()
 
@@ -2223,6 +2440,7 @@ class OpenFieldAgent(ResetableAgent):
             }
 
         target_data["set_step"] = self.num_steps_total  # type: ignore[assignment]
+        target_data["set_time"] = self.t  # type: ignore[assignment]
         target_data["random_walk_periods"] = list()  # type: ignore[assignment]
 
         new_idx = len(self.target_df)
@@ -2435,7 +2653,7 @@ class OpenFieldAgent(ResetableAgent):
             else:
                 raise ValueError(f"Unrecognized check_value {check_value}.")
 
-        check_value = np.asarray(check_value)  # copy
+        check_value = copy.deepcopy(np.asarray(check_value))
 
         if not velocity:
             if teleport_coords is None:
@@ -2807,6 +3025,7 @@ class OpenFieldAgent(ResetableAgent):
             teleportation_data = {
                 "teleport_pair_num": teleport_pair_num,
                 "step_num": self.num_steps_total,
+                "time": self.t,
             }
 
             for direction in ["in", "out"]:
@@ -3000,7 +3219,7 @@ class OpenFieldAgent(ResetableAgent):
         specified by the specified time point.
 
         Colors:
-        - lavenderblush: Trajectory had no target or time corresponds exactly to the
+        - lavender: Trajectory had no target or time corresponds exactly to the
             reach time.
         - red: Target not yet reached in the trajectory.
         - violet: Target was in a random walk.
@@ -3013,12 +3232,12 @@ class OpenFieldAgent(ResetableAgent):
         """
 
         endid = plot_util.get_plotting_times(np.asarray(self.history["t"]), t_end=t)[1]
-        agent_color = "lavenderblush"
+        agent_color = "dodgerblue"
         past_df = self.target_df.loc[self.target_df["set_step"] <= endid]
         if len(past_df):
             row = past_df.loc[past_df.index[-1]]
             if row["object_type_name"] == "no_target":
-                agent_color = "lavenderblush"
+                agent_color = "dodgerblue"
             elif np.isnan(row["reached_step"]) or endid < row["reached_step"]:
                 agent_color = "red"
                 # check if this was during random walk
@@ -3367,13 +3586,20 @@ class OpenFieldAgent(ResetableAgent):
 
         return sub_ax
 
-    def animate_trajectory(
-        self, additional_plot_func: Callable | None = None, **kwargs
+    def animate_trajectories(
+        self,
+        plot_head_direction=True,
+        additional_plot_func: Callable | None = None,
+        **kwargs,
     ) -> animation.FuncAnimation:
         """
+        self.animate_trajectories()
+
         Animate the trajectory of the agent.
 
         Args:
+        - plot_head_direction (bool, optional): Whether to plot the last head direction.
+            Default is True.
         - additional_plot_func: A function that is called after each frame of the
             animation is plotted. It takes sub_ax, t and **kwargs and returns sub_ax.
 
@@ -3385,7 +3611,8 @@ class OpenFieldAgent(ResetableAgent):
         """
 
         def run_all_additional_plot_funcs(
-            sub_ax: plt.Axes,
+            fig: mpl_figure.Figure,
+            ax: plt.Axes,
             t: float | None = None,
             **kwargs,
         ) -> plt.Axes:
@@ -3395,23 +3622,30 @@ class OpenFieldAgent(ResetableAgent):
             Run through all additional plot functions.
 
             Args:
-            - sub_ax (plt.Axes): Subplot to plot on.
+            - fig (mpl_figure.Figure): Figure to plot on (for backward compatibility).
+            - ax (plt.Axes): Subplot to plot on (called 'ax' for backward compatibility).
             - t (float, optional): The current time step. Defaut is None.
 
             Returns:
             - sub_ax (plt.Axes): Subplot with additional plot elements added.
             """
 
+            sub_ax = ax
             if additional_plot_func is not None:
                 sub_ax = additional_plot_func(sub_ax=sub_ax, t=t, **kwargs)
 
             # self.add_target_to_plot(sub_ax, t=t)
             plot_util.remove_prev_handle_labels(sub_ax)
 
-            return sub_ax
+            return fig, sub_ax
 
-        anim = super().animate_trajectory(
-            additional_plot_func=run_all_additional_plot_funcs, **kwargs
+        # call ratinabox.Agent method
+        anim = self.animate_trajectory(
+            additional_plot_func=run_all_additional_plot_funcs,
+            plot_head_direction=plot_head_direction,
+            return_traj_fig=True,
+            return_env_fig=True,
+            **kwargs,
         )
 
         return anim

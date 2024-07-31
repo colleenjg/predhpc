@@ -39,6 +39,11 @@ class SimpleValueNeuron(riab_neurons.PlaceCells):
         "max_fr": 10,
     }
 
+    ignored_param_keys = list()  # type: list[str]
+    ignored_params = {key: None for key in ignored_param_keys}
+
+    fixed_params = dict()  # type: dict[str, Any]
+
     def __init__(self, Agent, params=dict()):
         """
         SimpleValueNeuron(Agent)
@@ -154,8 +159,9 @@ class SimpleValueNeuron(riab_neurons.PlaceCells):
             Default is None.
         - ax (np.ndarray or plt.Axes, optional): Subplot or array of subplots to plot
             on (one per plotted ROI, if environment is 2D). Default is None.
-        - kwargs: Additional keyword arguments to pass to self.plot_rate_map().
-            Default is dict().
+
+        Keyword args:
+        - **kwargs: Keyword arguments to pass to self.get_local_gradient().
 
         Returns:
         - ax (np.ndarray or plt.Axes): Subplot or array of subplots
@@ -173,8 +179,6 @@ class SimpleValueNeuron(riab_neurons.PlaceCells):
         ys = [pos[1], pos[1] + gradV[1]]
 
         ax_out = self.plot_rate_map(ax=ax, no_legend=True)
-
-        _, ax_out = super().plot_rate_map(ax=ax, **kwargs)
 
         if ax is None:
             ax = ax_out

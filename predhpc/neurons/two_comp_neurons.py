@@ -69,6 +69,7 @@ class TwoCompLayer(object):
         "inhibit_activation_function": params_util.LINEAR_SIGMOID_ACTIVATION_FUNCTION,
         "inhibit_input_filter_tau": 3,
         "inhibit_input_trend_tau": None,
+        "mutual_inhibition_weight": None,
     }
 
     ignored_param_keys = list()  # type: list[str]
@@ -135,6 +136,7 @@ class TwoCompLayer(object):
             "soma_to_dend_weight",
             "dend_to_soma_weight",
             "dend_first",
+            "mutual_inhibition_weight",
         ]
 
         for key, value in all_params.items():
@@ -250,6 +252,13 @@ class TwoCompLayer(object):
             )
             self.DendriteCompartment.add_input(
                 self.DendriteInhibition, w=dend_inhibition, recurrent=self.dend_first
+            )
+
+        if self.mutual_inhibition_weight is not None:
+            mutual_inhibition = (np.eye(self.n) - 1) * self.mutual_inhibition_weight
+            self.SomaCompartment.add_input(self.SomaCompartment, w=mutual_inhibition)
+            self.SomaCompartment.add_input_layers_with_no_learning(
+                self.SomaCompartment.name
             )
 
     def set_learn(self, learn=None, soma=None, dend=None, inhibit=None):
@@ -556,7 +565,9 @@ class TwoCompLayer(object):
             title = f"{title_start} across learning"
 
         fig = np.asarray(axes).ravel()[0].figure
-        fig.suptitle(title, y=0.90)
+
+        y = 0.9 if self.Agent.Environment.dimensionality == 1 else 0.97
+        fig.suptitle(title, y=y)
 
         util.save_figure(fig, f"{self.name}_rate_maps_across_learning", save=autosave)  # type: ignore[attr-defined]
 
@@ -619,16 +630,20 @@ class TwoCompLayer(object):
 
             ax1D = np.asarray(ax).ravel()
         else:
+            if "sub_ax" in kwargs.keys() and ax is None:
+                ax = kwargs.pop("sub_ax")
             sub_ax = ax
 
         soma_color = soma_color or self.SomaCompartment.color
         soma_ax = ax1D[0] if separate_axes else sub_ax
-        soma_ax = self.SomaCompartment.plot_rate_timeseries(
+        ax_out = self.SomaCompartment.plot_rate_timeseries(
             sub_ax=soma_ax,
             color=soma_color,
             autosave=False,
             **kwargs,
         )
+        if not separate_axes and sub_ax is None:
+            sub_ax = ax_out
 
         dend_color = dend_color or self.DendriteCompartment.color
         dend_ax = ax1D[1] if separate_axes else sub_ax
@@ -656,14 +671,15 @@ class TwoCompLayer(object):
                 plot_util.mark_target_and_reset_points(self.Agent, self, sub_ax=sub_ax)
                 if s != len(ax1D) - 1:
                     sub_ax.set_xlabel("")
+            fig = np.asarray(ax).ravel()[0].figure
         else:
-            soma_ax.plot([], [], color=soma_color, label="soma")
-            soma_ax.plot([], [], color=dend_color, label="dend")
+            sub_ax.plot([], [], color=soma_color, label="soma")
+            sub_ax.plot([], [], color=dend_color, label="dend")
             if self.inhibit_dend:
-                soma_ax.plot([], [], color=inhibit_color, label="inhib.")
-            soma_ax.legend()
+                sub_ax.plot([], [], color=inhibit_color, label="inhib.")
+            sub_ax.legend()
+            fig = sub_ax.figure
 
-        fig = np.asarray(ax).ravel()[0].figure
         util.save_figure(fig, f"{self.name}_firingrate", save=autosave)  # type: ignore[attr-defined]
 
         return ax

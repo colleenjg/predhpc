@@ -54,6 +54,11 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer):
         "input_trend_tau": None,  # in sec
     }
 
+    ignored_param_keys = list()  # type: list[str]
+    ignored_params = {key: None for key in ignored_param_keys}
+
+    fixed_params = dict()  # type: dict[str, Any]
+
     def __init__(self, Agent: "ratinabox.Agent", params: dict[str, Any] = dict()):
         """
         SmoothFeedForwardLayer(Agent)
@@ -105,6 +110,11 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer):
             name_in, n_in = input_layer.name, input_layer.n  # type: ignore[attr-defined]
             self.inputs[name_in]["filtered_inputs"] = np.full(n_in, np.nan)
             self.inputs[name_in]["filtered_trends"] = np.zeros(n_in)
+
+            for key in ["inputs", "trends"]:
+                if f"filtered_{key}" not in self.history.keys():
+                    self.history[f"filtered_{key}"] = dict()
+                self.history[f"filtered_{key}"][name_in] = list()
 
     def get_filter_tau(self, filter_tau: float | None = None) -> float:
         """
@@ -655,7 +665,6 @@ class LearnLayer(SmoothFeedForwardLayer):
         self.inputs[name_in]["filtered_inputs_for_learning"] = np.full(n_in, np.nan)
         self.inputs[name_in]["filtered_trends_for_learning"] = np.zeros(n_in)
 
-        name_in, n_in = input_layer.name, input_layer.n  # type: ignore[attr-defined]
         for key in ["inputs", "trends"]:
             if f"filtered_{key}_for_learning" not in self.history.keys():
                 self.history[f"filtered_{key}_for_learning"] = dict()
@@ -873,14 +882,16 @@ class LearnLayer(SmoothFeedForwardLayer):
             subplots.append(map_axes.ravel()[0])
 
         if normalize_together:
-            plot_util.normalize_cmaps(subplots, shrink=0.7)
+            cbar = plot_util.normalize_cmaps(subplots, shrink=0.7)
+            cbar.set_label("Firing rate / Hz")
 
         fig = np.asarray(axes).ravel()[0].figure
 
         if title is None:
             title = "Rate maps across learning"
 
-        fig.suptitle(title, y=0.90)
+        y = 0.9 if self.Agent.Environment.dimensionality == 1 else 0.97
+        fig.suptitle(title, y=y)
 
         util.save_figure(fig, f"{self.name}_rate_maps_across_learning", save=autosave)  # type: ignore[attr-defined]
 
@@ -1432,7 +1443,7 @@ class BTSPLayer(HebbianLayer):
         """
         self.set_BTSP_learn()
 
-        Set the layer to learn using BTSP during self.update() calls. Only affects 
+        Set the layer to learn using BTSP during self.update() calls. Only affects
         input weights that are learnable.
 
         Args:
@@ -2075,13 +2086,13 @@ class BTSPLayer(HebbianLayer):
         BTSP_events = np.asarray(self.history["BTSP_events"]) - startid
         BTSP_targets = self.history["BTSP_targets"]
 
-        ax = np.asarray(ax).ravel()
+        ax1D = np.asarray(ax).ravel()
         if timeseries or self.Agent.Environment.dimensionality == "1D":
-            if len(ax) != 1:
+            if len(ax1D) != 1:
                 raise ValueError(
                     "Only one axis expected for timeseries or 1D rate map."
                 )
-            sub_ax = ax
+            sub_ax = ax1D[0]
 
         for event, targets in zip(BTSP_events, BTSP_targets):
             for target in targets:
@@ -2111,7 +2122,7 @@ class BTSPLayer(HebbianLayer):
                         y_pos = 1 + line_sep * i + line_sep * 0.7
                         pos = pos + [y_pos]
                     else:
-                        sub_ax = ax[i]
+                        sub_ax = ax1D[i]
 
                 sub_ax.scatter(
                     *pos,
@@ -2180,7 +2191,7 @@ class BTSPLayer(HebbianLayer):
                 timeseries=False,
             )
 
-        fig = ax[0].figure
+        fig = np.asarray(ax).ravel()[0].figure
         util.save_figure(fig, f"{self.name}_ratemaps", save=autosave)  # type: ignore[attr-defined]
 
         return ax
@@ -2736,7 +2747,9 @@ class NMDACurrent(object):
                 axis1D[d].set_xlabel("")
 
         fig = axis1D[0].figure
-        fig.suptitle(title, y=0.90)
+
+        y = 0.9 if self.Agent.Environment.dimensionality == 1 else 0.97
+        fig.suptitle(title, y=y)
 
         util.save_figure(fig, f"{self.name}_NMDA_current_traces", save=autosave)  # type: ignore[attr-defined]
 

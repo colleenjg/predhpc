@@ -1,4 +1,5 @@
 import copy
+import warnings
 
 from matplotlib import pyplot as plt
 import numpy as np
@@ -11,6 +12,13 @@ from ratinabox.Neurons import FeedForwardLayer as riabFeedForwardLayer  # type: 
 from ratinabox.contribs import ValueNeuron as riabValueNeuron
 
 from predhpc import plot_util, util
+
+
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    message="Use kwarg `optimise_plot_for_single_neuron = True`",
+)
 
 
 class Neurons(riabNeurons, util.ParamsManagerMixin):
@@ -99,12 +107,9 @@ class Neurons(riabNeurons, util.ParamsManagerMixin):
            (one per plotted ROI, if environment is 2D).
         """
 
-        if ax is None:
-            kwargs["return_env_fig"] = True  # avoid internal error
-        else:
-            kwargs["fig"] = np.asarray(ax).ravel()[0].figure
+        kwargs = plot_util.organize_fig_ax_kwargs(ax=ax, return_env_fig=True, **kwargs)
 
-        _, ax_out = super().plot_rate_map(ax=ax, **kwargs)
+        _, ax_out = super().plot_rate_map(**kwargs)
 
         if ax is None:
             ax = ax_out
@@ -144,13 +149,9 @@ class Neurons(riabNeurons, util.ParamsManagerMixin):
         - sub_ax (plt.Axes): Subplot with firing rate timeseries plotted.
         """
 
-        if sub_ax is not None:
-            kwargs["ax"] = sub_ax
-
-        if "ax" in kwargs.keys():
-            kwargs["fig"] = kwargs["ax"].figure
-        else:
-            kwargs["return_env_fig"] = True  # avoid internal error
+        kwargs = plot_util.organize_fig_ax_kwargs(
+            sub_ax=sub_ax, return_env_fig=True, **kwargs
+        )
 
         t, _, _ = self.get_plotting_times(t_start, t_end)
         t_start = t[0]
@@ -264,12 +265,9 @@ class PlaceCells(riabPlaceCells, util.ParamsManagerMixin):
            (one per plotted ROI, if environment is 2D).
         """
 
-        if ax is None:
-            kwargs["return_env_fig"] = True  # avoid internal error
-        else:
-            kwargs["fig"] = np.asarray(ax).ravel()[0].figure
+        kwargs = plot_util.organize_fig_ax_kwargs(ax=ax, return_env_fig=True, **kwargs)
 
-        _, ax_out = super().plot_rate_map(ax=ax, **kwargs)
+        _, ax_out = super().plot_rate_map(**kwargs)
 
         if ax is None:
             ax = ax_out
@@ -309,13 +307,9 @@ class PlaceCells(riabPlaceCells, util.ParamsManagerMixin):
         - sub_ax (plt.Axes): Subplot with firing rate timeseries plotted.
         """
 
-        if sub_ax is not None:
-            kwargs["ax"] = sub_ax
-
-        if "ax" in kwargs.keys():
-            kwargs["fig"] = kwargs["ax"].figure
-        else:
-            kwargs["return_env_fig"] = True  # avoid internal error
+        kwargs = plot_util.organize_fig_ax_kwargs(
+            sub_ax=sub_ax, return_env_fig=True, **kwargs
+        )
 
         t, _, _ = self.get_plotting_times(t_start, t_end)
         t_start = t[0]
@@ -341,7 +335,7 @@ class PlaceCells(riabPlaceCells, util.ParamsManagerMixin):
 
         return sub_ax
 
-    def plot_place_cell_locations(self, sub_ax=None, autosave=None):
+    def plot_place_cell_locations(self, sub_ax=None, autosave=None, **kwargs):
         """
         self.plot_place_cell_locations()
 
@@ -354,6 +348,9 @@ class PlaceCells(riabPlaceCells, util.ParamsManagerMixin):
         - autosave (bool, optional): Whether to autosave the figure. If None, the
             global autosave setting for ratinabox is used. Default is None.
 
+        Keyword args:
+        - **kwargs: Keyword arguments passed to Environment.plot_environment().
+
         Returns:
         - sub_ax (plt.Axes): Subplot with place cell locations plotted.
         """
@@ -362,7 +359,9 @@ class PlaceCells(riabPlaceCells, util.ParamsManagerMixin):
         if sub_ax is not None:
             fig = sub_ax.figure
 
-        sub_ax = self.Agent.Environment.plot_environment(sub_ax=sub_ax, autosave=False)
+        sub_ax = self.Agent.Environment.plot_environment(
+            sub_ax=sub_ax, autosave=False, **kwargs
+        )
 
         place_cell_centres = self.place_cell_centres
 
@@ -465,12 +464,9 @@ class GridCells(riabGridCells, util.ParamsManagerMixin):
            (one per plotted ROI, if environment is 2D).
         """
 
-        if ax is None:
-            kwargs["return_env_fig"] = True  # avoid internal error
-        else:
-            kwargs["fig"] = np.asarray(ax).ravel()[0].figure
+        kwargs = plot_util.organize_fig_ax_kwargs(ax=ax, return_env_fig=True, **kwargs)
 
-        _, ax_out = super().plot_rate_map(ax=ax, **kwargs)
+        _, ax_out = super().plot_rate_map(**kwargs)
 
         if ax is None:
             ax = ax_out
@@ -510,13 +506,9 @@ class GridCells(riabGridCells, util.ParamsManagerMixin):
         - sub_ax (plt.Axes): Subplot with firing rate timeseries plotted.
         """
 
-        if sub_ax is not None:
-            kwargs["ax"] = sub_ax
-
-        if "ax" in kwargs.keys():
-            kwargs["fig"] = kwargs["ax"].figure
-        else:
-            kwargs["return_env_fig"] = True  # avoid internal error
+        kwargs = plot_util.organize_fig_ax_kwargs(
+            sub_ax=sub_ax, return_env_fig=True, **kwargs
+        )
 
         t, _, _ = self.get_plotting_times(t_start, t_end)
         t_start = t[0]
@@ -629,12 +621,9 @@ class ObjectVectorCells(riabObjectVectorCells, util.ParamsManagerMixin):
            (one per plotted ROI, if environment is 2D).
         """
 
-        if ax is None:
-            kwargs["return_env_fig"] = True  # avoid internal error
-        else:
-            kwargs["fig"] = np.asarray(ax).ravel()[0].figure
+        kwargs = plot_util.organize_fig_ax_kwargs(ax=ax, return_env_fig=True, **kwargs)
 
-        _, ax_out = super().plot_rate_map(ax=ax, **kwargs)
+        _, ax_out = super().plot_rate_map(**kwargs)
 
         if ax is None:
             ax = ax_out
@@ -674,13 +663,9 @@ class ObjectVectorCells(riabObjectVectorCells, util.ParamsManagerMixin):
         - sub_ax (plt.Axes): Subplot with firing rate timeseries plotted.
         """
 
-        if sub_ax is not None:
-            kwargs["ax"] = sub_ax
-
-        if "ax" in kwargs.keys():
-            kwargs["fig"] = kwargs["ax"].figure
-        else:
-            kwargs["return_env_fig"] = True  # avoid internal error
+        kwargs = plot_util.organize_fig_ax_kwargs(
+            sub_ax=sub_ax, return_env_fig=True, **kwargs
+        )
 
         t, _, _ = self.get_plotting_times(t_start, t_end)
         t_start = t[0]
@@ -793,12 +778,9 @@ class FeedForwardLayer(riabFeedForwardLayer, util.ParamsManagerMixin):
            (one per plotted ROI, if environment is 2D).
         """
 
-        if ax is None:
-            kwargs["return_env_fig"] = True  # avoid internal error
-        else:
-            kwargs["fig"] = np.asarray(ax).ravel()[0].figure
+        kwargs = plot_util.organize_fig_ax_kwargs(ax=ax, return_env_fig=True, **kwargs)
 
-        _, ax_out = super().plot_rate_map(ax=ax, **kwargs)
+        _, ax_out = super().plot_rate_map(**kwargs)
 
         if ax is None:
             ax = ax_out
@@ -838,13 +820,9 @@ class FeedForwardLayer(riabFeedForwardLayer, util.ParamsManagerMixin):
         - sub_ax (plt.Axes): Subplot with firing rate timeseries plotted.
         """
 
-        if sub_ax is not None:
-            kwargs["ax"] = sub_ax
-
-        if "ax" in kwargs.keys():
-            kwargs["fig"] = kwargs["ax"].figure
-        else:
-            kwargs["return_env_fig"] = True  # avoid internal error
+        kwargs = plot_util.organize_fig_ax_kwargs(
+            sub_ax=sub_ax, return_env_fig=True, **kwargs
+        )
 
         t, _, _ = self.get_plotting_times(t_start, t_end)
         t_start = t[0]
@@ -958,12 +936,9 @@ class ValueNeuron(riabValueNeuron, util.ParamsManagerMixin):
            (one per plotted ROI, if environment is 2D).
         """
 
-        if ax is None:
-            kwargs["return_env_fig"] = True  # avoid internal error
-        else:
-            kwargs["fig"] = np.asarray(ax).ravel()[0].figure
+        kwargs = plot_util.organize_fig_ax_kwargs(ax=ax, return_env_fig=True, **kwargs)
 
-        _, ax_out = super().plot_rate_map(ax=ax, **kwargs)
+        _, ax_out = super().plot_rate_map(**kwargs)
 
         if ax is None:
             ax = ax_out
@@ -1003,13 +978,9 @@ class ValueNeuron(riabValueNeuron, util.ParamsManagerMixin):
         - sub_ax (plt.Axes): Subplot with firing rate timeseries plotted.
         """
 
-        if sub_ax is not None:
-            kwargs["ax"] = sub_ax
-
-        if "ax" in kwargs.keys():
-            kwargs["fig"] = kwargs["ax"].figure
-        else:
-            kwargs["return_env_fig"] = True  # avoid internal error
+        kwargs = plot_util.organize_fig_ax_kwargs(
+            sub_ax=sub_ax, return_env_fig=True, **kwargs
+        )
 
         t, _, _ = self.get_plotting_times(t_start, t_end)
         t_start = t[0]
