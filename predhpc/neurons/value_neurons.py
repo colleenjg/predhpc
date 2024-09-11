@@ -183,8 +183,7 @@ class SimpleValueNeuron(riab_neurons.PlaceCells):
         if ax is None:
             ax = ax_out
 
-        ax1D = np.asarray(ax).ravel()
-        for sub_ax in ax1D:
+        for sub_ax in np.asarray(ax).ravel():
             sub_ax.scatter(*pos, color="red", marker=".", s=20, zorder=12)
             sub_ax.plot(
                 xs,

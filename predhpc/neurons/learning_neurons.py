@@ -763,7 +763,10 @@ class LearnLayer(SmoothFeedForwardLayer):
         kwargs["chosen_neurons"] = chosen_neurons
         kwargs["shape"] = shape[::-1]
 
-        ax = super().plot_rate_map(autosave=False, ax=ax, **kwargs)
+        ax_out = super().plot_rate_map(autosave=False, ax=ax, **kwargs)
+
+        if ax is None:
+            ax = ax_out
 
         if no_legend:
             for sub_ax in np.asarray(ax).ravel():
@@ -1294,6 +1297,7 @@ class BTSPLayer(HebbianLayer):
         • self.update_for_BTSP()
         • self.update()
         • self.plot_filtered_for_BTSP()
+        • self.plot_BTSP_frequency()
         • self.plot_BTSP_ramp()
         • self.add_BTSP_markers_to_plots()
         • self.plot_rate_map()
@@ -1939,6 +1943,175 @@ class BTSPLayer(HebbianLayer):
         util.save_figure(fig, f"{self.name}_filtered_inputs_for_BTSP", save=autosave)  # type: ignore[attr-defined]
 
         return sub_ax
+
+    def plot_BTSP_frequency(self, sub_ax=None, autosave=None):
+        """
+        self.plot_BTSP_frequency()
+
+        Plot the frequency of BTSP events for each neuron.
+
+        Args:
+        - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
+        - autosave (bool, optional): Whether to autosave the figure. Default is None.
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with BTSP frequency plotted.
+        """
+
+        targets, counts = np.unique(
+            np.concatenate(self.history["BTSP_targets"]), return_counts=True
+        )
+        counts = np.append(counts, np.zeros(self.n - len(targets)))
+
+        if sub_ax is None:
+            _, sub_ax = plt.subplots(figsize=(5, 2))
+
+        bin_counts, bins = np.histogram(counts, bins=np.arange(counts.max() + 3))
+        sub_ax.bar(bins[:-1], bin_counts, align="center", color=self.color, alpha=0.8)
+
+        sub_ax.axvline(
+            counts.mean(), color="k", ls="dashed", label=f"mean={counts.mean():.1f}"
+        )
+
+        sub_ax.spines[["right", "top"]].set_visible(False)
+        sub_ax.set_ylabel("Number of neurons")
+        sub_ax.set_xlabel("Number of BTSP events")
+        sub_ax.set_title("Frequency of BTSP events", y=1.1)
+
+        fig = sub_ax.figure
+        util.save_figure(fig, f"{self.name}_BTSP_frequency", save=autosave)  # type: ignore[attr-defined]
+
+        return sub_ax
+
+    def plot_BTSP_responses(
+        self, pre=1, post=2, num_cols=10, ax=None, split=True, fill=True, autosave=None
+    ):
+
+        BTSP_targets = self.history["BTSP_targets"]
+        BTSP_events = self.history["BTSP_events"]
+        firingrates = np.asarray(self.history["firingrate"])
+
+        if ax is None:
+            if split:
+                num_cols = min(self.n, num_cols)
+                num_rows = int(np.ceil(self.n / num_cols))
+                fig, ax = plt.subplots(
+                    num_rows,
+                    num_cols,
+                    figsize=(num_cols, num_rows),
+                    sharex=True,
+                    sharey=True,
+                    squeeze=False,
+                )
+            else:
+                fig, ax = plt.subplots(1, 1, figsize=(4, 2))
+        elif split and len(ax.shape) != 2:
+            raise ValueError("If split is True and 'ax' is passed, must be 2D.")
+        elif not split and not isinstance(ax, plt.Axes):
+            raise ValueError("If not split and 'ax' is passed, must a subplot.")
+
+        num_steps_total = len(self.history["t"])
+
+        flat_targets = np.concatenate(BTSP_targets)
+        relative_indices = plot_util.get_time_indices(
+            pre=pre, post=post, dt=self.Agent.dt
+        )
+        time = np.linspace(-pre, post, len(relative_indices))
+
+        if split:
+            to_enumerate = len(ax.ravel())
+            base_lw = 0.75
+            base_alpha = 0.2
+        else:
+            to_enumerate = self.n
+            base_lw = 0.5
+            base_alpha = 0.1
+
+        all_responses, count = list(), 0
+        for neuron_num in range(to_enumerate):
+            sub_ax = ax.ravel()[neuron_num] if split else ax
+            if neuron_num >= self.n:
+                sub_ax.axis("off")
+                continue
+
+            if split or neuron_num == 0:
+                sub_ax.axvline(0, color="k", ls="dashed")
+                sub_ax.spines[["right", "top"]].set_visible(False)
+
+            if neuron_num not in flat_targets:
+                continue
+
+            count += 1
+            time_indices = [
+                BTSP_events[i]
+                for i, targets in enumerate(BTSP_targets)
+                if neuron_num in targets
+            ]
+            responses = np.full((len(time_indices), len(relative_indices)), np.nan)
+            for i, time_idx in enumerate(time_indices):
+                indices = relative_indices + time_idx
+                mask = (indices >= 0) * (indices < num_steps_total)
+                responses[i, mask] = firingrates[indices[mask], neuron_num]
+            all_responses.append(responses)
+
+            if fill:
+                for response in responses:
+                    sub_ax.fill_between(
+                        time,
+                        np.zeros_like(response),
+                        response,
+                        color=self.color,
+                        alpha=base_alpha,
+                        lw=0,
+                    )
+
+            sub_ax.plot(
+                time,
+                responses.T,
+                color=self.color,
+                alpha=base_alpha * 2,
+                lw=base_lw,
+                ls="dashed",
+            )
+
+            sub_ax.plot(
+                time,
+                np.nanmean(responses, axis=0),
+                color=self.color,
+                alpha=base_alpha * 4,
+                lw=base_lw * 2,
+            )
+
+            if split:
+                sub_ax.plot([], [], label=f"#{neuron_num} ({len(time_indices)})")
+                sub_ax.legend(
+                    handletextpad=-0.1, handlelength=0, loc="upper right", fontsize=5
+                )
+
+        plot_util.pad_axis(sub_ax, axis="y", end="high")
+
+        if split:
+            fig.suptitle("BTSP responses", y=0.96)
+            for sub_ax in ax[:, 0]:
+                sub_ax.set_ylabel("Firing rate")
+            for sub_ax in ax[-1]:
+                sub_ax.set_xlabel("Time (s)")
+        else:
+            color = "white" if fill else self.color
+            all_responses = np.concatenate(all_responses)
+            ax.plot(
+                time, np.nanmean(all_responses, axis=0), color=color, alpha=0.8, lw=3
+            )
+            ax.set_ylabel("Firing rate")
+            ax.set_xlabel("Time (s)")
+            ax.set_title(
+                f"BTSP responses ({len(all_responses)} from {count}/{self.n} neurons)"
+            )
+
+        fig = np.asarray(ax).ravel()[0].figure
+        util.save_figure(fig, f"{self.name}_BTSP_responses", save=autosave)  # type: ignore[attr-defined]
+
+        return ax
 
     def plot_BTSP_ramp(self, axes=None, plot_events=True, autosave=None):
         """
@@ -2718,11 +2891,11 @@ class NMDACurrent(object):
                 squeeze=False,
             )  # type: ignore[assignment]
 
-        axis1D = np.asarray(ax).ravel()
+        ax1D = np.asarray(ax).ravel()
 
-        if len(axis1D) != len(datatypes):
+        if len(ax1D) != len(datatypes):
             raise ValueError(
-                f"Number of subplots ({len(axis1D)}) does not match number of datatypes "
+                f"Number of subplots ({len(ax1D)}) does not match number of datatypes "
                 f"to plot ({len(datatypes)})."
             )
 
@@ -2735,18 +2908,18 @@ class NMDACurrent(object):
             plot_util.plot_timeseries(
                 self,  # type: ignore[assignment]
                 t_start=t_start,
-                sub_ax=axis1D[d],
+                sub_ax=ax1D[d],
                 trace_name=datatype,
                 chosen_neurons=chosen_neurons,
                 autosave=False,
                 **kwargs,
             )
 
-            axis1D[d].set_ylabel(datatype.capitalize().replace("_", " "))
+            ax1D[d].set_ylabel(datatype.capitalize().replace("_", " "))
             if d != len(datatypes) - 1:
-                axis1D[d].set_xlabel("")
+                ax1D[d].set_xlabel("")
 
-        fig = axis1D[0].figure
+        fig = ax1D[0].figure
 
         y = 0.9 if self.Agent.Environment.dimensionality == 1 else 0.97
         fig.suptitle(title, y=y)
