@@ -3392,20 +3392,22 @@ class OpenFieldAgent(ResetableAgent):
             object_df = sub_target_df[sub_target_df["object_idx"] == object_idx]
             count = len(object_df)
             # write the number of times the target was visited
-            for shift, color in [(1, "white"), (0, "black")]:
-                shift_x = shift * 0.006 * env_width
-                shift_y = shift * 0.006 * env_height
-                sub_ax.text(
-                    object_df.loc[object_df.index[0], "position_x"] + shift_x,
-                    object_df.loc[object_df.index[0], "position_y"] + shift_y,
-                    str(count),
-                    horizontalalignment="left",
-                    verticalalignment="bottom",
-                    color=color,
-                    fontsize=10,
-                    zorder=10,
-                    fontweight="bold",
-                )
+            shift_x = 1 * 0.006 * env_width
+            shift_y = 1 * 0.006 * env_height
+
+            t = sub_ax.text(
+                object_df.loc[object_df.index[0], "position_x"] + shift_x,
+                object_df.loc[object_df.index[0], "position_y"] + shift_y,
+                str(count),
+                horizontalalignment="left",
+                verticalalignment="bottom",
+                color="black",
+                fontsize=10,
+                zorder=2,
+                fontweight="bold",
+            )
+
+            t.set_bbox(dict(facecolor="white", alpha=0.8, lw=0))
 
         reached_df = sub_target_df[~sub_target_df["reached_step"].isna()]
 

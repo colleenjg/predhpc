@@ -316,7 +316,7 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer):
 
         return sub_ax
 
-    def plot_firingrate_distribution(self, sub_ax=None, bins=50):
+    def plot_firingrate_distribution(self, sub_ax=None, bins=50, t_start=0, t_end=None):
         """
         self.plot_firingrate_distribution()
 
@@ -326,6 +326,8 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer):
         - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
             created. Default is None.
         - bins (int, optional): Number of histogram bins. Default is 50.
+        - t_start (float, optional): Start time of the plot. Default is 0.
+        - t_end (float, optional): End time of the plot. Default is None.
 
         Returns:
         - sub_ax (plt.Axes): Subplot with firing rate distribution plotted.
@@ -334,7 +336,9 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer):
         if sub_ax is None:
             _, sub_ax = plt.subplots(figsize=(4, 2))
 
-        firingrates = np.asarray(self.history["firingrate"]).ravel()
+        _, startid, endid = self.get_plotting_times(t_start, t_end)
+
+        firingrates = np.asarray(self.history["firingrate"])[startid:endid].ravel()
         sub_ax.hist(firingrates, bins=bins, color=self.color, alpha=0.6, density=True)
 
         sub_ax.axvline(0, color="k", lw=1, ls="dashed")
@@ -1298,6 +1302,8 @@ class BTSPLayer(HebbianLayer):
         • self.update()
         • self.plot_filtered_for_BTSP()
         • self.plot_BTSP_frequency()
+        • self.plot_BTSP_step_histogram()
+        • self.plot_BTSP_responses()
         • self.plot_BTSP_ramp()
         • self.add_BTSP_markers_to_plots()
         • self.plot_rate_map()
@@ -1977,6 +1983,66 @@ class BTSPLayer(HebbianLayer):
         sub_ax.set_ylabel("Number of neurons")
         sub_ax.set_xlabel("Number of BTSP events")
         sub_ax.set_title("Frequency of BTSP events", y=1.1)
+
+        fig = sub_ax.figure
+        util.save_figure(fig, f"{self.name}_BTSP_frequency", save=autosave)  # type: ignore[attr-defined]
+
+        return sub_ax
+
+    def plot_BTSP_step_histogram(self, sub_ax=None, nbins=20, autosave=None):
+        """
+        self.plot_BTSP_step_histogram()
+
+        Plot the histogram of when BTSP events occur across neurons.
+
+        Args:
+        - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
+        - nbins (int, optional): Number of bins for the histogram. Default is 20.
+        - autosave (bool, optional): Whether to autosave the figure. Default is None.
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with BTSP frequency plotted.
+        """
+
+        steps = list()
+        for step, targets in zip(
+            self.history["BTSP_events"], self.history["BTSP_targets"]
+        ):
+            steps.extend([step] * len(targets))
+
+        if sub_ax is None:
+            _, sub_ax = plt.subplots(figsize=(5, 2))
+
+        max_bin = (np.max(steps) // nbins + 1) * nbins
+        bins = np.linspace(0, max_bin, nbins)
+
+        sub_ax.hist(steps, bins=bins, density=True, color=self.color, alpha=0.8)
+
+        mean_step = np.mean(steps)
+        mean_time = mean_step * self.Agent.dt
+        in_minutes = True if mean_time > 60 * 3 else False
+        mean_time_str = (
+            f"{mean_time / 60:.2f} min" if in_minutes else f"{mean_time:.2f} s"
+        )
+
+        sub_ax.axvline(
+            mean_step,
+            color="k",
+            ls="dashed",
+            label=f"mean={int(mean_step)} steps / {mean_time_str}",
+        )
+
+        sub_ax.spines[["right"]].set_visible(False)
+        sub_ax.set_ylabel("BTSP events (density)")
+        sub_ax.set_xlabel("Step number")
+        plot_util.pad_axis(sub_ax, axis="y", end="high")
+
+        twin_sub_ax = sub_ax.twiny()
+        long_str = "minutes" if in_minutes else "seconds"
+        twin_sub_ax.set_xlabel(f"Time (in {long_str})")
+        x_min, x_max = sub_ax.get_xlim()
+        twin_sub_ax.set_xlim(x_min * self.Agent.dt, x_max * self.Agent.dt)
+        twin_sub_ax.spines[["right"]].set_visible(False)
 
         fig = sub_ax.figure
         util.save_figure(fig, f"{self.name}_BTSP_frequency", save=autosave)  # type: ignore[attr-defined]

@@ -34,6 +34,7 @@ class Neurons(riabNeurons, util.ParamsManagerMixin):
         • self.get_plotting_times()
         • self.plot_rate_map()
         • self.plot_rate_timeseries()
+        • self.plot_rate_correlations()
     """
 
     default_params = dict()  # type: dict[str, Any]
@@ -177,6 +178,45 @@ class Neurons(riabNeurons, util.ParamsManagerMixin):
 
         return sub_ax
 
+    def plot_rate_correlations(
+        self,
+        t_start: float | None = 0,
+        t_end: float | None = None,
+        autosave: bool | None = None,
+        **kwargs,
+    ):
+        """
+        self.plot_rate_correlations()
+
+        Plot rate correlations between neurons.
+
+        Args:
+        - t_start (float, optional): Time at which to start plotting data.
+            Default is 0.
+        - t_end (float, optional): Time at which to stop plotting data.
+            Default is None.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the
+            global autosave setting for ratinabox is used. Default is None.
+
+        Keyword args:
+        - **kwargs: Keyword arguments passed to plot_util.plot_rate_correlations().
+            Default is dict().
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with rate correlations plotted.
+        """
+
+        _, startid, endid = self.get_plotting_times(t_start, t_end)
+
+        sub_ax = plot_util.plot_rate_correlations(
+            firingrates=self.history["firingrate"][startid:endid], **kwargs
+        )
+
+        fig = sub_ax.figure
+        util.save_figure(fig, f"{self.name}_rate_correlations", save=autosave)  # type: ignore[attr-defined]
+
+        return sub_ax
+
 
 class PlaceCells(riabPlaceCells, util.ParamsManagerMixin):
     """
@@ -192,6 +232,7 @@ class PlaceCells(riabPlaceCells, util.ParamsManagerMixin):
         • self.plot_rate_map()
         • self.plot_rate_timeseries()
         • self.plot_place_cell_locations()
+        • self.plot_rate_correlations()
     """
 
     default_params = dict()  # type: dict[str, Any]
@@ -377,6 +418,45 @@ class PlaceCells(riabPlaceCells, util.ParamsManagerMixin):
 
         return sub_ax
 
+    def plot_rate_correlations(
+        self,
+        t_start: float | None = 0,
+        t_end: float | None = None,
+        autosave: bool | None = None,
+        **kwargs,
+    ):
+        """
+        self.plot_rate_correlations()
+
+        Plot rate correlations between neurons.
+
+        Args:
+        - t_start (float, optional): Time at which to start plotting data.
+            Default is 0.
+        - t_end (float, optional): Time at which to stop plotting data.
+            Default is None.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the
+            global autosave setting for ratinabox is used. Default is None.
+
+        Keyword args:
+        - **kwargs: Keyword arguments passed to plot_util.plot_rate_correlations().
+            Default is dict().
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with rate correlations plotted.
+        """
+
+        _, startid, endid = self.get_plotting_times(t_start, t_end)
+
+        sub_ax = plot_util.plot_rate_correlations(
+            firingrates=self.history["firingrate"][startid:endid], **kwargs
+        )
+
+        fig = sub_ax.figure
+        util.save_figure(fig, f"{self.name}_rate_correlations", save=autosave)  # type: ignore[attr-defined]
+
+        return sub_ax
+
 
 class GridCells(riabGridCells, util.ParamsManagerMixin):
     """
@@ -391,6 +471,7 @@ class GridCells(riabGridCells, util.ParamsManagerMixin):
         • self.get_plotting_times()
         • self.plot_rate_map()
         • self.plot_rate_timeseries()
+        • self.plot_rate_correlations()
     """
 
     default_params = dict()  # type: dict[str, Any]
@@ -534,6 +615,45 @@ class GridCells(riabGridCells, util.ParamsManagerMixin):
 
         return sub_ax
 
+    def plot_rate_correlations(
+        self,
+        t_start: float | None = 0,
+        t_end: float | None = None,
+        autosave: bool | None = None,
+        **kwargs,
+    ):
+        """
+        self.plot_rate_correlations()
+
+        Plot rate correlations between neurons.
+
+        Args:
+        - t_start (float, optional): Time at which to start plotting data.
+            Default is 0.
+        - t_end (float, optional): Time at which to stop plotting data.
+            Default is None.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the
+            global autosave setting for ratinabox is used. Default is None.
+
+        Keyword args:
+        - **kwargs: Keyword arguments passed to plot_util.plot_rate_correlations().
+            Default is dict().
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with rate correlations plotted.
+        """
+
+        _, startid, endid = self.get_plotting_times(t_start, t_end)
+
+        sub_ax = plot_util.plot_rate_correlations(
+            firingrates=self.history["firingrate"][startid:endid], **kwargs
+        )
+
+        fig = sub_ax.figure
+        util.save_figure(fig, f"{self.name}_rate_correlations", save=autosave)  # type: ignore[attr-defined]
+
+        return sub_ax
+
 
 class ObjectVectorCells(riabObjectVectorCells, util.ParamsManagerMixin):
     """
@@ -548,6 +668,7 @@ class ObjectVectorCells(riabObjectVectorCells, util.ParamsManagerMixin):
         • self.get_plotting_times()
         • self.plot_rate_map()
         • self.plot_rate_timeseries()
+        • self.plot_rate_correlations()
     """
 
     default_params = dict()  # type: dict[str, Any]
@@ -691,6 +812,45 @@ class ObjectVectorCells(riabObjectVectorCells, util.ParamsManagerMixin):
 
         return sub_ax
 
+    def plot_rate_correlations(
+        self,
+        t_start: float | None = 0,
+        t_end: float | None = None,
+        autosave: bool | None = None,
+        **kwargs,
+    ):
+        """
+        self.plot_rate_correlations()
+
+        Plot rate correlations between neurons.
+
+        Args:
+        - t_start (float, optional): Time at which to start plotting data.
+            Default is 0.
+        - t_end (float, optional): Time at which to stop plotting data.
+            Default is None.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the
+            global autosave setting for ratinabox is used. Default is None.
+
+        Keyword args:
+        - **kwargs: Keyword arguments passed to plot_util.plot_rate_correlations().
+            Default is dict().
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with rate correlations plotted.
+        """
+
+        _, startid, endid = self.get_plotting_times(t_start, t_end)
+
+        sub_ax = plot_util.plot_rate_correlations(
+            firingrates=self.history["firingrate"][startid:endid], **kwargs
+        )
+
+        fig = sub_ax.figure
+        util.save_figure(fig, f"{self.name}_rate_correlations", save=autosave)  # type: ignore[attr-defined]
+
+        return sub_ax
+
 
 class FeedForwardLayer(riabFeedForwardLayer, util.ParamsManagerMixin):
     """
@@ -705,6 +865,7 @@ class FeedForwardLayer(riabFeedForwardLayer, util.ParamsManagerMixin):
         • self.get_plotting_times()
         • self.plot_rate_map()
         • self.plot_rate_timeseries()
+        • self.plot_rate_correlations()
     """
 
     default_params = dict()  # type: dict[str, Any]
@@ -848,6 +1009,45 @@ class FeedForwardLayer(riabFeedForwardLayer, util.ParamsManagerMixin):
 
         return sub_ax
 
+    def plot_rate_correlations(
+        self,
+        t_start: float | None = 0,
+        t_end: float | None = None,
+        autosave: bool | None = None,
+        **kwargs,
+    ):
+        """
+        self.plot_rate_correlations()
+
+        Plot rate correlations between neurons.
+
+        Args:
+        - t_start (float, optional): Time at which to start plotting data.
+            Default is 0.
+        - t_end (float, optional): Time at which to stop plotting data.
+            Default is None.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the
+            global autosave setting for ratinabox is used. Default is None.
+
+        Keyword args:
+        - **kwargs: Keyword arguments passed to plot_util.plot_rate_correlations().
+            Default is dict().
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with rate correlations plotted.
+        """
+
+        _, startid, endid = self.get_plotting_times(t_start, t_end)
+
+        sub_ax = plot_util.plot_rate_correlations(
+            firingrates=self.history["firingrate"][startid:endid], **kwargs
+        )
+
+        fig = sub_ax.figure
+        util.save_figure(fig, f"{self.name}_rate_correlations", save=autosave)  # type: ignore[attr-defined]
+
+        return sub_ax
+
 
 class ValueNeuron(riabValueNeuron, util.ParamsManagerMixin):
     """
@@ -862,6 +1062,7 @@ class ValueNeuron(riabValueNeuron, util.ParamsManagerMixin):
         • self.get_plotting_times()
         • self.plot_rate_map()
         • self.plot_rate_timeseries()
+        • self.plot_rate_correlations()
     """
 
     default_params = dict()  # type: dict[str, Any]
@@ -1003,5 +1204,44 @@ class ValueNeuron(riabValueNeuron, util.ParamsManagerMixin):
 
         fig = sub_ax.figure
         util.save_figure(fig, f"{self.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
+
+        return sub_ax
+
+    def plot_rate_correlations(
+        self,
+        t_start: float | None = 0,
+        t_end: float | None = None,
+        autosave: bool | None = None,
+        **kwargs,
+    ):
+        """
+        self.plot_rate_correlations()
+
+        Plot rate correlations between neurons.
+
+        Args:
+        - t_start (float, optional): Time at which to start plotting data.
+            Default is 0.
+        - t_end (float, optional): Time at which to stop plotting data.
+            Default is None.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the
+            global autosave setting for ratinabox is used. Default is None.
+
+        Keyword args:
+        - **kwargs: Keyword arguments passed to plot_util.plot_rate_correlations().
+            Default is dict().
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with rate correlations plotted.
+        """
+
+        _, startid, endid = self.get_plotting_times(t_start, t_end)
+
+        sub_ax = plot_util.plot_rate_correlations(
+            firingrates=self.history["firingrate"][startid:endid], **kwargs
+        )
+
+        fig = sub_ax.figure
+        util.save_figure(fig, f"{self.name}_rate_correlations", save=autosave)  # type: ignore[attr-defined]
 
         return sub_ax
