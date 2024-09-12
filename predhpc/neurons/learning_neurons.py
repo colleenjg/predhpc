@@ -1294,6 +1294,7 @@ class BTSPLayer(HebbianLayer):
         • self.add_input()
         • self.save_to_history()
         • self.log_num_steps_to_apply_BTSP()
+        • self.get_BTSP_step_dict()
         • self.update_BTSP_buffer()
         • self.reset_BTSP_buffer()
         • self.compute_BTSP_update()
@@ -1545,6 +1546,26 @@ class BTSPLayer(HebbianLayer):
             )
 
         print(log_str)
+
+    def get_BTSP_step_dict(self):
+        """
+        self.get_BTSP_step_dict()
+
+        Get a dictionary of BTSP events for each neuron.
+
+        Returns:
+        - BTSP_step_dict (dict): Dictionary of BTSP events for each neuron.
+        """
+
+        BTSP_step_dict = {neuron_num: list() for neuron_num in range(self.n)}
+
+        for step, targets in zip(
+            self.history["BTSP_events"], self.history["BTSP_targets"]
+        ):
+            for target in targets:
+                BTSP_step_dict[target].append(step)
+
+        return BTSP_step_dict
 
     def update_BTSP_buffer(self, ws_delta, b_delta=None, pre=False):
         """
@@ -2053,8 +2074,7 @@ class BTSPLayer(HebbianLayer):
         self, pre=1, post=2, num_cols=10, ax=None, split=True, fill=True, autosave=None
     ):
 
-        BTSP_targets = self.history["BTSP_targets"]
-        BTSP_events = self.history["BTSP_events"]
+        BTSP_step_dict = self.get_BTSP_step_dict()
         firingrates = np.asarray(self.history["firingrate"])
 
         if ax is None:
@@ -2078,7 +2098,6 @@ class BTSPLayer(HebbianLayer):
 
         num_steps_total = len(self.history["t"])
 
-        flat_targets = np.concatenate(BTSP_targets)
         relative_indices = plot_util.get_time_indices(
             pre=pre, post=post, dt=self.Agent.dt
         )
@@ -2093,7 +2112,7 @@ class BTSPLayer(HebbianLayer):
             base_lw = 0.5
             base_alpha = 0.1
 
-        all_responses, count = list(), 0
+        all_responses = list()
         for neuron_num in range(to_enumerate):
             sub_ax = ax.ravel()[neuron_num] if split else ax
             if neuron_num >= self.n:
@@ -2104,15 +2123,10 @@ class BTSPLayer(HebbianLayer):
                 sub_ax.axvline(0, color="k", ls="dashed")
                 sub_ax.spines[["right", "top"]].set_visible(False)
 
-            if neuron_num not in flat_targets:
+            time_indices = BTSP_step_dict[neuron_num]
+            if len(time_indices) == 0:
                 continue
 
-            count += 1
-            time_indices = [
-                BTSP_events[i]
-                for i, targets in enumerate(BTSP_targets)
-                if neuron_num in targets
-            ]
             responses = np.full((len(time_indices), len(relative_indices)), np.nan)
             for i, time_idx in enumerate(time_indices):
                 indices = relative_indices + time_idx
@@ -2165,13 +2179,16 @@ class BTSPLayer(HebbianLayer):
         else:
             color = "white" if fill else self.color
             all_responses = np.concatenate(all_responses)
+            num_BTSP_neurons = len(
+                [i for i, steps in BTSP_step_dict.items() if len(steps)]
+            )
             ax.plot(
                 time, np.nanmean(all_responses, axis=0), color=color, alpha=0.8, lw=3
             )
             ax.set_ylabel("Firing rate")
             ax.set_xlabel("Time (s)")
             ax.set_title(
-                f"BTSP responses ({len(all_responses)} from {count}/{self.n} neurons)"
+                f"BTSP responses ({len(all_responses)} from {num_BTSP_neurons}/{self.n} neurons)"
             )
 
         fig = np.asarray(ax).ravel()[0].figure
