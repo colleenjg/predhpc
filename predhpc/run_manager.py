@@ -614,6 +614,41 @@ def learn_1D_BTSP(
     return Env, Ag, CA3_PCs, CA1s, spatial_axes, time_axes
 
 
+def plot_interleaved_openfield_rate_maps(CA1s, ECs, num_cols=10):
+    """
+    plot_interleaved_openfield_rate_maps(CA1s, ECs)
+
+    Plot interleaved open field rate maps for CA1 neuron somata and the EC neurons that
+    target their dendrites.
+
+    Args:
+    - CA1s (learning_neurons.BTSPLayer): CA1 neurons.
+    - ECs (object_neurons.ObjectCells): EC neurons.
+    """
+
+    if CA1s.n != ECs.n:
+        raise ValueError("CA1s and ECs should have the same number of neurons.")
+
+    num_cols = min(10, ECs.n)
+    num_rows = int(np.ceil(ECs.n / num_cols)) * 2
+
+    _, axes = plt.subplots(
+        num_rows, num_cols, figsize=(1.5 * num_cols, 1.5 * num_rows), squeeze=False
+    )
+
+    ECs.plot_rate_map(ax=axes[::2].ravel()[: ECs.n], no_legend=True)
+    plot_util.plot_2D_input_place_cell_weights(
+        CA1s.SomaCompartment,
+        ax=axes[1::2].ravel()[: ECs.n],
+        alpha=0.5,
+        plot_BTSP_events=True,
+        no_legend=True,
+    )
+
+    return axes
+
+
+
 if __name__ == "__main__":
     Env, Ag, CA3_PCs, CA1s, spatial_axes, time_axes = learn_1D_BTSP()
 

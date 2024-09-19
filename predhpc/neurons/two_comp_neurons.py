@@ -7,7 +7,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 
 from predhpc import util, plot_util, params_util
-from predhpc.neurons import learning_neurons
+from predhpc.neurons import learning_neurons, riab_neurons
 
 if TYPE_CHECKING:
     import ratinabox  # type: ignore[import]
@@ -47,10 +47,17 @@ class TwoCompLayer(object):
     List of methods:
         • self.set_learn()
         • self.set_BTSP_learn()
+        • self.get_place_cell_centre_of_main_dendrite_input()
+        • self.get_vectors_to_place_cell_centre_of_main_dendrite_input()
+        • self.get_distances_to_place_cell_centre_of_main_dendrite_input()
+        • self.get_closest_steps_to_target()
+        • self.match_closest_to_target_steps_to_BTSP_steps()
         • self.update()
         • self.plot_rate_map()
         • self.plot_rate_timeseries()
         • self.plot_rate_maps_across_learning()
+        • self.plot_distances_to_target()
+        • self.plot_distances_to_targets()
     """
 
     default_params = {
@@ -309,6 +316,221 @@ class TwoCompLayer(object):
 
         self.SomaCompartment.set_BTSP_learn(soma)
         self.DendriteCompartment.set_BTSP_learn(dend)
+
+    def get_place_cell_centre_of_main_dendrite_input(
+        self, neuron_num: int = 0, src_name: str = "EC"
+    ):
+        """
+        self.get_place_cell_centre_of_main_dendrite_input()
+
+        Get the place cell centre input location for the dendrite of a specified neuron.
+
+        Args:
+        - neuron_num (int, optional): Neuron number. Default is 0.
+        - src_name (str, optional): Name of the input place cell layer.
+            Default is "EC".
+
+        Returns:
+        - place_cell_centre (1D np.ndarray): Main dendrite input place cell centre
+            location.
+        """
+
+        if src_name not in self.DendriteCompartment.inputs.keys():
+            raise ValueError(f"No '{src_name}' input to dendrite.")
+
+        input_dict = self.DendriteCompartment.inputs[src_name]
+
+        if not isinstance(input_dict["layer"], riab_neurons.PlaceCells):
+            raise ValueError(f"Input layer '{src_name}' is not a PlaceCells layer.")
+
+        if neuron_num > self.n:
+            raise ValueError(
+                f"Neuron number {neuron_num} is greater than the number of neurons "
+                "in the layer."
+            )
+
+        input_idx = np.argmax(input_dict["w"][:, neuron_num])
+        place_cell_centre = input_dict["layer"].place_cell_centres[input_idx]
+
+        return place_cell_centre
+
+    def get_vectors_to_place_cell_centre_of_main_dendrite_input(
+        self,
+        neuron_num: int = 0,
+        src_name: str = "EC",
+        polar: bool = False,
+        radians: bool = False,
+    ):
+        """
+        self.get_vectors_to_place_cell_centre_of_main_dendrite_input()
+
+        Get the vectors from the agent's current position to the place cell centre
+        input location for the dendrite of a specified neuron.
+
+        Args:
+        - neuron_num (int, optional): Neuron number. Default is 0.
+        - src_name (str, optional): Name of the input place cell layer.
+            Default is "EC".
+        - polar (bool, optional): Whether to return vectors in polar coordinates.
+            Default is False.
+        - radians (bool, optional): If True and polar is True, return angles in radians.
+            Default is False.
+
+        Returns:
+        - vectors (2D np.ndarray): Vectors from agent's position to dendrite input
+            place cell centre.
+        """
+
+        place_cell_centre = self.get_place_cell_centre_of_main_dendrite_input(
+            neuron_num=neuron_num, src_name=src_name
+        )
+        pos = np.asarray(self.Agent.history["pos"])
+
+        vectors = util.get_vectors_to_target(
+            pos, target=place_cell_centre, polar=polar, radians=radians
+        )
+
+        return vectors
+
+    def get_distances_to_place_cell_centre_of_main_dendrite_input(
+        self, neuron_num: int = 0, src_name: str = "EC"
+    ):
+        """
+        self.get_distances_to_place_cell_centre_of_main_dendrite_input()
+
+        Get the distances from the agent's current position to the place cell centre
+        input location for the dendrite of a specified neuron.
+
+        Args:
+        - neuron_num (int, optional): Neuron number. Default is 0.
+        - src_name (str, optional): Name of the input place cell layer.
+            Default is "EC".
+
+        Returns:
+        - distances (1D np.ndarray): Distances from agent's position to dendrite input
+            place cell centre.
+        """
+
+        vectors = self.get_vectors_to_place_cell_centre_of_main_dendrite_input(
+            neuron_num, src_name
+        )
+
+        distances = np.linalg.norm(vectors, ord=2, axis=1)
+
+        return distances
+
+    def get_closest_steps_to_target(
+        self,
+        neuron_num=0,
+        target_src_name="LEC",
+        min_dist=0.2,
+        min_steps_btw=20,
+        log=False,
+    ):
+        """
+        self.get_closest_steps_to_target()
+
+        Get the steps where the agent is closest to the target specified by the place
+        cell centre of the main input to the neuron's dendrite.
+
+        Args:
+        - target_src_name (str, optional): Name of the input place cell layer.
+            Default is "LEC".
+        - neuron_num (int, optional): Neuron number. Default is 0.
+        - min_dist (float, optional): Minimum distance to be considered closest.
+            Default is 0.2.
+        - min_steps_btw (int, optional): Minimum number of steps between closest steps.
+            Default is 20.
+        - log (bool, optional): Whether to print the number of closest steps identified.
+            Default is False.
+
+        Returns:
+        - closest_steps (1D np.ndarray): Steps identified as locally closest to the target.
+        """
+
+        distances = self.get_distances_to_place_cell_centre_of_main_dendrite_input(
+            neuron_num, src_name=target_src_name
+        )
+        closest_steps = util.get_minima_indices(
+            distances, minimum=min_dist, min_pts_btw=min_steps_btw
+        )
+
+        if log:
+            print(
+                f"{len(closest_steps)}/{len(distances)} steps identified as locally "
+                "closest to the target."
+            )
+
+        return closest_steps
+
+    def match_closest_to_target_steps_to_BTSP_steps(
+        self, target_src_name="LEC", neuron_num=0, max_step_dist=40, min_dist=0.2
+    ):
+        """
+        self.match_closest_to_target_steps_to_BTSP_steps()
+
+        Match the steps closest to the target to the BTSP steps of the specified neuron.
+
+        Args:
+        - target_src_name (str, optional): Name of the input place cell layer.
+            Default is "LEC".
+        - neuron_num (int, optional): Neuron number. Default is 0.
+        - max_step_dist (int, optional): Maximum distance between steps to be considered
+            a match. Default is 40.
+        - min_dist (float, optional): Minimum distance to be considered closest.
+            Default is 0.2.
+
+        Returns:
+        - steps_dict (dict): Dictionary of steps closest to the target, matched to
+            BTSP steps, with keys:
+                "steps_before": closest steps occurring before neuron's first BTSP step
+                "steps_near_BTSP": closest steps occurring near BTSP steps
+                "steps_of_nearest_BTSP": index of nearest BTSP step for each step_near_BTSP value
+                "steps_other": closest steps after first BTSP, but not near a BTSP step
+                "all_BTSP_steps": all BTSP steps, whether close to target or not
+        """
+
+        if neuron_num >= self.n:
+            raise ValueError(
+                f"Neuron number ({neuron_num}) must be smaller than number of "
+                f"neurons ({self.n})."
+            )
+
+        BTSP_steps = self.SomaCompartment.get_BTSP_step_dict()[neuron_num]
+        closest_steps = self.get_closest_steps_to_target(
+            neuron_num, target_src_name=target_src_name, min_dist=min_dist
+        )
+
+        keys = [
+            "steps_before",
+            "steps_near_BTSP",
+            "steps_of_nearest_BTSP",
+            "steps_other",
+            "other_BTSP_steps",
+        ]
+        steps_dict = {key: list() for key in keys}
+        if len(BTSP_steps):
+            for step in closest_steps:
+                diff = np.absolute(BTSP_steps - step)
+                if diff.min() < max_step_dist:
+                    key = "steps_near_BTSP"
+                    steps_dict["steps_of_nearest_BTSP"].append(
+                        BTSP_steps[np.argmin(diff)]
+                    )
+                elif step < min(BTSP_steps):
+                    key = "steps_before"
+                else:
+                    key = "steps_other"
+                steps_dict[key].append(step)
+            steps_dict["other_BTSP_steps"] = [
+                step
+                for step in BTSP_steps
+                if step not in steps_dict["steps_of_nearest_BTSP"]
+            ]
+        else:
+            steps_dict["steps_other"] = closest_steps
+
+        return steps_dict
 
     def update(self, dend_first: bool | None = None):
         """
@@ -683,3 +905,280 @@ class TwoCompLayer(object):
         util.save_figure(fig, f"{self.name}_firingrate", save=autosave)  # type: ignore[attr-defined]
 
         return ax
+
+    def plot_distances_to_target(
+        self,
+        neuron_num=0,
+        target_src_name="LEC",
+        sub_ax=None,
+        mark_soma_BTSP=True,
+        mark_teleport=True,
+        mark_closest=True,
+        min_dist=0.2,
+        min_steps_btw=20,
+        log_num_closest=False,
+    ):
+        """
+        self.plot_distances_to_target()
+
+        Plot the distances from the agent's current position to the place cell centre
+        of the main input to the neuron's dendrite, over time.
+
+        Args:
+        - neuron_num (int, optional): Neuron number. Default is 0.
+        - target_src_name (str, optional): Name of the input place cell layer.
+            Default is "LEC".
+        - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
+        - mark_soma_BTSP (bool, optional): Whether to mark the soma compartment BTSP
+            points. Default is True.
+        - mark_teleport (bool, optional): Whether to mark the teleport points.
+            Default is True.
+        - mark_closest (bool, optional): Whether to mark the closest points to the
+            target. Default is True.
+        - min_dist (float, optional): Minimum distance to be considered closest.
+            Default is 0.2.
+        - min_steps_btw (int, optional): Minimum number of steps between closest steps.
+            Default is 20.
+        - log_num_closest (bool, optional): Whether to print the number of closest
+            steps identified. Default is False.
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with distances plotted.
+        """
+
+        time_min = np.asarray(self.Agent.history["t"]) / 60
+        distances = self.get_distances_to_place_cell_centre_of_main_dendrite_input(
+            neuron_num, src_name=target_src_name
+        )
+
+        if sub_ax is None:
+            _, sub_ax = plt.subplots(figsize=[8, 1.3])
+
+        sub_ax.plot(time_min, distances)
+
+        if mark_soma_BTSP:
+            self.SomaCompartment.add_BTSP_markers_to_plots(
+                sub_ax, chosen_neurons=[neuron_num], timeseries=True
+            )
+            plot_util.pad_axis(sub_ax, end="high")
+
+        if mark_teleport:
+            plot_util.pad_axis(sub_ax, end="high", pad_prop=0.1)
+            self.Agent.add_teleportation_markers_to_plots(sub_ax, timeseries=True)
+            sub_ax.legend(loc="upper right", fontsize=5)
+
+        if mark_closest or log_num_closest:
+            closest_steps = self.get_closest_steps_to_target(
+                neuron_num=neuron_num,
+                target_src_name=target_src_name,
+                min_dist=min_dist,
+                min_steps_btw=min_steps_btw,
+                log=log_num_closest,
+            )
+            closest_steps = util.get_minima_indices(
+                distances, minimum=min_dist, min_pts_btw=min_steps_btw
+            )
+
+            if mark_closest and len(closest_steps):
+                plot_util.pad_axis(sub_ax, end="both", pad_prop=0.2)
+                sub_ax.plot(
+                    time_min[closest_steps],
+                    np.zeros_like(closest_steps),
+                    lw=0,
+                    marker="o",
+                    ms=2,
+                    color=self.SomaCompartment.color,
+                )
+
+        sub_ax.spines[["right", "top"]].set_visible(False)
+        sub_ax.set_ylabel("Dist. to target")
+        sub_ax.set_xlabel("Time / min.")
+
+        return sub_ax
+
+    def plot_distances_to_targets(
+        self,
+        target_src_name="LEC",
+        num_neurons="all",
+        mark_soma_BTSP=True,
+        mark_teleport=True,
+        mark_closest=True,
+        min_dist=0.2,
+        min_steps_btw=20,
+        axes=None,
+        num_cols=2,
+        sharey=True,
+        log_num_closest=False,
+    ):
+        """
+        self.plot_distances_to_target()
+
+        Plot the distances from the agent's current position to the place cell centre
+        of the main input to the neuron's dendrite, over time.
+
+        Args:
+        - target_src_name (str, optional): Name of the input place cell layer.
+            Default is "LEC".
+        - axes (2D np.ndarray): Array of subplots to plot on (one per neuron).
+            Default is None.
+        - neuron_num (int, optional): Neuron number. Default is 0.
+        - mark_soma_BTSP (bool, optional): Whether to mark the soma compartment BTSP
+            points. Default is True.
+        - mark_teleport (bool, optional): Whether to mark the teleport points.
+            Default is True.
+        - mark_closest (bool, optional): Whether to mark the closest points to the
+            target. Default is True.
+        - min_dist (float, optional): Minimum distance to be considered closest.
+            Default is 0.2.
+        - min_steps_btw (int, optional): Minimum number of steps between closest steps.
+            Default is 20.
+        - num_cols (int, optional): Number of columns in the subplot array.
+            Default is 2.
+        - sharey (bool, optional): Whether to share the y-axis across subplots.
+            Default is True.
+        - log_num_closest (bool, optional): Whether to print the number of closest
+            steps identified. Default is False.
+
+        Returns:
+        - axes (2D np.ndarray): Array of subplots with distances plotted.
+        """
+
+        if num_neurons == "all":
+            num_neurons = self.n
+        elif num_neurons > self.n:
+            raise ValueError(
+                f"num_neurons ({num_neurons}) must be less than or equal to the number "
+                "of neurons in the layer."
+            )
+
+        if axes is None:
+            num_cols = min(num_neurons, num_cols)
+            num_rows = int(np.ceil(num_neurons / num_cols))
+            _, axes = plt.subplots(
+                num_rows,
+                num_cols,
+                figsize=[8, 0.8 * num_rows],
+                sharex=True,
+                squeeze=False,
+            )
+        elif len(axes.ravel()) != num_neurons:
+            raise ValueError(
+                f"Number of subplots ({len(axes.ravel())}) must match number of "
+                f"neurons specified ({num_neurons})."
+            )
+
+        ax2D = axes.reshape(len(axes), -1)
+
+        i = 0
+        for r, ax_row in enumerate(ax2D):
+            for c, sub_ax in enumerate(ax_row):
+                if i < num_neurons:
+                    use_mark_teleport = False
+                    if r == 0:
+                        use_mark_teleport = mark_teleport
+
+                    self.plot_distances_to_target(
+                        neuron_num=i,
+                        target_src_name=target_src_name,
+                        sub_ax=sub_ax,
+                        mark_soma_BTSP=mark_soma_BTSP,
+                        mark_teleport=use_mark_teleport,
+                        mark_closest=mark_closest,
+                        min_dist=min_dist,
+                        min_steps_btw=min_steps_btw,
+                        log_num_closest=log_num_closest,
+                    )
+                    if use_mark_teleport and c != len(ax2D[0]) - 1:
+                        legend = sub_ax.legend()
+                        if legend is not None:
+                            legend.remove()
+                else:
+                    sub_ax.spines[["left", "bottom"]].set_visible(False)
+                    sub_ax.set_xticks([])
+                    sub_ax.set_yticks([])
+
+                if c == 0 and r == len(ax2D) // 2:
+                    sub_ax.set_ylabel("Distance to target")
+                else:
+                    sub_ax.set_ylabel("")
+                if r == len(ax2D) - 1:
+                    sub_ax.set_xlabel("Time / min.")
+                else:
+                    sub_ax.set_xlabel("")
+
+                i += 1
+
+        if sharey:
+            y_lims = np.asarray([sub_ax.get_ylim() for sub_ax in axes.ravel()])
+            y_lims = [np.min(y_lims[0]), np.max(y_lims[1])]
+            for sub_ax in axes.ravel():
+                sub_ax.set_ylim(y_lims)
+
+        neuron_str = "all" if num_neurons == self.n else f"first {num_neurons}"
+
+        y = 0.885 + (0.005 * ax2D.shape[1])
+        sub_ax.figure.suptitle(f"Distance to target for {neuron_str} neurons.", y=y)
+
+        return axes
+
+    def plot_properties_at_BTSP_and_closest_to_target_steps(
+        self,
+        neuron_num=0,
+        target_src_name="LEC",
+        axes=None,
+    ):
+        """
+        plot_properties_at_BTSP_and_closest_to_target_steps(CA1s)
+
+        Plot properties at BTSP and closest to target steps for a CA1 neuron.
+
+        Args:
+        - neuron_num (int, optional): Neuron number. Default is 0.
+        - target_src_name (str, optional): Name of the input place cell layer.
+            Default is "LEC".
+        - axes (2D np.ndarray, optional): Array of subplots to plot on. Default is None.
+
+        Returns:
+        - axes (2D np.ndarray): Array of subplots with properties plotted.
+        """
+
+        if axes is None:
+            _, axes = plt.subplots(1, 3, figsize=[8, 2], sharey=True, squeeze=False)
+        elif len(axes.ravel()) != 3:
+            raise ValueError("axes must have length 3.")
+
+        distances = self.get_distances_to_place_cell_centre_of_main_dendrite_input(
+            neuron_num=0, src_name=target_src_name
+        )
+        firingrates = np.asarray(self.SomaCompartment.history["firingrate"]).T[
+            neuron_num
+        ]
+        angles = self.get_vectors_to_place_cell_centre_of_main_dendrite_input(
+            neuron_num=0, src_name=target_src_name, polar=True
+        )[:, 1]
+
+        steps_dict = self.match_closest_to_target_steps_to_BTSP_steps(
+            target_src_name="LEC", neuron_num=0
+        )
+
+        for i, (x_data_type, x_data, sub_ax) in enumerate(
+            zip(
+                ["Step", "Firing rate", "Angle from target"],
+                [None, firingrates, angles],
+                axes.ravel(),
+            )
+        ):
+            y_data_type = "Distance from target" if i == 0 else ""
+            plot_util.plot_property_at_BTSP_and_closest_to_target_steps(
+                steps_dict,
+                y_data=distances,
+                x_data=x_data,
+                x_data_type=x_data_type,
+                y_data_type=y_data_type,
+                sub_ax=sub_ax,
+                legend=(i == len(axes.ravel()) - 1),
+            )
+
+        sub_ax.figure.suptitle("Properties near BTSP and closest to target steps")
+
+        return axes

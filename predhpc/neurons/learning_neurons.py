@@ -2349,6 +2349,7 @@ class BTSPLayer(HebbianLayer):
                     "Only one axis expected for timeseries or 1D rate map."
                 )
             sub_ax = ax1D[0]
+            ymax = sub_ax.get_ylim()[1]
 
         for event, targets in zip(BTSP_events, BTSP_targets):
             for target in targets:
@@ -2368,13 +2369,13 @@ class BTSPLayer(HebbianLayer):
                     if event < 0:
                         continue
                     x_pos = t[event] / 60
-                    line_sep = (sub_ax.get_ylim()[1] - 1) / num_neurons
+                    line_sep = (ymax - 1) / num_neurons
                     y_pos = 1 + line_sep * i + line_sep * 0.7
                     pos = [x_pos, y_pos]
                 else:
                     pos = self.Agent.history["pos"][event + startid]
                     if self.Agent.Environment.dimensionality == "1D":
-                        line_sep = (sub_ax.get_ylim()[1] - 1) / num_neurons
+                        line_sep = (ymax - 1) / num_neurons
                         y_pos = 1 + line_sep * i + line_sep * 0.7
                         pos = pos + [y_pos]
                     else:

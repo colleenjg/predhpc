@@ -1,4 +1,4 @@
-from typing import Any, TYPE_CHECKING, Callable
+from typing import Any, TYPE_CHECKING, Callable, Sequence
 import warnings
 
 import copy
@@ -3253,6 +3253,97 @@ class OpenFieldAgent(ResetableAgent):
                             break
 
         return agent_color
+
+    def add_teleportation_markers_to_plots(
+        self,
+        ax: np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]] | plt.Axes,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        timeseries: bool = False,
+        plot_lines: bool = True,
+        legend: bool = True,
+    ):
+        """
+        self.add_teleportation_markers_to_plots()
+
+        Adds teleportation markers to timeseries or environment plots.
+
+        Args:
+        - ax (np.ndarray or plt.Axes): Subplot or array of subplots on which to add
+            teleportation markers.
+        - t_start (float, optional): Start time of the plot. Default is None.
+        - t_end (float, optional): End time. Default is None.
+        - timeseries (bool, optional): Whether the plot is timeseries. Default is False.
+        - plot_lines (bool, optional): Whether to plot lines for teleportation events,
+            if timeseries is True. Default is True.
+        - legend (bool, optional): Whether to add a legend. Default is True.
+        """
+
+        t = np.asarray(self.history["t"])
+        startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
+        t = t[startid:endid]
+
+        step_nums = self.teleportation_df["step_num"].to_numpy() - startid
+        object_in_type_nums = self.teleportation_df["in_object_type_num"].to_numpy()
+
+        ax1D = np.asarray(ax).ravel()
+
+        for sub_ax in ax1D:
+            plotted = list()
+            if timeseries:
+                y_min, y_max = sub_ax.get_ylim()
+                y_pos = (y_max - y_min) * 0.98 + y_min
+
+            for i in np.argsort(object_in_type_nums):
+                step_num = step_nums[i]
+                obj_num = object_in_type_nums[i]
+
+                if step_num >= len(t):
+                    continue
+                elif step_num < 0:
+                    alpha = 0.6
+                else:
+                    alpha = 1.0
+
+                plot_params = copy.deepcopy(
+                    self.Environment.object_type_num_to_plot_params_dict[obj_num]
+                )
+                name = plot_params.pop("name")
+                if legend and name not in plotted:
+                    label = name.replace("_", " ").replace(" in", "")
+                    plotted.append(name)
+                else:
+                    label = None
+
+                if timeseries:
+                    if step_num < 0:
+                        continue
+                    x_pos = t[step_num] / 60
+                    pos = [x_pos, y_pos]
+                    plot_params["s"] /= 2
+                    if plot_lines:
+                        sub_ax.axvline(
+                            x=x_pos,
+                            color=plot_params["color"],
+                            ls="dashed",
+                            zorder=-1,
+                            alpha=0.8,
+                        )
+                        sub_ax.scatter(
+                            *pos,
+                            alpha=0.9,
+                            color="white",
+                            s=plot_params["s"] * 6,
+                            zorder=0,
+                            marker="s",
+                        )
+                else:
+                    pos = self.history["pos"][step_num + startid]
+
+                sub_ax.scatter(*pos, alpha=alpha, label=label, **plot_params)
+
+            if legend:
+                sub_ax.legend()
 
     def add_target_to_plot(
         self,
