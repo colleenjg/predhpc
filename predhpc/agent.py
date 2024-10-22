@@ -482,7 +482,7 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
         - target_position (1D np.ndarray or None): Target position.
 
         Args:
-        - position (1D np.ndarray or list): Target position.
+        - position (1D np.ndarray or list or None): Target position.
         """
 
         self.target_position = self.format_position(position)
@@ -1342,6 +1342,7 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
                     t_end=t_end,
                     in_minutes=True,
                     dim_idx=dim_idx,
+                    raise_error=(position_name != "target"),
                 )
 
         if self.Environment.D == 1:

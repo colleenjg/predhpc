@@ -55,7 +55,7 @@ class ObjectInstanceCells(riab_neurons.PlaceCells):
 
     def __init__(self, Agent: "ratinabox.Agent", params: dict[str, Any] = dict()):
         """
-        ObjectCells(Agent)
+        ObjectInstanceCells(Agent)
 
         Initialise an object cell layer.
 
@@ -214,6 +214,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
         "min_fr": 0,
         "max_fr": 1,
         "dynamic": True,  # place cells centres will update if object locations change
+        "is_dummy": False,  # dummy object cells, where all objects have been removed
     }
 
     ignored_param_keys = list()
@@ -267,6 +268,9 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
 
         self._create_place_cell_layer()
         self._add_place_inputs()
+
+        if self.is_dummy:
+            self.set_to_dummy()
 
     @property
     def input_object_types(self):
@@ -437,6 +441,65 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
             )
             self._broken_link = True
 
+    def set_to_dummy(self):
+        """
+        self.set_to_dummy()
+
+        Set the layer to a dummy state, where all objects have been removed.
+        """
+
+        if self.is_dummy:
+            return
+
+        self._saved_input_object_locations = copy.deepcopy(self.input_object_locations)
+
+        # set to far outside the environment
+        self._input_object_locations[:] = np.nan
+
+        self.is_dummy = True
+
+    def reset_from_dummy(self):
+
+        if not self.is_dummy:
+            return
+
+        self._input_object_locations[:] = self._saved_input_object_locations[:]
+
+        self.is_dummy = False
+
+    def get_state(self, evaluate_at="last", **kwargs):
+        """
+        self.get_state()
+
+        Returns the firing rate of the place cells. If neuron layer is in dummy mode,
+        returns minimum firingrate. Otherwise, firingrate is computed in parent class'
+        get_state() method.
+
+        Returns:
+            - firingrates (1 or 2D np.ndarray): Array of firing rates, with shape
+                (n x number of positions) if firingrates for more than 1 position are
+                requested.
+        """
+        if self.is_dummy:
+            if evaluate_at == "last":
+                V_shape = self.n
+            elif evaluate_at == "all":
+                V_shape = (
+                    self.n,
+                    self.Agent.Environment.flattened_discrete_coords.shape[0],
+                )
+            else:
+                V_shape = (self.n, kwargs["pos"].shape[0])
+
+            V = np.full(V_shape, 0)
+            firingrate = self.activation_function(V, deriv=False)
+            if evaluate_at == "last":
+                self.firingrate_prime = self.activation_function(V, deriv=True)
+        else:
+            firingrate = super().get_state(evaluate_at=evaluate_at, **kwargs)
+
+        return firingrate
+
     def update(self):
         """
         self.update()
@@ -448,7 +511,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
         the future.
         """
 
-        if not self._broken_link:
+        if not self.is_dummy or self._broken_link:
             self.check_link()
 
         self.PlaceCellInputs.update()
@@ -469,6 +532,37 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
         sep = "\n    "
         log_str = f"Layer comprises:{sep}{sep.join(obj_strs)}"
         print(log_str)
+
+    def plot_place_cell_locations(
+        self,
+        sub_ax=None,
+        autosave=None,
+    ):
+        """
+        self.plot_place_cell_locations()
+
+        Plots location of the place cells centers.
+
+        Args:
+        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
+            created. Default is None.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the
+            global autosave setting for ratinabox is used. Default is None.
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with place cell locations plotted.
+        """
+
+        if self.is_dummy:
+            sub_ax = self.Agent.Environment.plot_environment(
+                sub_ax=sub_ax, autosave=False
+            )
+            util.save_figure(sub_ax.figure, f"{self.name}_place_cell_locations", save=autosave)  # type: ignore[attr-defined]
+
+        else:
+            return self.PlaceCellInputs.plot_place_cell_locations(
+                sub_ax=sub_ax, autosave=autosave
+            )
 
 
 class FixedObjectCells(ObjectCells):
