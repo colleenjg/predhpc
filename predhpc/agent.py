@@ -3,7 +3,8 @@ import warnings
 
 import copy
 from matplotlib import pyplot as plt  # type: ignore[import]
-from matplotlib import animation, markers
+from matplotlib import animation as mpl_animation
+from matplotlib import markers as mpl_markers
 from matplotlib import colors as mpl_colors
 from matplotlib import figure as mpl_figure
 import numpy as np
@@ -12,10 +13,11 @@ import seaborn as sns  # type: ignore[import]
 from ratinabox import Agent as riabAgent  # type: ignore[import]
 from ratinabox import utils as rutils
 
-from predhpc import env, util, plot_util
+from predhpc import env, plot_fcts
+from predhpc.util import gen_util, plot_util, ext_util
 
 
-class ResetableAgent(riabAgent, util.ParamsManagerMixin):
+class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
     """
     ResetableAgent()
 
@@ -242,7 +244,7 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
             self.rand = None
 
         elif self.num_trajectories:
-            self.trajectory_length = util.get_trajectory_lengths(
+            self.trajectory_length = ext_util.get_trajectory_lengths(
                 num_trajectories=self.num_trajectories,
                 exp_factors=self.exp_factors,  # type: ignore[attr-defined]
                 random_max=self.random_max,  # type: ignore[attr-defined]
@@ -407,6 +409,37 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
             new_velocity = self.velocity * 0  # set to 0
 
         self.velocity = new_velocity
+
+    def get_plotting_times(
+        self,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        raise_error: bool = True,
+    ):
+        """
+        self.get_plotting_times()
+
+        Obtain the times to plot.
+
+        Args:
+        - t_start (float, optional): Start time. Default is None.
+        - t_end (float, optional): End time. Default is None.
+        - raise_error (bool, optional): Whether to raise an error if the start and end
+            times are not in the history. Default is True.
+
+        Returns:
+        - t (1D np.ndarray): Times to plot.
+        - startid (int): Index of the start time point.
+        - endid (int): Index of the end time point.
+        """
+
+        t = np.asarray(self.history["t"])
+        startid, endid = plot_util.get_plotting_times(
+            t, t_start=t_start, t_end=t_end, raise_error=raise_error
+        )
+        t = t[startid : endid + 1]
+
+        return t, startid, endid
 
     def format_position(
         self,
@@ -1067,12 +1100,12 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
         """
 
         traj_leng_to_date = self.get_trajectory_lengths_to_date()
-        sub_ax, _ = plot_util.plot_trajectory_lengths(
+        sub_ax, _ = plot_fcts.plot_trajectory_lengths(
             dt=self.dt, trajectory_lengths=traj_leng_to_date, in_minutes=in_minutes  # type: ignore[has-type]
         )
 
         fig = sub_ax.figure
-        util.save_figure(fig, "trajectories_to_date", save=autosave)
+        plot_util.save_figure(fig, "trajectories_to_date", save=autosave)
 
         return sub_ax
 
@@ -1122,10 +1155,9 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
         - sub_ax (plt.Axes): Subplot with distance to position plotted.
         """
 
-        t = np.asarray(self.history["t"])
-        startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
+        t, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
 
-        t = t[startid : endid + 1] / 60
+        t = t / 60  # to minutes
         positions = np.asarray(self.history["pos"])[startid : endid + 1]
 
         if position is None:
@@ -1179,7 +1211,7 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
         sub_ax.spines[["right", "top"]].set_visible(False)
 
         fig = sub_ax.figure
-        util.save_figure(fig, "distance", save=autosave)
+        plot_util.save_figure(fig, "distance", save=autosave)
 
         return sub_ax
 
@@ -1224,8 +1256,7 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
             else:
                 return
 
-        t = np.asarray(self.history["t"])
-        startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
+        t, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
 
         if in_minutes:
             t = t / 60
@@ -1298,13 +1329,12 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
         """
 
         dt = self.dt
-        t, pos = np.asarray(self.history["t"]), np.asarray(self.history["pos"])
-        startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
-        t_start, t_end = t[startid], t[endid]
+        t, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
+        pos = np.asarray(self.history["pos"])
 
         skiprate = max(1, int((1 / framerate) / dt))
 
-        time = t[startid : endid + 1][::skiprate] / 60  # in minutes
+        time = t[::skiprate] / 60  # in minutes
         pos = pos[startid : endid + 1][::skiprate]
 
         # get reset step indices
@@ -1327,7 +1357,7 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
                 time,
                 pos,
                 alpha=alpha,
-                marker=markers.MarkerStyle("."),
+                marker=mpl_markers.MarkerStyle("."),
                 color=color,
                 s=s,
             )
@@ -1368,7 +1398,7 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
         sub_ax.spines[["right", "top"]].set_visible(False)
 
         fig = sub_ax.figure
-        util.save_figure(fig, "trajectory_resets", save=autosave)
+        plot_util.save_figure(fig, "trajectory_resets", save=autosave)
 
         return sub_ax
 
@@ -1419,7 +1449,7 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
 
         # plot head direction
         if head_direction is not None:
-            rotated_agent_marker = markers.MarkerStyle(
+            rotated_agent_marker = mpl_markers.MarkerStyle(
                 marker=[(-1, 0), (1, 0), (0, 4)]
             )  # a triangle
             rotated_agent_marker._transform = (
@@ -1515,15 +1545,15 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
         """
 
         dt = self.dt
-        t, pos = np.asarray(self.history["t"]), np.asarray(self.history["pos"])
-        startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
-        t_start, t_end = t[startid], t[endid]
+        t, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
+        pos = np.asarray(self.history["pos"])
 
         skiprate = max(1, int((1 / framerate) / dt))
-        time_idx = np.arange(startid, endid + 1, skiprate)
-        trajectory = pos[time_idx]
+        t = t[::skiprate]
+        idx = np.arange(startid, endid + 1, skiprate)
+        trajectory = pos[idx]
 
-        time = t[time_idx] / 60  # in minutes
+        time = t / 60  # in minutes
 
         # get reset step indices
         if startid > endid:
@@ -1537,13 +1567,13 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
             colormap,
             cmap_per=cmap_per,
             scale_cmap_per=scale_cmap_per,
-            time_idx=time_idx,
+            time_idx=idx,
         )
 
         full_traj_idx = [
             np.full(steps, i) for i, steps in enumerate(trajectory_lengths)
         ]
-        traj_idx = np.concatenate(full_traj_idx).astype(int)[time_idx]
+        traj_idx = np.concatenate(full_traj_idx).astype(int)[idx]
 
         if self.Environment.dimensionality == "2D":
             if size_fact is not None:
@@ -1584,7 +1614,7 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
             if plot_agent == True:
                 head_direction = None
                 if plot_head_direction:
-                    head_direction = self.history["head_direction"][time_idx[-1]]
+                    head_direction = self.history["head_direction"][idx[-1]]
 
                 self.add_agent_to_plot(
                     sub_ax,
@@ -1610,7 +1640,7 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
             )
 
         fig = sub_ax.figure
-        util.save_figure(fig, "trajectory", save=autosave)
+        plot_util.save_figure(fig, "trajectory", save=autosave)
 
         return sub_ax
 
@@ -1663,12 +1693,8 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
          - sub_ax (plt.Axes): Subplot with trajectory edges plotted.
         """
 
-        t, pos = np.asarray(self.history["t"]), np.asarray(self.history["pos"])
-        startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
-        t_start, t_end = t[startid], t[endid]
-
-        if t_start is None or t_end is None:
-            raise RuntimeError("t_start or t_end is None.")
+        t, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
+        pos = np.asarray(self.history["pos"])
 
         t = t / 60  # minutes
 
@@ -1729,8 +1755,8 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
                     _, sub_ax = plt.subplots(figsize=(3, 1.5))
                 sub_ax.scatter(time / 60, trajectory, alpha=alpha, s=5, **kwargs)
 
-                sub_ax.set_xlim(t_start / 60, t_end / 60)
-                sub_ax.set_xticks([t_start / 60, t_end / 60])
+                sub_ax.set_xlim(t[0] / 60, t[-1] / 60)
+                sub_ax.set_xticks([t[0] / 60, t[-1] / 60])
                 if xlim is not None:
                     sub_ax.set_xlim(right=xlim)
 
@@ -1749,7 +1775,7 @@ class ResetableAgent(riabAgent, util.ParamsManagerMixin):
             raise RuntimeError("sub_ax is None.")
 
         fig = sub_ax.figure
-        util.save_figure(fig, "trajectory_edges", save=autosave)
+        plot_util.save_figure(fig, "trajectory_edges", save=autosave)
 
         return sub_ax
 
@@ -2818,7 +2844,7 @@ class OpenFieldAgent(ResetableAgent):
 
         drift_velocity = self.get_drift_velocity(speed_fact=speed_fact)
 
-        update_vector = util.get_velocity_update_vector(
+        update_vector = ext_util.get_velocity_update_vector(
             velocity,
             drift_velocity=drift_velocity,
             dt=self.dt,
@@ -2918,7 +2944,7 @@ class OpenFieldAgent(ResetableAgent):
         )
 
         # get the output vector
-        out_vector = util.rotate_to(
+        out_vector = gen_util.rotate_to(
             in_vector=self.pos - teleport_in_coords,
             in_basis=teleport_in_vector,  # type: ignore[arg-type]
             out_basis=teleport_out_vector,  # type: ignore[arg-type]
@@ -2955,7 +2981,7 @@ class OpenFieldAgent(ResetableAgent):
             teleport_pair_num, direction="out"
         )
 
-        out_velocity = -util.rotate_to(
+        out_velocity = -gen_util.rotate_to(
             in_vector=self.velocity,
             in_basis=teleport_in_vector,  # type: ignore[arg-type]
             out_basis=teleport_out_vector,  # type: ignore[arg-type]
@@ -3232,7 +3258,7 @@ class OpenFieldAgent(ResetableAgent):
         - agent_color (str): The agent's state color.
         """
 
-        endid = plot_util.get_plotting_times(np.asarray(self.history["t"]), t_end=t)[1]
+        endid = self.get_plotting_times(t_end=t)[-1]
         agent_color = "dodgerblue"
         past_df = self.target_df.loc[self.target_df["set_step"] <= endid]
         if len(past_df):
@@ -3280,9 +3306,7 @@ class OpenFieldAgent(ResetableAgent):
         - legend (bool, optional): Whether to add a legend. Default is True.
         """
 
-        t = np.asarray(self.history["t"])
-        startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
-        t = t[startid:endid]
+        t, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
 
         step_nums = self.teleportation_df["step_num"].to_numpy() - startid
         object_in_type_nums = self.teleportation_df["in_object_type_num"].to_numpy()
@@ -3343,7 +3367,7 @@ class OpenFieldAgent(ResetableAgent):
 
                 sub_ax.scatter(*pos, alpha=alpha, label=label, **plot_params)
 
-            if legend:
+            if legend and len(plotted):
                 sub_ax.legend()
 
     def add_target_to_plot(
@@ -3379,7 +3403,7 @@ class OpenFieldAgent(ResetableAgent):
         sub_ax.scatter(
             past_df.loc[idx, "position_x"],  # type: ignore[assignment]
             past_df.loc[idx, "position_y"],  # type: ignore[assignment]
-            marker=markers.MarkerStyle("x"),
+            marker=mpl_markers.MarkerStyle("x"),
             s=60,
             zorder=4,
             color="red",
@@ -3430,7 +3454,7 @@ class OpenFieldAgent(ResetableAgent):
         self.add_target_to_plot(sub_ax, t=t_end)
 
         fig = sub_ax.figure
-        util.save_figure(fig, "trajectory", save=autosave)
+        plot_util.save_figure(fig, "trajectory", save=autosave)
 
         return sub_ax
 
@@ -3550,7 +3574,7 @@ class OpenFieldAgent(ResetableAgent):
             legend.remove()
 
         fig = sub_ax.figure
-        util.save_figure(fig, "trajectory_targets", save=autosave)
+        plot_util.save_figure(fig, "trajectory_targets", save=autosave)
 
         return sub_ax
 
@@ -3583,14 +3607,14 @@ class OpenFieldAgent(ResetableAgent):
         if sub_ax is None:
             _, sub_ax = plt.subplots(figsize=(8, 3))
 
-        t, pos = np.asarray(self.history["t"]), np.asarray(self.history["pos"])
-        startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
-        t_start, t_end = t[startid], t[endid]
+        t, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
+
+        pos = np.asarray(self.history["pos"])
+        t_start, t_end = t[0], t[-1]
 
         if t_start is None or t_end is None:
             raise RuntimeError("t_start or t_end is None.")
 
-        t = t[startid : endid + 1]  # keep in seconds
         pos = pos[startid : endid + 1]
 
         # plot reset points as vertical dashed lines
@@ -3642,12 +3666,18 @@ class OpenFieldAgent(ResetableAgent):
                 label = plot_params.pop("name")
                 plot_params["markersize"] = plot_params.pop("s") / 8
 
-            if np.isnan(row["reached_step"]):
+            if np.isnan(row["reached_step"]) or row["reached_step"] >= endid:
+                if r >= len(reset_times):
+                    continue
                 target_reached_time = reset_times[r]
                 alpha = 0.3
                 r += 1
             else:
-                target_reached_time = t[int(row["reached_step"])]
+                target_reached_idx = int(row["reached_step"]) - startid
+                if target_reached_idx < 0 or target_reached_idx >= len(t):
+                    continue
+
+                target_reached_time = t[target_reached_idx]
                 alpha = 0.8
 
             if target_reached_time < t_start or target_reached_time > t_end:
@@ -3676,7 +3706,7 @@ class OpenFieldAgent(ResetableAgent):
         plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.04)
 
         fig = sub_ax.figure
-        util.save_figure(fig, "trajectory_targets_over_time", save=autosave)
+        plot_util.save_figure(fig, "trajectory_targets_over_time", save=autosave)
 
         return sub_ax
 
@@ -3685,7 +3715,7 @@ class OpenFieldAgent(ResetableAgent):
         plot_head_direction=True,
         additional_plot_func: Callable | None = None,
         **kwargs,
-    ) -> animation.FuncAnimation:
+    ) -> mpl_animation.FuncAnimation:
         """
         self.animate_trajectories()
 

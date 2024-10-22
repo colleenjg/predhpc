@@ -6,8 +6,8 @@ import numpy as np
 from sklearn.linear_model import Ridge  # type: ignore[import]
 from sklearn.multioutput import MultiOutputRegressor  # type: ignore[import]
 
-from predhpc import util
 from predhpc.neurons import riab_neurons, learning_neurons
+from predhpc.util import ext_util, plot_util
 
 if TYPE_CHECKING:
     import ratinabox  # type: ignore[import]
@@ -348,7 +348,7 @@ class RegressionLayer(learning_neurons.LearnLayer):
         sub_ax.set_xlabel(f"Firing rate{fit_str}")
 
         fig = sub_ax.get_figure()
-        util.save_figure(fig, f"{self.name}_firing_rate_histogram", save=autosave)  # type: ignore[attr-defined]
+        plot_util.save_figure(fig, f"{self.name}_firing_rate_histogram", save=autosave)  # type: ignore[attr-defined]
 
         return sub_ax
 
@@ -478,7 +478,7 @@ class TorchLayer(learning_neurons.LearnLayer):
         )  # avoid deep copy to preserve reference to input layers
 
         if params["sigmoid"]:
-            params["activation_function"] = util.get_standard_sigmoid_params()
+            params["activation_function"] = ext_util.get_standard_sigmoid_params()
             self.activ = torch.nn.Sigmoid  # type: ignore[assignment]
         else:
             params["activation_function"] = {"activation": "relu"}
@@ -598,6 +598,6 @@ class TorchLayer(learning_neurons.LearnLayer):
         sub_ax.set_xlabel(f"Firing rate{train_str}")
 
         fig = sub_ax.get_figure()
-        util.save_figure(fig, f"{self.name}_firing_rate_histogram", save=autosave)  # type: ignore[attr-defined]
+        plot_util.save_figure(fig, f"{self.name}_firing_rate_histogram", save=autosave)  # type: ignore[attr-defined]
 
         return sub_ax

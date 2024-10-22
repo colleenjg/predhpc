@@ -4,17 +4,18 @@ from typing import Any, Sequence
 import warnings
 
 from matplotlib import pyplot as plt  # type: ignore[import]
-from matplotlib import markers
+from matplotlib import markers as mpl_markers
 import numpy as np
 from tqdm import tqdm  # type: ignore[import]
 
-from predhpc import agent, env, plot_util, util, params_util
+from predhpc import agent, env, plot_fcts
 from predhpc.neurons import (
     riab_neurons,
     learning_neurons,
     two_comp_neurons,
     object_neurons,
 )
+from predhpc.util import plot_util, params_util
 
 
 def plot_T_maze(
@@ -55,7 +56,7 @@ def plot_T_maze(
     ax1D[0].set_title("Trajectories")
 
     # Plot CA3 place cell locations on T-maze
-    plot_util.plot_overlayed_rate_maps(
+    plot_fcts.plot_overlayed_rate_maps(
         CA3_PCs, sub_ax=ax1D[1], method="max", colorbar=False
     )
     CA3_PCs.plot_place_cell_locations(sub_ax=ax1D[1])
@@ -73,7 +74,7 @@ def plot_T_maze(
         CA1s_or_ECs.plot_rate_map(ax=ax1D[2], method=method)
         title = f"{CA1s_or_ECs.name.replace('_', ' ')} rate map"  # type: ignore[attr-defined]
     else:
-        plot_util.plot_overlayed_rate_maps(
+        plot_fcts.plot_overlayed_rate_maps(
             CA1s_or_ECs,
             sub_ax=ax1D[2],
             method="max",
@@ -90,7 +91,7 @@ def plot_T_maze(
     )
     ax1D[2].set_title(title)
 
-    util.save_figure(fig, "T_maze", save=autosave)
+    plot_util.save_figure(fig, "T_maze", save=autosave)
 
     return axes
 
@@ -129,7 +130,7 @@ def plot_time_series_with_BTSP_events(
         sub_ax.scatter(
             CA1s.Agent.history["t"][t] / 60,
             y_hei,
-            marker=markers.MarkerStyle("o"),
+            marker=mpl_markers.MarkerStyle("o"),
             s=6,
             color="k",
             alpha=0.7,
@@ -354,13 +355,13 @@ def plot_1D_spatial_info(
     ax1D = np.asarray(axes).ravel()
 
     # Plot environment
-    plot_util.plot_1D_reset_environment(Ag, sub_ax=ax1D[0], autosave=False)
+    plot_fcts.plot_1D_reset_environment(Ag, sub_ax=ax1D[0], autosave=False)
 
     # Plot CA3 place cell locations
     CA3_PCs.plot_place_cell_locations(
         sub_ax=ax1D[1], autosave=False, plot_objects=False
     )
-    plot_util.plot_overlayed_rate_maps(
+    plot_fcts.plot_overlayed_rate_maps(
         CA3_PCs, sub_ax=ax1D[1], method="max", autosave=False
     )
     ymin, ymax = ax1D[1].get_ylim()
@@ -375,7 +376,7 @@ def plot_1D_spatial_info(
     # Plot CA1 weights
     i = 3
     if CA1_weights is not None:
-        plot_util.plot_1D_input_place_cell_weights(
+        plot_fcts.plot_1D_input_place_cell_weights(
             np.asarray(CA1_weights),
             CA3_PCs,
             sub_ax=ax1D[i],
@@ -384,12 +385,12 @@ def plot_1D_spatial_info(
         i += 1
 
     # Plot CA1 rate maps across learning
-    plot_util.plot_1D_rate_map_across_learning(
+    plot_fcts.plot_1D_rate_map_across_learning(
         Ag, CA1s, axes=ax1D[i : i + 3], autosave=False  # type: ignore[arg-type]
     )
 
     # Plot environment
-    plot_util.plot_1D_reset_environment(Ag, sub_ax=ax1D[i + 3], autosave=False)
+    plot_fcts.plot_1D_reset_environment(Ag, sub_ax=ax1D[i + 3], autosave=False)
 
     for a, sub_ax in enumerate(ax1D[:-1]):
         sub_ax.set_xlabel("")
@@ -397,7 +398,7 @@ def plot_1D_spatial_info(
             sub_ax.spines["bottom"].set_visible(False)
             sub_ax.xaxis.set_visible(False)
 
-    util.save_figure(fig, "1D_env_info", save=autosave)
+    plot_util.save_figure(fig, "1D_env_info", save=autosave)
 
     return axes
 
@@ -464,12 +465,12 @@ def plot_1D_time_info(
     )
     ax1D[2].set_title("CA1 rate timeseries")
 
-    plot_util.mark_target_and_reset_points(Ag, CA1s, sub_ax=ax1D[2])
+    plot_fcts.mark_target_and_reset_points(Ag, CA1s, sub_ax=ax1D[2])
 
     for sub_ax in ax1D[:-1]:
         sub_ax.set_xlabel("")
 
-    util.save_figure(fig, "time_info", save=autosave)
+    plot_util.save_figure(fig, "time_info", save=autosave)
 
     return axes
 
@@ -637,7 +638,7 @@ def plot_interleaved_openfield_rate_maps(CA1s, ECs, num_cols=10):
     )
 
     ECs.plot_rate_map(ax=axes[::2].ravel()[: ECs.n], no_legend=True)
-    plot_util.plot_2D_input_place_cell_weights(
+    plot_fcts.plot_2D_input_place_cell_weights(
         CA1s.SomaCompartment,
         ax=axes[1::2].ravel()[: ECs.n],
         alpha=0.5,
@@ -646,7 +647,6 @@ def plot_interleaved_openfield_rate_maps(CA1s, ECs, num_cols=10):
     )
 
     return axes
-
 
 
 if __name__ == "__main__":

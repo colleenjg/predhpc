@@ -10,7 +10,7 @@ import pandas as pd  # type: ignore[import]
 
 from ratinabox import Environment as riabEnv  # type: ignore[import]
 
-from predhpc import util, plot_util
+from predhpc.util import gen_util, plot_util, ext_util
 
 
 class EnvironmentWarning(UserWarning):
@@ -22,7 +22,7 @@ class EnvironmentWarning(UserWarning):
 warnings.simplefilter("once", EnvironmentWarning)
 
 
-class Environment(riabEnv, util.ParamsManagerMixin):
+class Environment(riabEnv, ext_util.ParamsManagerMixin):
     """
     Environment()
 
@@ -199,7 +199,7 @@ class TEnv(Environment):
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
 
-        self.params["boundary"] = util.get_T_shape_env_boundaries(
+        self.params["boundary"] = ext_util.get_T_shape_env_boundaries(
             prop_env=self.params["prop_env"],
             scale_x=self.params["scale_x"],
             scale_y=self.params["scale_y"],
@@ -445,7 +445,7 @@ class TEnv(Environment):
         - positions (2D np.ndarray): Positions with shape (n, 2).
         """
 
-        n_top, n_bottom = util.get_num_samples_top_bottom_T_arms(
+        n_top, n_bottom = ext_util.get_num_samples_top_bottom_T_arms(
             n, area=area, top_arms_prop_of_area=self.top_arms_prop_of_area
         )
 
@@ -458,7 +458,7 @@ class TEnv(Environment):
 
             extent_x, extent_y = self.get_T_extents(area=area)
 
-            area_positions, adjusted_bottom_upper_limit = util.sample_from_T_areas(
+            area_positions, adjusted_bottom_upper_limit = ext_util.sample_from_T_areas(
                 n,
                 extent_x=extent_x,
                 extent_y=extent_y,
@@ -526,7 +526,7 @@ class TEnv(Environment):
         sub_ax.legend(loc="lower right", frameon=False)
 
         fig = sub_ax.figure
-        util.save_figure(fig, "Environment", save=autosave)
+        plot_util.save_figure(fig, "Environment", save=autosave)
 
         if return_env_fig:
             return fig, sub_ax
@@ -929,7 +929,7 @@ class OpenField(Environment):
         walls_ends_too_close = False
         for wall in self.walls:
             # get angle between two vectors
-            angle = util.get_angle_between_vectors(
+            angle = gen_util.get_angle_between_vectors(
                 np.diff(new_wall_coords, axis=0)[0], np.diff(wall, axis=0)[0]
             )
 
@@ -1086,7 +1086,7 @@ class OpenField(Environment):
 
         # returns points (1) x vectors x coords
         closest_dist = float(
-            np.min(util.shortest_distances_from_points_to_lines(coords, self.walls))
+            np.min(gen_util.shortest_distances_from_points_to_lines(coords, self.walls))
         )
 
         return closest_dist
@@ -1193,7 +1193,7 @@ class OpenField(Environment):
             # check that end_coords are far enough from objects, if there are any
             if end_coords is not None and len(self.objects["objects"]) != 0:
                 closest_dist = np.min(
-                    util.shortest_distances_from_points_to_lines(
+                    gen_util.shortest_distances_from_points_to_lines(
                         self.objects["objects"], [start_coords, end_coords]
                     )
                 )
@@ -1530,7 +1530,7 @@ class OpenField(Environment):
             legend.remove()
 
         fig = sub_ax.figure
-        util.save_figure(fig, "Environment", save=autosave)
+        plot_util.save_figure(fig, "Environment", save=autosave)
 
         if return_env_fig:
             return fig, sub_ax

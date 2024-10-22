@@ -2,11 +2,11 @@ import copy
 from typing import TYPE_CHECKING, Any
 import warnings
 
-from matplotlib import pyplot as plt
 import numpy as np
 
-from predhpc import env, plot_util, util
+from predhpc import env
 from predhpc.neurons import riab_neurons
+from predhpc.util import ext_util, plot_util
 
 if TYPE_CHECKING:
     import ratinabox  # type: ignore[import]
@@ -424,7 +424,8 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
         """
         self.check_link()
 
-        Check whether the place cell centres are still linked  of objects in the environment has changed.
+        Check whether the place cell centres are still linked to the objects in the
+        environment has changed.
 
         If the number of objects has changed, a warning is raised, as this change will
         have detached the object cell centres from the environment object locations,
@@ -459,6 +460,11 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
         self.is_dummy = True
 
     def reset_from_dummy(self):
+        """
+        self.reset_from_dummy()
+
+        Reset the layer from a dummy state, where all objects have been removed.
+        """
 
         if not self.is_dummy:
             return
@@ -467,7 +473,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
 
         self.is_dummy = False
 
-    def get_state(self, evaluate_at="last", **kwargs):
+    def get_state(self, evaluate_at="agent", **kwargs):
         """
         self.get_state()
 
@@ -481,7 +487,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
                 requested.
         """
         if self.is_dummy:
-            if evaluate_at == "last":
+            if evaluate_at == "agent":
                 V_shape = self.n
             elif evaluate_at == "all":
                 V_shape = (
@@ -496,6 +502,14 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
             if evaluate_at == "last":
                 self.firingrate_prime = self.activation_function(V, deriv=True)
         else:
+            if evaluate_at == "agent":
+                evaluate_at = "last"
+                if "pos" in kwargs.keys():
+                    raise ValueError(
+                        "pos should not be passed when evaluating at agent."
+                    )
+                kwargs["pos"] = self.Agent.pos
+
             firingrate = super().get_state(evaluate_at=evaluate_at, **kwargs)
 
         return firingrate
@@ -511,7 +525,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
         the future.
         """
 
-        if not self.is_dummy or self._broken_link:
+        if not (self.is_dummy or self._broken_link):
             self.check_link()
 
         self.PlaceCellInputs.update()
@@ -557,7 +571,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
             sub_ax = self.Agent.Environment.plot_environment(
                 sub_ax=sub_ax, autosave=False
             )
-            util.save_figure(sub_ax.figure, f"{self.name}_place_cell_locations", save=autosave)  # type: ignore[attr-defined]
+            plot_util.save_figure(sub_ax.figure, f"{self.name}_place_cell_locations", save=autosave)  # type: ignore[attr-defined]
 
         else:
             return self.PlaceCellInputs.plot_place_cell_locations(
@@ -767,7 +781,7 @@ class WeightedObjectCells(ObjectCells):
 
                 weight_dict[object_type] = getattr(self, f"{object_name}_weight")
 
-            object_types = util.get_weighted_object_types(
+            object_types = ext_util.get_weighted_object_types(
                 weight_dict, self.n, self.allow_omit_object_types
             )
 
@@ -1158,7 +1172,7 @@ class WeightedObjectVectorCells(riab_neurons.ObjectVectorCells):
 
                 weight_dict[object_type] = getattr(self, f"{object_name}_weight")
 
-            object_types = util.get_weighted_object_types(
+            object_types = ext_util.get_weighted_object_types(
                 weight_dict, self.n, self.allow_omit_object_types
             )
 

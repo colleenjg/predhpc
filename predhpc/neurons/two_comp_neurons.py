@@ -6,8 +6,9 @@ import warnings
 from matplotlib import pyplot as plt
 import numpy as np
 
-from predhpc import util, plot_util, params_util
+from predhpc import plot_fcts
 from predhpc.neurons import learning_neurons, riab_neurons
+from predhpc.util import gen_util, plot_util, params_util
 
 if TYPE_CHECKING:
     import ratinabox  # type: ignore[import]
@@ -40,6 +41,8 @@ class TwoCompLayer(object):
         "inhibit_activation_function": params_util.LINEAR_SIGMOID_ACTIVATION_FUNCTION,
         "inhibit_input_filter_tau": 3,
         "inhibit_input_trend_tau": None,
+        "mutual_inhibition_weight": None,
+        "lateral_tau": 0.3,
     }
 
     No property attributes.
@@ -77,6 +80,7 @@ class TwoCompLayer(object):
         "inhibit_input_filter_tau": 3,
         "inhibit_input_trend_tau": None,
         "mutual_inhibition_weight": None,
+        "lateral_tau": 0.1,
     }
 
     ignored_param_keys = list()  # type: list[str]
@@ -144,6 +148,7 @@ class TwoCompLayer(object):
             "dend_to_soma_weight",
             "dend_first",
             "mutual_inhibition_weight",
+            "lateral_tau",
         ]
 
         for key, value in all_params.items():
@@ -262,10 +267,26 @@ class TwoCompLayer(object):
             )
 
         if self.mutual_inhibition_weight is not None:
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", "No input layers", UserWarning)
+
+                lateral_params = {
+                    "name": "LateralInhibition",
+                    "n": self.n,
+                    "activation_function": self.SomaCompartment.activation_function,
+                    "color": "gray",
+                    "input_filter_tau": self.lateral_tau,
+                }
+
+                self.LateralInhibition = learning_neurons.SmoothFeedForwardLayer(
+                    self.Agent, params=lateral_params
+                )
+
+            self.LateralInhibition.add_input(self.SomaCompartment, w=np.eye(self.n))
             mutual_inhibition = (np.eye(self.n) - 1) * self.mutual_inhibition_weight
-            self.SomaCompartment.add_input(self.SomaCompartment, w=mutual_inhibition)
+            self.SomaCompartment.add_input(self.LateralInhibition, w=mutual_inhibition)
             self.SomaCompartment.add_input_layers_with_no_learning(
-                self.SomaCompartment.name
+                self.LateralInhibition.name
             )
 
     def set_learn(self, learn=None, soma=None, dend=None, inhibit=None):
@@ -386,7 +407,7 @@ class TwoCompLayer(object):
         )
         pos = np.asarray(self.Agent.history["pos"])
 
-        vectors = util.get_vectors_to_target(
+        vectors = gen_util.get_vectors_to_target(
             pos, target=place_cell_centre, polar=polar, radians=radians
         )
 
@@ -451,7 +472,7 @@ class TwoCompLayer(object):
         distances = self.get_distances_to_place_cell_centre_of_main_dendrite_input(
             neuron_num, src_name=target_src_name
         )
-        closest_steps = util.get_minima_indices(
+        closest_steps = gen_util.get_minima_indices(
             distances, minimum=min_dist, min_pts_btw=min_steps_btw
         )
 
@@ -464,7 +485,13 @@ class TwoCompLayer(object):
         return closest_steps
 
     def match_closest_to_target_steps_to_BTSP_steps(
-        self, target_src_name="LEC", neuron_num=0, max_step_dist=40, min_dist=0.2
+        self,
+        target_src_name="LEC",
+        neuron_num=0,
+        max_step_dist=40,
+        min_dist=0.2,
+        t_start=None,
+        t_end=None,
     ):
         """
         self.match_closest_to_target_steps_to_BTSP_steps()
@@ -479,6 +506,8 @@ class TwoCompLayer(object):
             a match. Default is 40.
         - min_dist (float, optional): Minimum distance to be considered closest.
             Default is 0.2.
+        - t_start (int, optional): Start time for matching. Default is None.
+        - t_end (int, optional): End time for matching. Default is None.
 
         Returns:
         - steps_dict (dict): Dictionary of steps closest to the target, matched to
@@ -496,6 +525,10 @@ class TwoCompLayer(object):
                 f"neurons ({self.n})."
             )
 
+        _, start, end = self.SomaCompartment.get_plotting_times(
+            t_start=t_start, t_end=t_end
+        )
+
         BTSP_steps = self.SomaCompartment.get_BTSP_step_dict()[neuron_num]
         closest_steps = self.get_closest_steps_to_target(
             neuron_num, target_src_name=target_src_name, min_dist=min_dist
@@ -511,6 +544,8 @@ class TwoCompLayer(object):
         steps_dict = {key: list() for key in keys}
         if len(BTSP_steps):
             for step in closest_steps:
+                if step < start or step >= end:
+                    continue
                 diff = np.absolute(BTSP_steps - step)
                 if diff.min() < max_step_dist:
                     key = "steps_near_BTSP"
@@ -522,6 +557,7 @@ class TwoCompLayer(object):
                 else:
                     key = "steps_other"
                 steps_dict[key].append(step)
+
             steps_dict["other_BTSP_steps"] = [
                 step
                 for step in BTSP_steps
@@ -563,9 +599,13 @@ class TwoCompLayer(object):
         if dend_first:
             self.DendriteCompartment.update()
             self.SomaCompartment.update()
+            if self.mutual_inhibition_weight is not None:
+                self.LateralInhibition.update()
         else:
             self.SomaCompartment.update()
             self.DendriteCompartment.update()
+            if self.mutual_inhibition_weight is not None:
+                self.LateralInhibition.update()
 
         return
 
@@ -667,7 +707,7 @@ class TwoCompLayer(object):
             sub_ax.legend(loc="lower right")
 
         fig = np.asarray(ax).ravel()[0].figure
-        util.save_figure(fig, f"{self.name}_ratemaps", save=autosave)  # type: ignore[attr-defined]
+        plot_util.save_figure(fig, f"{self.name}_ratemaps", save=autosave)  # type: ignore[attr-defined]
 
         return ax
 
@@ -791,7 +831,7 @@ class TwoCompLayer(object):
         y = 0.9 if self.Agent.Environment.dimensionality == 1 else 0.97
         fig.suptitle(title, y=y)
 
-        util.save_figure(fig, f"{self.name}_rate_maps_across_learning", save=autosave)  # type: ignore[attr-defined]
+        plot_util.save_figure(fig, f"{self.name}_rate_maps_across_learning", save=autosave)  # type: ignore[attr-defined]
 
         return axes
 
@@ -801,7 +841,9 @@ class TwoCompLayer(object):
         soma_color: str | None = None,
         dend_color: str | None = None,
         inhibit_color: str | None = None,
+        lateral_color: str | None = None,
         separate_axes: bool = False,
+        plot_lateral: bool = False,
         autosave: bool | None = None,
         **kwargs,
     ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
@@ -818,8 +860,12 @@ class TwoCompLayer(object):
         - dend_color (str, optional): Color for dendrite compartment. Default is None.
         - inhibit_color (str, optional): Color for inhibitory compartment.
             Default is None.
+        - lateral_color (str, optional): Color for lateral inhibition compartment.
+            Default is None.
         - separate_axes (bool, optional): Whether to plot each compartment on a
             separate subplot. Default is False.
+        - plot_lateral (bool, optional): Whether to plot the lateral inhibition layer,
+            if it exists. Default is False.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
         global autosave setting for ratinabox is used. Default is None.
 
@@ -832,7 +878,13 @@ class TwoCompLayer(object):
         """
 
         if separate_axes:
-            num_rows = 2 + self.inhibit_dend  # type: ignore[attr-defined]
+            titles = ["Soma compartment", "Dendrite compartment"]
+            if self.inhibit_dend:  # type: ignore[attr-defined]
+                titles.append("Inhibitory interneuron")
+            if plot_lateral and self.mutual_inhibition_weight is not None:
+                titles.append("Lateral inhibitor")
+            num_rows = len(titles)
+
             if ax is None:
                 _, ax = plt.subplots(
                     num_rows,
@@ -886,11 +938,20 @@ class TwoCompLayer(object):
                 **kwargs,
             )
 
+        if plot_lateral and self.mutual_inhibition_weight is not None:
+            lateral_color = lateral_color or self.LateralInhibition.color
+            lat_ax = ax1D[-1] if separate_axes else sub_ax
+            self.LateralInhibition.plot_rate_timeseries(
+                sub_ax=lat_ax,
+                color=lateral_color,
+                autosave=False,
+                **kwargs,
+            )
+
         if separate_axes:
-            titles = ["Soma compartment", "Dendrite compartment", "Interneuron"]
             for s, sub_ax in enumerate(ax1D):
                 sub_ax.set_title(titles[s])
-                plot_util.mark_target_and_reset_points(self.Agent, self, sub_ax=sub_ax)
+                plot_fcts.mark_target_and_reset_points(self.Agent, self, sub_ax=sub_ax)
                 if s != len(ax1D) - 1:
                     sub_ax.set_xlabel("")
             fig = np.asarray(ax).ravel()[0].figure
@@ -899,10 +960,12 @@ class TwoCompLayer(object):
             sub_ax.plot([], [], color=dend_color, label="dend")
             if self.inhibit_dend:
                 sub_ax.plot([], [], color=inhibit_color, label="inhib.")
+            if plot_lateral and self.mutual_inhibition_weight is not None:
+                sub_ax.plot([], [], color=lateral_color, label="lat. inhib.")
             sub_ax.legend()
             fig = sub_ax.figure
 
-        util.save_figure(fig, f"{self.name}_firingrate", save=autosave)  # type: ignore[attr-defined]
+        plot_util.save_figure(fig, f"{self.name}_firingrate", save=autosave)  # type: ignore[attr-defined]
 
         return ax
 
@@ -965,7 +1028,10 @@ class TwoCompLayer(object):
         if mark_teleport:
             plot_util.pad_axis(sub_ax, end="high", pad_prop=0.1)
             self.Agent.add_teleportation_markers_to_plots(sub_ax, timeseries=True)
-            sub_ax.legend(loc="upper right", fontsize=5)
+
+            legend = sub_ax.get_legend()
+            if legend is not None:
+                sub_ax.legend(loc="upper right", fontsize=5)
 
         if mark_closest or log_num_closest:
             closest_steps = self.get_closest_steps_to_target(
@@ -975,12 +1041,12 @@ class TwoCompLayer(object):
                 min_steps_btw=min_steps_btw,
                 log=log_num_closest,
             )
-            closest_steps = util.get_minima_indices(
+            closest_steps = gen_util.get_minima_indices(
                 distances, minimum=min_dist, min_pts_btw=min_steps_btw
             )
 
             if mark_closest and len(closest_steps):
-                plot_util.pad_axis(sub_ax, end="both", pad_prop=0.2)
+                plot_util.pad_axis(sub_ax, axis="y", end="both", pad_prop=0.2)
                 sub_ax.plot(
                     time_min[closest_steps],
                     np.zeros_like(closest_steps),
@@ -1011,7 +1077,7 @@ class TwoCompLayer(object):
         log_num_closest=False,
     ):
         """
-        self.plot_distances_to_target()
+        self.plot_distances_to_targets()
 
         Plot the distances from the agent's current position to the place cell centre
         of the main input to the neuron's dendrite, over time.
@@ -1089,7 +1155,7 @@ class TwoCompLayer(object):
                         log_num_closest=log_num_closest,
                     )
                     if use_mark_teleport and c != len(ax2D[0]) - 1:
-                        legend = sub_ax.legend()
+                        legend = sub_ax.get_legend()
                         if legend is not None:
                             legend.remove()
                 else:
@@ -1109,7 +1175,7 @@ class TwoCompLayer(object):
                 i += 1
 
         if sharey:
-            y_lims = np.asarray([sub_ax.get_ylim() for sub_ax in axes.ravel()])
+            y_lims = np.asarray([sub_ax.get_ylim() for sub_ax in axes.ravel()]).T
             y_lims = [np.min(y_lims[0]), np.max(y_lims[1])]
             for sub_ax in axes.ravel():
                 sub_ax.set_ylim(y_lims)
@@ -1121,64 +1187,172 @@ class TwoCompLayer(object):
 
         return axes
 
-    def plot_properties_at_BTSP_and_closest_to_target_steps(
+    def plot_neuron_properties_at_BTSP_and_closest_to_target_steps(
         self,
         neuron_num=0,
         target_src_name="LEC",
+        t_start=None,
+        t_end=None,
         axes=None,
+        k=5,
+        legend=True,
     ):
         """
-        plot_properties_at_BTSP_and_closest_to_target_steps(CA1s)
+        self.plot_neuron_properties_at_BTSP_and_closest_to_target_steps()
 
-        Plot properties at BTSP and closest to target steps for a CA1 neuron.
+        Plot properties (step number, firing rate, velocity and angle near target)
+        at BTSP and closest to target steps for a neuron.
 
         Args:
         - neuron_num (int, optional): Neuron number. Default is 0.
         - target_src_name (str, optional): Name of the input place cell layer.
             Default is "LEC".
+        - t_start (int, optional): Start time for plotting. Default is None.
+        - t_end (int, optional): End time for plotting. Default is None.
         - axes (2D np.ndarray, optional): Array of subplots to plot on. Default is None.
+        - k (bool, optional): Number of points across which to smooth the firing rate,
+        velocity and angle data backward, before the target point. If None, no
+        smoothing is done. Default is 5.
+        - legend (bool, optional): Whether to include a legend in the plots.
+            Default is True.
 
         Returns:
         - axes (2D np.ndarray): Array of subplots with properties plotted.
         """
 
         if axes is None:
-            _, axes = plt.subplots(1, 3, figsize=[8, 2], sharey=True, squeeze=False)
-        elif len(axes.ravel()) != 3:
-            raise ValueError("axes must have length 3.")
+            _, axes = plt.subplots(1, 4, figsize=[8, 2], sharey=True, squeeze=False)
+        elif len(axes.ravel()) != 4:
+            raise ValueError("axes must have length 4.")
 
         distances = self.get_distances_to_place_cell_centre_of_main_dendrite_input(
-            neuron_num=0, src_name=target_src_name
+            neuron_num, src_name=target_src_name
         )
         firingrates = np.asarray(self.SomaCompartment.history["firingrate"]).T[
             neuron_num
         ]
+
+        velocities = np.sqrt(np.sum(np.asarray(self.Agent.history["vel"]) ** 2, axis=1))
         angles = self.get_vectors_to_place_cell_centre_of_main_dendrite_input(
-            neuron_num=0, src_name=target_src_name, polar=True
+            neuron_num, src_name=target_src_name, polar=True
         )[:, 1]
 
         steps_dict = self.match_closest_to_target_steps_to_BTSP_steps(
-            target_src_name="LEC", neuron_num=0
+            target_src_name="LEC", neuron_num=neuron_num, t_start=t_start, t_end=t_end
         )
 
         for i, (x_data_type, x_data, sub_ax) in enumerate(
             zip(
-                ["Step", "Firing rate", "Angle from target"],
-                [None, firingrates, angles],
+                ["Step", "Firing rate", "Velocity near target", "Angle near target"],
+                [None, firingrates, velocities, angles],
                 axes.ravel(),
             )
         ):
             y_data_type = "Distance from target" if i == 0 else ""
-            plot_util.plot_property_at_BTSP_and_closest_to_target_steps(
+
+            if k is not None and x_data_type != "Step":
+                smoothed = np.convolve(x_data, np.full(k, 1 / k), mode="valid")
+                for j in range(len(x_data) - len(smoothed)):
+                    smoothed = np.insert(smoothed, j, x_data[: j + 1].mean())
+                x_data = smoothed
+
+            incl_legend = i == (len(axes.ravel()) - 1) and legend
+            plot_fcts.plot_property_at_BTSP_and_closest_to_target_steps(
                 steps_dict,
                 y_data=distances,
                 x_data=x_data,
                 x_data_type=x_data_type,
                 y_data_type=y_data_type,
                 sub_ax=sub_ax,
-                legend=(i == len(axes.ravel()) - 1),
+                legend=incl_legend,
             )
 
-        sub_ax.figure.suptitle("Properties near BTSP and closest to target steps")
+            if x_data_type == "Step":
+                for t in [t_start, t_end]:
+                    if t is not None:
+                        step = t / self.Agent.dt
+                        sub_ax.axvline(step, color="k", ls="dashed", lw=1)
+
+        sub_ax.figure.suptitle(
+            f"Properties near BTSP and closest to target steps (#{neuron_num})"
+        )
+
+        return axes
+
+    def plot_properties_at_BTSP_and_closest_to_target_steps(
+        self,
+        target_src_name="LEC",
+        sort_by_num_BTSP=False,
+        t_start=None,
+        t_end=None,
+        k=5,
+        legend=True,
+    ):
+        """
+        self.plot_properties_at_BTSP_and_closest_to_target_steps()
+
+        Plot properties at BTSP and closest to target steps for all neurons.
+
+        Args:
+        - target_src_name (str, optional): Name of the input place cell layer.
+            Default is "LEC".
+        - sort_by_num_BTSP (bool, optional): If True, neurons are sorted by number of
+            BTSP events. Default is False.
+        - t_start (int, optional): Start time for plotting. Default is None.
+        - t_end (int, optional): End time for plotting. Default is None.
+        - k (bool, optional): Number of points across which to smooth the firing rate,
+        velocity and angle data backward, before the target point. If None, no
+        smoothing is done. Default is 5.
+        - legend (bool, optional): Whether to include a legend in the plots.
+            Default is True.
+
+        Returns:
+        - axes (2D np.ndarray): Array of subplots with properties plotted.
+        """
+
+        n_row = self.n
+        n_col = 4
+        figsize = (n_col * 2, n_row * 1.5)
+        fig, axes = plt.subplots(
+            n_row, n_col, figsize=figsize, sharex=False, sharey="row", squeeze=False
+        )
+
+        sorter = np.arange(self.n)
+        if sort_by_num_BTSP:
+            num_BTSP = [
+                len(self.SomaCompartment.get_BTSP_step_dict()[i]) for i in sorter
+            ]
+            sorter = np.argsort(num_BTSP)
+
+        for i, neuron_num in enumerate(sorter):
+            self.plot_neuron_properties_at_BTSP_and_closest_to_target_steps(
+                neuron_num=neuron_num,
+                target_src_name=target_src_name,
+                t_start=t_start,
+                t_end=t_end,
+                axes=axes[i],
+                k=k,
+                legend=legend,
+            )
+            title = f"Neuron {neuron_num}"
+            if sort_by_num_BTSP:
+                title = f"{title} ({num_BTSP[neuron_num]} BTSP events)"
+            axes[i, 0].set_title(title)
+
+        fig.suptitle("Properties near BTSP and closest to target steps", y=0.885)
+
+        # adjust x limits to match within each column
+        for i in range(axes.shape[1]):
+            x_lims = np.asarray([sub_ax.get_xlim() for sub_ax in axes[:, i]]).T
+            x_lims = [np.min(x_lims[0]), np.max(x_lims[1])]
+            for r, sub_ax in enumerate(axes[:, i]):
+                sub_ax.set_xlim(*x_lims)
+                if r != self.n - 1:
+                    sub_ax.set_xlabel("")
+                    sub_ax.xaxis.set_tick_params(labelbottom=False)
+
+        # adjust y label
+        for sub_ax in axes[:, 0]:
+            sub_ax.set_ylabel("Dist. from target")
 
         return axes
