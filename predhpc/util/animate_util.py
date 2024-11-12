@@ -42,7 +42,7 @@ class TemporarilyMoveTarget:
             [x, y] for a 2D environment.
         """
 
-        self.Ag = Ag
+        self.Agent = Ag
         self.original_target_position = Ag.target_position
         self.temp_target_position = temp_target_position
 
@@ -51,14 +51,14 @@ class TemporarilyMoveTarget:
         Temporarily moves the target position of the agent.
         """
 
-        self.Ag.set_target_position(self.temp_target_position)
+        self.Agent.set_target_position(self.temp_target_position)
 
     def __exit__(self, exc_type, exc_value, exc_traceback):
         """
         Restores the target position of the agent to the original target position.
         """
 
-        self.Ag.set_target_position(self.original_target_position)
+        self.Agent.set_target_position(self.original_target_position)
 
 
 def init_linear_track_fig():

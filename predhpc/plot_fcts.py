@@ -16,7 +16,7 @@ from predhpc.util import gen_util, plot_util
 
 if TYPE_CHECKING:
     from predhpc.agent import ResetableAgent
-    from predhpc.neurons.riab_neurons import Neurons, PlaceCells
+    from predhpc.neurons import riab_neurons, learning_neurons
 
 
 def add_time_axis(
@@ -224,7 +224,10 @@ def plot_trajectory_lengths(
 
 
 def mark_target_and_reset_points(
-    Ag: "ResetableAgent", CA1s: "Neurons", sub_ax: plt.Axes, restore_xlims: bool = True
+    Ag: "ResetableAgent",
+    CA1s: "riab_neurons.Neurons",
+    sub_ax: plt.Axes,
+    restore_xlims: bool = True,
 ):
     """
     mark_target_and_reset_points(Ag, CA1s, sub_ax)
@@ -233,7 +236,7 @@ def mark_target_and_reset_points(
 
     Args:
     - Ag (Agent): Agent for which to add target and reset points.
-    - CA1s (Neurons): CA1 layer to plot.
+    - CA1s (riab_neurons.Neurons): CA1 layer to plot.
     - sub_ax (plt.Axes): Subplot to add target and reset points to.
     - restore_xlims (bool, optional): Whether to restore x limits. Default is True.
     """
@@ -837,6 +840,63 @@ def plot_property_at_BTSP_and_closest_to_target_steps(
     return sub_ax
 
 
+def plot_time_series_with_BTSP_events(
+    CA1s: "learning_neurons.BTSPLayer",
+    sub_ax: plt.Axes | None = None,
+) -> plt.Axes:
+    """
+    plot_time_series_with_BTSP_events(CA1s)
+
+    Plot the time series of the CA1s layer with BTSP events marked.
+
+    Args:
+    - CA1s (learning_neurons.BTSPLayer): CA1s layer.
+    - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
+        created. Default is None.
+
+    Returns:
+    - sub_ax (plt.Axes): Subplot with time series and BTSP events plotted.
+    """
+
+    if sub_ax is None:
+        _, sub_ax = plt.subplots(figsize=(6, 1.2**CA1s.n))
+
+    CA1s.plot_rate_timeseries(chosen_neurons="all", spikes=True, sub_ax=sub_ax)
+    lo, hi = sub_ax.get_ylim()
+
+    target_reached_step = CA1s.Agent.target_df["reached_step"].to_numpy()  # type: ignore[attr-defined]
+    if np.isnan(target_reached_step[-1]):
+        target_reached_step = target_reached_step[:-1]
+    target_reached_step = target_reached_step.astype(int)
+
+    for t in target_reached_step:
+        y_hei = lo + (hi - lo) * 0.82
+        sub_ax.scatter(
+            CA1s.Agent.history["t"][t] / 60,
+            y_hei,
+            marker=mpl_markers.MarkerStyle("o"),
+            s=6,
+            color="k",
+            alpha=0.7,
+        )
+
+    # add distance from target below
+    all_positions = np.asarray(CA1s.Agent.history["pos"])
+    time_in_min = np.asarray(CA1s.Agent.history["t"]) / 60
+    distances = np.linalg.norm(
+        CA1s.Agent.target_position - all_positions, ord=2, axis=1  # type: ignore[attr-defined]
+    )
+    norm_dist = distances / distances.max()
+    sub_ax.plot(time_in_min, -norm_dist, color="black", alpha=0.6, lw=1)
+    sub_ax.set_ylim(-norm_dist.max() * 1.2, sub_ax.get_ylim()[1])
+
+    sub_ax.set_title(
+        "CA1 time series with BTSP events (with proximity to target)", y=1.1
+    )
+
+    return sub_ax
+
+
 def plot_1D_reset_environment(
     Ag: "ResetableAgent",
     title: str = "Environment",
@@ -897,7 +957,7 @@ def plot_1D_reset_environment(
 
 def plot_1D_rate_map_across_learning(
     Ag: "ResetableAgent",
-    CA1s: "Neurons",
+    CA1s: "riab_neurons.Neurons",
     axes: np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]] | None = None,
     plot_proportion: float = 0.3,
     min_num_steps: int = 100,
@@ -911,7 +971,7 @@ def plot_1D_rate_map_across_learning(
 
     Args:
     - Ag (Agent): Agent for which to plot the rate map.
-    - CA1s (Neurons): CA1 layer to plot.
+    - CA1s (riab_neurons.Neurons): CA1 layer to plot.
     - axes (1 or 2D np.ndarray, optional): Array of subplots to plot on (3 total).
         Default is None.
     - plot_proportion (float, optional): Proportion of the total steps to plot.
@@ -987,7 +1047,7 @@ def plot_1D_rate_map_across_learning(
 
 def plot_1D_input_place_cell_weights(
     place_weights: np.ndarray[tuple[int, int, int], np.dtype[np.float64]],
-    PCs: "PlaceCells",
+    PCs: "riab_neurons.PlaceCells",
     cmap: str = "crest",
     sub_ax: plt.Axes | None = None,
     autosave: bool | None = None,
@@ -1000,7 +1060,7 @@ def plot_1D_input_place_cell_weights(
     Args:
     - place_weights (2 or 3D np.ndarray): Incoming place weights across epochs to a
         layer of cells with shape ((num_epochs,) num_cells, num_PCs).
-    - PCs (PlaceCells): Place cells of the layer.
+    - PCs (riab_neurons.PlaceCells): Place cells of the layer.
     - cmap (str, optional): Colormap to use. Default is "crest".
     - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
         created. Default is None.
@@ -1174,7 +1234,7 @@ def plot_previous_1D_input_place_cell_weights(
 
 
 def plot_2D_input_place_cell_weights(
-    target_neurons: "Neurons",
+    target_neurons: "riab_neurons.Neurons",
     PCs_input_name: str = "CA3_PCs",
     place_weights: np.ndarray[tuple[int, int], np.dtype[np.float64]] | None = None,
     chosen_neurons: (
@@ -1205,7 +1265,7 @@ def plot_2D_input_place_cell_weights(
     Plot the input place cell weights of a layer.
 
     Args:
-    - target_neurons (Neurons): Target neurons.
+    - target_neurons (riab_neurons.Neurons): Target neurons.
     - PCs_input_name (str, optional): Name of the input place cell layer.
     - place_weights (2D np.ndarray, optional): Place weights to plot with shape
         (number of output neurons, number of input neurons). If None, uses the
@@ -1236,7 +1296,7 @@ def plot_2D_input_place_cell_weights(
     - ValueError: If PCs_input_name is not found among the target_neurons inputs.
 
     Keyword args:
-    - **kwargs: Keyword arguments passed to Neurons.plot_environment().
+    - **kwargs: Keyword arguments passed to riab_neurons.Neurons.plot_environment().
 
     Returns:
     - axes (np.ndarray or plt.Axes): Subplot or array of subplots
@@ -1328,7 +1388,7 @@ def plot_2D_input_place_cell_weights(
 
 
 def plot_series_of_2D_input_place_cell_weights(
-    target_neurons: "Neurons",
+    target_neurons: "riab_neurons.Neurons",
     place_weight_series: list[np.ndarray[tuple[int, int], np.dtype[np.float64]]],
     steps: np.ndarray | None = None,
     ratio: float = 8,
@@ -1340,7 +1400,7 @@ def plot_series_of_2D_input_place_cell_weights(
     Plot a series of 2D input place cell weights.
 
     Args:
-    - target_neurons (Neurons): Target neurons.
+    - target_neurons (riab_neurons.Neurons): Target neurons.
     - place_weight_series (list): Series of place weights to plot.
     - steps (np.ndarray, optional): Steps at which to plot the series. Step numbers are
         included in the title of each figure. Default is None.
@@ -1404,7 +1464,7 @@ def plot_series_of_2D_input_place_cell_weights(
 
 
 def plot_place_cell_inputs_over_time(
-    target_neurons: "Neurons",
+    target_neurons: "riab_neurons.Neurons",
     PCs_input_name: str = "CA3_PCs",
     filter_key: str | None = None,
     plot_position: bool = True,
@@ -1420,7 +1480,7 @@ def plot_place_cell_inputs_over_time(
     Plot the input place cell weights of a layer.
 
     Args:
-    - target_neurons (Neurons): Target neurons.
+    - target_neurons (riab_neurons.Neurons): Target neurons.
     - PCs_input_name (str, optional): Name of the input place cell layer. Default is
         "CA3_PCs".
     - filter_key (str, optional): Filter key to use. Default is None.
@@ -1508,7 +1568,7 @@ def plot_place_cell_inputs_over_time(
 
 
 def plot_overlayed_rate_maps(
-    NeuronLayer: "Neurons",
+    NeuronLayer: "riab_neurons.Neurons",
     chosen_neurons: (
         str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
     ) = "all",
@@ -1525,7 +1585,7 @@ def plot_overlayed_rate_maps(
     Plot the rate maps of the neurons in a layer.
 
     Args:
-    - NeuronLayer (Neurons): NeuronLayer object
+    - NeuronLayer (riab_neurons.Neurons): NeuronLayer object
     - chosen_neurons (str, int, list or 1D np.ndarray, optional):
         - If "all" or None plots all neurons in the layer.
         - If 15 or "15", selects 15 neurons evenly spread from index 0 to n
@@ -1635,7 +1695,7 @@ def plot_overlayed_rate_maps(
 
 
 def plot_timeseries(
-    NeuronLayer: "Neurons",
+    NeuronLayer: "riab_neurons.Neurons",
     t_start: float | None = None,
     t_end: float | None = None,
     chosen_neurons: (
@@ -1657,7 +1717,7 @@ def plot_timeseries(
     Plot the rate timeseries of a layer of neurons.
 
     Args:
-    - NeuronLayer (Neurons): The layer of neurons to plot.
+    - NeuronLayer (riab_neurons.Neurons): The layer of neurons to plot.
     - t_start (float, optional): The start time of the plot. Default is None.
     - t_end (float, optional): The end time of the plot. Default is None.
     - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.

@@ -624,7 +624,7 @@ def add_colorbars(axes, im, vmin=None, vmax=None, label=None, end_only=False):
 
     axes = np.asarray(axes)
     if len(axes.shape) < 2 or end_only:
-        dividers = [make_axes_locatable(axes.reshape(-1)[-1])]
+        dividers = [make_axes_locatable(axes.ravel()[-1])]
     else:
         dividers = [make_axes_locatable(ax_row[-1]) for ax_row in axes]
 

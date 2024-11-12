@@ -477,6 +477,7 @@ class TEnv(Environment):
         fig: mpl_figure.Figure | None = None,
         sub_ax: plt.Axes | None = None,
         return_env_fig: bool = False,
+        no_legend: bool = False,
         autosave: bool | None = None,
         **kwargs,
     ) -> plt.Axes:
@@ -493,6 +494,7 @@ class TEnv(Environment):
             created.
         - return_env_fig (bool, optional): Whether to return the figure
             (for compatibility). Default is False.
+        - no_legend (bool, optional): Whether to plot the legend. Default is False.
         - autosave (bool, optional): Whether to save the figure. Default is None.
 
         Keyword args:
@@ -524,6 +526,10 @@ class TEnv(Environment):
             sub_ax.scatter(*T_end, zorder=5, label="reset", **reset_kwargs)
 
         sub_ax.legend(loc="lower right", frameon=False)
+
+        legend = sub_ax.get_legend()
+        if no_legend and legend is not None:
+            legend.remove()
 
         fig = sub_ax.figure
         plot_util.save_figure(fig, "Environment", save=autosave)

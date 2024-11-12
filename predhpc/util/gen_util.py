@@ -112,7 +112,7 @@ def get_minima_indices(data, min_pts_btw=20, minimum=None, single_direction=Fals
 
     minimum_indices = np.asarray(minimum_indices)
 
-    if min_pts_btw > 1:
+    if len(minimum_indices) and min_pts_btw > 1:
         keep = np.ones_like(minimum_indices, dtype=bool)
         for i in np.argsort(data[minimum_indices]):
             if keep[i]:

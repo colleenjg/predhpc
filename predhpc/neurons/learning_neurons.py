@@ -1301,6 +1301,7 @@ class BTSPLayer(HebbianLayer):
         • self.get_BTSP_step_dict()
         • self.get_BTSP_steps()
         • self.get_BTSP_counts()
+        • self.get_BTSP_ramp_peaks()
         • self.update_BTSP_buffer()
         • self.reset_BTSP_buffer()
         • self.compute_BTSP_update()
@@ -1310,7 +1311,9 @@ class BTSPLayer(HebbianLayer):
         • self.plot_filtered_for_BTSP()
         • self.plot_BTSP_frequency()
         • self.plot_BTSP_step_histogram()
+        • self.plot_BTSP_ramp_histogram()
         • self.plot_BTSP_responses()
+        • self.plot_BTSP_locations()
         • self.plot_BTSP_ramp()
         • self.add_BTSP_markers_to_plots()
         • self.plot_rate_map()
@@ -1637,6 +1640,34 @@ class BTSPLayer(HebbianLayer):
         counts = np.append(counts, np.zeros(self.n - len(targets)))
 
         return counts
+
+    def get_BTSP_ramp_peak_dict(self):
+        """
+        self.get_BTSP_ramp_peak_dict()
+
+        Get the peak values of the BTSP ramp.
+
+        Returns:
+        - ramp_peak_dict (dict): Dictionary with peak values and steps for each neuron.
+        """
+
+        BTSP_ramp = np.asarray(self.history["BTSP_ramp"])
+
+        ramp_peak_dict = {
+            "peaks": dict(),
+            "steps": dict(),
+        }
+        for n, neuron_ramp in enumerate(BTSP_ramp.T):
+            peaks = gen_util.get_minima_indices(-neuron_ramp, minimum=-1e-5)
+            if len(peaks):
+                peak_vals = neuron_ramp[peaks]
+            else:
+                peak_vals = np.asarray(list())
+
+            ramp_peak_dict["peaks"][n] = peak_vals
+            ramp_peak_dict["steps"][n] = peaks
+
+        return ramp_peak_dict
 
     def update_BTSP_buffer(self, ws_delta, b_delta=None, pre=False, increment=True):
         """
@@ -2153,7 +2184,7 @@ class BTSPLayer(HebbianLayer):
         return sub_ax
 
     def plot_BTSP_step_histogram(
-        self, sub_ax=None, nbins=20, interval=False, autosave=None
+        self, sub_ax=None, nbins=40, interval=False, autosave=None
     ):
         """
         self.plot_BTSP_step_histogram()
@@ -2162,7 +2193,7 @@ class BTSPLayer(HebbianLayer):
 
         Args:
         - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
-        - nbins (int, optional): Number of bins for the histogram. Default is 20.
+        - nbins (int, optional): Number of bins for the histogram. Default is 40.
         - interval (bool, optional): Whether to plot the step intervals instead of step
             numbers .
         - autosave (bool, optional): Whether to autosave the figure. Default is None.
@@ -2229,6 +2260,97 @@ class BTSPLayer(HebbianLayer):
         plot_util.save_figure(fig, f"{self.name}_BTSP_frequency", save=autosave)  # type: ignore[attr-defined]
 
         return sub_ax
+
+    def plot_BTSP_ramp_peak_histogram(self, sub_ax=None, nbins=40, autosave=None):
+        """
+        self.plot_BTSP_ramp_peak_histogram()
+
+        Plot the histogram of BTSP ramp peaks.
+
+        Args:
+        - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
+        - nbins (int, optional): Maximum number of bins for the histogram. Default is 40.
+        - autosave (bool, optional): Whether to autosave the figure. Default is None.
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with BTSP ramp peaks plotted.
+        """
+
+        peak_dict = self.get_BTSP_ramp_peak_dict()
+        peaks = np.concatenate(list(peak_dict["peaks"].values()))
+
+        if sub_ax is None:
+            _, sub_ax = plt.subplots(figsize=(5, 2))
+
+        max_bin = int(peaks.max()) + 1
+        bins = np.linspace(0, max_bin, nbins)
+
+        for i, alpha in enumerate([0.3, 0.8]):
+            peaks_to_plot = peaks
+            label = None
+            if i == 1:
+                peaks_to_plot = peaks[peaks >= 1]
+                perc = len(peaks_to_plot) / len(peaks) * 100
+                label = f"{perc:.2f}% above thr."
+
+            if len(peaks_to_plot):
+                sub_ax.hist(
+                    peaks_to_plot,
+                    bins=bins,
+                    density=True,
+                    color=self.color,
+                    label=label,
+                    alpha=alpha,
+                )
+
+        mean_peak = np.mean(peaks)
+        sub_ax.axvline(mean_peak, color="k", ls="dashed", label=f"mean={mean_peak:.2f}")
+
+        sub_ax.spines[["right", "top"]].set_visible(False)
+        sub_ax.set_ylabel("Number of peaks (density)")
+        sub_ax.set_xlabel("BTSP ramp peaks")
+        sub_ax.legend()
+        plot_util.pad_axis(sub_ax, axis="y", end="high")
+
+        fig = sub_ax.figure
+        plot_util.save_figure(fig, f"{self.name}_BTSP_ramp_peaks", save=autosave)  # type: ignore[attr-defined]
+
+        return sub_ax
+
+    def plot_BTSP_stats_summary(self, axes=None):
+        """
+        self.plot_BTSP_stats_summary()
+
+        Plot six BTSP statistics: responses, locations, and frequency, ramp peak,
+        step and step interval histograms.
+
+        Args:
+        - axes (plt.Axes, optional): Axes to plot on. If provided, must have shape
+            (3, 2). Default is None.
+
+        Returns:
+        - axes (plt.Axes): Axes with BTSP statistics plotted.
+        """
+
+        if axes is None:
+            fig, axes = plt.subplots(3, 2, figsize=[8, 8], gridspec_kw={"hspace": 0.4})
+        elif axes.shape != (3, 2):
+            raise ValueError("If passed, axes must have shape (3, 2).")
+
+        fig = axes.ravel()[0].figure
+        fig.suptitle("BTSP statistics", y=1.05)
+
+        self.plot_BTSP_responses(split=False, fill=False, ax=axes[0, 0])
+        self.Agent.Environment.plot_environment(sub_ax=axes[0, 1])
+        self.plot_BTSP_locations(sub_ax=axes[0, 1])
+
+        self.plot_BTSP_frequency(sub_ax=axes[1, 0])
+        self.plot_BTSP_ramp_peak_histogram(sub_ax=axes[1, 1])
+
+        for i, interval in enumerate([False, True]):
+            self.plot_BTSP_step_histogram(sub_ax=axes[2, i], interval=interval)
+
+        return axes
 
     def plot_BTSP_responses(
         self,
@@ -2389,6 +2511,87 @@ class BTSPLayer(HebbianLayer):
         plot_util.save_figure(fig, f"{self.name}_BTSP_responses", save=autosave)  # type: ignore[attr-defined]
 
         return ax
+
+    def plot_BTSP_locations(
+        self,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        chosen_neurons: (
+            str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
+        ) = "all",
+        sub_ax: plt.Axes | None = None,
+        color: str | None = None,
+    ):
+        """
+        self.plot_BTSP_locations()
+
+        Plot the locations of BTSP events.
+
+        Args:
+        - t_start (float, optional): Start time of the plot. Default is None.
+        - t_end (float, optional): End time. Default is None.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
+            Default is "all".
+        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
+            created with environment plotted. Default is None.
+        - color (str, optional): Color of the BTSP markers. Default is None.
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with BTSP locations plotted.
+        """
+
+        if color is None:
+            color = self.color or "C1"
+
+        chosen_neurons = self.return_list_of_neurons(chosen_neurons=chosen_neurons)  # type: ignore[arg-type]
+        num_neurons = len(chosen_neurons)
+
+        t, startid, _ = self.get_plotting_times(t_start=t_start, t_end=t_end)
+
+        BTSP_events = np.asarray(self.history["BTSP_events"]) - startid
+        BTSP_targets = self.history["BTSP_targets"]
+
+        min_not_yet = (
+            self.num_steps_total - self.BTSP_buffer["num_steps"].max() - startid
+        )
+
+        if sub_ax is None:
+            sub_ax = self.Agent.Environment.plot_environment()
+
+        if self.Agent.Environment.dimensionality == "1D":
+            ymax = sub_ax.get_ylim()[1]
+
+        for event, targets in zip(BTSP_events, BTSP_targets):
+            for target in targets:
+                if event >= len(t):
+                    continue
+                elif event < 0:
+                    alpha = 0.6  # happened before
+                elif event >= min_not_yet:
+                    alpha = 0.3  # not yet applied
+                else:
+                    alpha = 1.0
+
+                if target not in chosen_neurons:
+                    continue
+
+                i = chosen_neurons.index(target)
+
+                pos = self.Agent.history["pos"][event + startid]
+                if self.Agent.Environment.dimensionality == "1D":
+                    line_sep = (ymax - 1) / num_neurons
+                    y_pos = 1 + line_sep * i + line_sep * 0.7
+                    pos = pos + [y_pos]
+
+                sub_ax.scatter(
+                    *pos,
+                    color=color,
+                    alpha=alpha,
+                    marker=mpl_markers.MarkerStyle("x"),
+                    s=10,
+                )
+
+        return sub_ax
 
     def plot_BTSP_ramp(self, axes=None, plot_events=True, autosave=None):
         """
@@ -2592,87 +2795,6 @@ class BTSPLayer(HebbianLayer):
                     marker=mpl_markers.MarkerStyle("x"),
                     s=10,
                 )
-
-    def plot_BTSP_locations(
-        self,
-        t_start: float | None = None,
-        t_end: float | None = None,
-        chosen_neurons: (
-            str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
-        ) = "all",
-        sub_ax: plt.Axes | None = None,
-        color: str | None = None,
-    ):
-        """
-        self.plot_BTSP_locations()
-
-        Plot the locations of BTSP events.
-
-        Args:
-        - t_start (float, optional): Start time of the plot. Default is None.
-        - t_end (float, optional): End time. Default is None.
-        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
-            Default is "all".
-        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
-            created with environment plotted. Default is None.
-        - color (str, optional): Color of the BTSP markers. Default is None.
-
-        Returns:
-        - sub_ax (plt.Axes): Subplot with BTSP locations plotted.
-        """
-
-        if color is None:
-            color = self.color or "C1"
-
-        chosen_neurons = self.return_list_of_neurons(chosen_neurons=chosen_neurons)  # type: ignore[arg-type]
-        num_neurons = len(chosen_neurons)
-
-        t, startid, _ = self.get_plotting_times(t_start=t_start, t_end=t_end)
-
-        BTSP_events = np.asarray(self.history["BTSP_events"]) - startid
-        BTSP_targets = self.history["BTSP_targets"]
-
-        min_not_yet = (
-            self.num_steps_total - self.BTSP_buffer["num_steps"].max() - startid
-        )
-
-        if sub_ax is None:
-            sub_ax = self.Agent.Environment.plot_environment()
-
-        if self.Agent.Environment.dimensionality == "1D":
-            ymax = sub_ax.get_ylim()[1]
-
-        for event, targets in zip(BTSP_events, BTSP_targets):
-            for target in targets:
-                if event >= len(t):
-                    continue
-                elif event < 0:
-                    alpha = 0.6  # happened before
-                elif event >= min_not_yet:
-                    alpha = 0.3  # not yet applied
-                else:
-                    alpha = 1.0
-
-                if target not in chosen_neurons:
-                    continue
-
-                i = chosen_neurons.index(target)
-
-                pos = self.Agent.history["pos"][event + startid]
-                if self.Agent.Environment.dimensionality == "1D":
-                    line_sep = (ymax - 1) / num_neurons
-                    y_pos = 1 + line_sep * i + line_sep * 0.7
-                    pos = pos + [y_pos]
-
-                sub_ax.scatter(
-                    *pos,
-                    color=color,
-                    alpha=alpha,
-                    marker=mpl_markers.MarkerStyle("x"),
-                    s=10,
-                )
-
-        return sub_ax
 
     def plot_rate_map(
         self,

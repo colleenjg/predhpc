@@ -108,7 +108,7 @@ def get_agent_params(dt=DT, scale=None, environment="linear", **kwargs):
 
     Args:
     - dt (float, optional): The time step.
-    - scale (float, optional): The scale of the environment.
+    - scale (float, optional): The scale of the environment, used for linear agent.
     - environment (str, optional): The environment type
         (e.g., linear, tmaze, openfield).
 
@@ -203,7 +203,7 @@ def get_EC_params(n=None, environment="linear", vector=False, **kwargs):
         EC_params["widths"] = 0.1
 
     elif environment == "openfield":
-        EC_params["widths"] = 0.15
+        EC_params["widths"] = 0.07
 
     if n is not None:
         EC_params["n"] = n
@@ -333,7 +333,7 @@ def get_CA1_params(
             "soma_regularization_alpha": 0.6,
             "soma_p": 1,
             "soma_lr": 5e-5,  # basic learning rate
-            "soma_BTSP_lr_fact": 300,  # BTSP clamp
+            "soma_BTSP_lr_fact": 20,  # BTSP clamp
             "soma_NMDA_activation_threshold": 2,  # threshold for NMDA activation
             "soma_BTSP_induction_threshold": 8,  # sustainedrequired for BTSP
             "soma_BTSP_plateau_length": 0.12,  # plateau length required for BTSP
@@ -342,6 +342,8 @@ def get_CA1_params(
             "inhibit_weight": 3.0,  # strength of dendritic inhibition from soma
             "inhibit_input_filter_tau": 3,
             "inhibit_input_trend_tau": None,
+            "mutual_inhibition_weight": None,
+            "lateral_tau": 0.3,
         }
     else:
         CA1_params = {
