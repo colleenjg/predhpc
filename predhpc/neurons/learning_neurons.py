@@ -2613,7 +2613,7 @@ class BTSPLayer(HebbianLayer):
         """
 
         if axes is None:
-            _, axes = plt.subplots(2, 1, figsize=[9, 5], sharex=True, squeeze=False)
+            _, axes = plt.subplots(2, 1, figsize=[8, 5], sharex=True, squeeze=False)
         elif axes.shape != (2, 1) and axes.shape != (2,):
             raise ValueError("axes must have shape (2, 1) or (2, ).")
 
@@ -3372,7 +3372,7 @@ class NMDACurrent(object):
 
         if ax is None:
             n = len(chosen_neurons)
-            height = max([1, min(n / 12.0 + 5 / 3, 8)]) * len(datatypes)
+            height = max([1, min(n / 12.0 + 1, 8)]) * len(datatypes)
             _, ax = plt.subplots(
                 len(datatypes),
                 1,
@@ -3406,7 +3406,7 @@ class NMDACurrent(object):
                 **kwargs,
             )
 
-            ax1D[d].set_ylabel(datatype.capitalize().replace("_", " "))
+            ax1D[d].set_ylabel(datatype.capitalize().replace("_", "\n"))
             if d != len(datatypes) - 1:
                 ax1D[d].set_xlabel("")
 
@@ -3650,7 +3650,7 @@ class NMDALayer(BTSPLayer):
         """
 
         if axes is None:
-            _, axes = plt.subplots(3, 1, figsize=[9, 7], sharex=True, squeeze=False)
+            _, axes = plt.subplots(3, 1, figsize=[8, 5], sharex=True, squeeze=False)
         elif axes.shape != (3, 1) and axes.shape != (3,):
             raise ValueError("axes must have shape (3, 1) or (3, ).")
 
@@ -3665,7 +3665,7 @@ class NMDALayer(BTSPLayer):
         )
         ax1D[1].set_xlabel("")
         ax1D[2].set_xlabel("Time (s)")
-        ax1D[2].set_ylabel("CA1 NMDA current")
+        ax1D[2].set_ylabel("Pyr. NMDA current")
         ax1D[2].spines[["top", "right"]].set_visible(False)
 
         fig = ax1D[0].figure

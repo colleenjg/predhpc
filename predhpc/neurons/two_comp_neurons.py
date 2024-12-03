@@ -56,6 +56,7 @@ class TwoCompLayer(object):
         • self.get_closest_steps_to_target()
         • self.match_closest_to_target_steps_to_BTSP_steps()
         • self.update()
+        • self.add_compartment_legend()
         • self.plot_rate_map()
         • self.plot_rate_timeseries()
         • self.plot_rate_maps_across_learning()
@@ -338,8 +339,90 @@ class TwoCompLayer(object):
         self.SomaCompartment.set_BTSP_learn(soma)
         self.DendriteCompartment.set_BTSP_learn(dend)
 
+    def get_compartments(
+        self,
+        compartment: str = "all",
+        incl_lateral: bool = False,
+    ):
+        """
+        self.get_compartments()
+
+        - compartment (str, optional): Which compartments to retrieve
+            ("soma", "dend", "both", "inhibit", "all"). Default is "all".
+
+        Returns:
+        - compartments (list): List of compartments.
+        """
+
+        if compartment not in ["soma", "dend", "both", "inhibit", "all"]:
+            raise ValueError(
+                "compartment must be 'soma', 'dend', 'both', 'inhibit' or 'all', "
+                f"not '{compartment}'."
+            )
+
+        compartments = list()
+        if compartment in ["soma", "both", "all"]:
+            compartments.append(self.SomaCompartment)
+        if compartment in ["dend", "both", "all"]:
+            compartments.append(self.DendriteCompartment)
+        if compartment in ["inhibit", "all"]:
+            if self.inhibit_dend:
+                compartments.append(self.DendriteInhibition)
+            elif compartment == "inhibit":  # type: ignore[attr-defined]
+                raise ValueError(
+                    "Cannot retrieve inhibition compartment, as inhibition is not enabled."
+                )
+        if incl_lateral:
+            if self.mutual_inhibition_weight is None:
+                raise ValueError(
+                    "Cannot retrieve lateral inhibition compartment, as mutual "
+                    "inhibition is not enabled."
+                )
+            else:
+                compartments.append(self.LateralInhibition)
+
+        return compartments
+
+    def get_min_max_firingrates(
+        self,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        compartment: str = "all",
+        incl_lateral: bool = False,
+    ):
+        """
+        self.get_min_max_firingrates()
+
+        Obtain the minimum and maximum firing rates of the layer.
+
+        Args:
+        - t_start (float, optional): Start time for obtaining firingrate min and max.
+            Default is None.
+        - t_end (float, optional): Stop time for obtaining firingrate min and max.
+            Default is None.
+        - compartment (str, optional): Which compartment to plot, if environment is
+            2D ("soma", "dend", "both", "inhibit", "all"). Default is "all".
+
+        Returns:
+        - min_firingrate (float): Minimum firing rate.
+        - max_firingrate (float): Maximum firing rate.
+        """
+
+        min_firingrate = np.inf
+        max_firingrate = -np.inf
+
+        compartments = self.get_compartments(compartment, incl_lateral=incl_lateral)
+        for comp in compartments:
+            min_rate, max_rate = comp.get_min_max_firingrates(
+                t_start=t_start, t_end=t_end
+            )
+            min_firingrate = min(min_firingrate, min_rate)
+            max_firingrate = max(max_firingrate, max_rate)
+
+        return min_firingrate, max_firingrate
+
     def get_place_cell_centre_of_main_dendrite_input(
-        self, neuron_num: int = 0, src_name: str = "EC"
+        self, neuron_num: int = 0, src_name: str = "Obj"
     ):
         """
         self.get_place_cell_centre_of_main_dendrite_input()
@@ -348,8 +431,8 @@ class TwoCompLayer(object):
 
         Args:
         - neuron_num (int, optional): Neuron number. Default is 0.
-        - src_name (str, optional): Name of the input place cell layer.
-            Default is "EC".
+        - src_name (str, optional): Name of the input layer
+            (must be a place cell-derived layer). Default is "Obj".
 
         Returns:
         - place_cell_centre (1D np.ndarray): Main dendrite input place cell centre
@@ -378,7 +461,7 @@ class TwoCompLayer(object):
     def get_vectors_to_place_cell_centre_of_main_dendrite_input(
         self,
         neuron_num: int = 0,
-        src_name: str = "EC",
+        src_name: str = "Obj",
         polar: bool = False,
         radians: bool = False,
     ):
@@ -390,8 +473,8 @@ class TwoCompLayer(object):
 
         Args:
         - neuron_num (int, optional): Neuron number. Default is 0.
-        - src_name (str, optional): Name of the input place cell layer.
-            Default is "EC".
+        - src_name (str, optional): Name of the input layer
+            (must be a place cell-derived layer). Default is "Obj".
         - polar (bool, optional): Whether to return vectors in polar coordinates.
             Default is False.
         - radians (bool, optional): If True and polar is True, return angles in radians.
@@ -414,7 +497,7 @@ class TwoCompLayer(object):
         return vectors
 
     def get_distances_to_place_cell_centre_of_main_dendrite_input(
-        self, neuron_num: int = 0, src_name: str = "EC"
+        self, neuron_num: int = 0, src_name: str = "Obj"
     ):
         """
         self.get_distances_to_place_cell_centre_of_main_dendrite_input()
@@ -424,8 +507,8 @@ class TwoCompLayer(object):
 
         Args:
         - neuron_num (int, optional): Neuron number. Default is 0.
-        - src_name (str, optional): Name of the input place cell layer.
-            Default is "EC".
+        - src_name (str, optional): Name of the input layer
+            (must be a place cell-derived layer). Default is "Obj".
 
         Returns:
         - distances (1D np.ndarray): Distances from agent's position to dendrite input
@@ -443,7 +526,7 @@ class TwoCompLayer(object):
     def get_closest_steps_to_target(
         self,
         neuron_num=0,
-        target_src_name="LEC",
+        target_src_name="Obj",
         min_dist=0.2,
         min_steps_btw=20,
         log=False,
@@ -455,8 +538,8 @@ class TwoCompLayer(object):
         cell centre of the main input to the neuron's dendrite.
 
         Args:
-        - target_src_name (str, optional): Name of the input place cell layer.
-            Default is "LEC".
+        - target_src_name (str, optional): Name of the input layer
+            (must be a place cell-derived layer). Default is "Obj".
         - neuron_num (int, optional): Neuron number. Default is 0.
         - min_dist (float, optional): Minimum distance to be considered closest.
             Default is 0.2.
@@ -486,7 +569,7 @@ class TwoCompLayer(object):
 
     def match_closest_to_target_steps_to_BTSP_steps(
         self,
-        target_src_name="LEC",
+        target_src_name="Obj",
         neuron_num=0,
         max_step_dist=40,
         min_dist=0.2,
@@ -499,8 +582,8 @@ class TwoCompLayer(object):
         Match the steps closest to the target to the BTSP steps of the specified neuron.
 
         Args:
-        - target_src_name (str, optional): Name of the input place cell layer.
-            Default is "LEC".
+        - target_src_name (str, optional): Name of the input layer
+            (must be a place cell-derived layer). Default is "Obj".
         - neuron_num (int, optional): Neuron number. Default is 0.
         - max_step_dist (int, optional): Maximum distance between steps to be considered
             a match. Default is 40.
@@ -609,10 +692,64 @@ class TwoCompLayer(object):
 
         return
 
+    def add_compartment_legend(
+        self,
+        sub_ax,
+        compartment="all",
+        plot_lateral=False,
+        loc="best",
+        soma_color=None,
+        dend_color=None,
+        inhibit_color=None,
+        lateral_color=None,
+    ):
+        """
+        self.add_compartment_legend()
+
+        Add a legend to a plot with the colors of the specified compartments.
+
+        Args:
+        - sub_ax (plt.Axes): Subplot to add the legend to.
+        - compartment (str, optional): Which compartments to include in the legend
+            ("soma", "dend", "inhibit", "all"). Default is "all".
+        - plot_lateral (bool, optional): Whether to include the lateral inhibition
+            compartment in the legend. Default is False.
+        - soma_color (str, optional): Color for soma compartment. Default is None.
+        - dend_color (str, optional): Color for dendrite compartment. Default is None.
+        - inhibit_color (str, optional): Color for inhibitory compartment.
+            Default is None.
+        - lateral_color (str, optional): Color for lateral inhibition compartment.
+            Default is None.
+        """
+
+        if compartment not in ["soma", "dend", "both", "inhibit", "all"]:
+            raise ValueError(
+                "compartment must be 'soma', 'dend', 'both', 'inhibit' or 'all', not "
+                f"'{compartment}'."
+            )
+
+        if compartment in ["all", "soma"]:
+            color = soma_color or self.SomaCompartment.color
+            sub_ax.plot([], [], color=color, label="soma")
+        if compartment in ["all", "dend"]:
+            color = dend_color or self.DendriteCompartment.color
+            sub_ax.plot([], [], color=color, label="dend")
+        if self.inhibit_dend and compartment in ["all", "inhibit"]:
+            color = inhibit_color or self.DendriteInhibition.color
+            sub_ax.plot([], [], color=color, label="inhib.")
+        if plot_lateral and self.mutual_inhibition_weight is not None:
+            color = lateral_color or self.LateralInhibition.color
+            sub_ax.plot([], [], color=color, label="lat. inh.")
+
+        sub_ax.legend(loc=loc)
+
     def plot_rate_map(
         self,
+        t_start: float | None = None,
+        t_end: float | None = None,
         ax: plt.Axes | np.ndarray | None = None,
         compartment: str | None = None,
+        norm_by: str | None = None,
         no_legend: bool = False,
         autosave: bool | None = None,
         **kwargs,
@@ -624,11 +761,15 @@ class TwoCompLayer(object):
         per two-compartment neuron.
 
         Args:
+        - t_start (float, optional): Start time of the plot. Default is None.
+        - t_end (float, optional): End time. Default is None.
         - ax (np.ndarray or plt.Axes, optional): Subplot or array of subplots to plot
             on (one per plotted ROI, if environment is 2D). Default is None.
         - compartment (str, optional): Which compartment to plot, if environment is
-            2D ("soma", "dend" or "both"). Default is None
+            2D ("soma", "dend", "both", "inhibit", "all"). Default is None
             (i.e., "soma" if environment is 2D, and "both" otherwise).
+        - norm_by (str, optional): Normalisation method for rate maps.
+            Default is "shared_fr_max".
         - no_legend (bool, optional): Whether to remove the legend. Default is False.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
         global autosave setting for ratinabox is used. Default is None.
@@ -647,64 +788,35 @@ class TwoCompLayer(object):
             else:
                 compartment = "soma"
 
+        if norm_by is None and compartment in ["both", "all"]:
+            norm_by = "shared_fr_max"
+
+        if norm_by == "shared_fr_max":
+            kwargs["norm_by"] = self.get_min_max_firingrates(
+                t_start=t_start, t_end=t_end, compartment=compartment
+            )[1]
+        elif norm_by is not None:
+            kwargs["norm_by"] = norm_by
+
         if self.Agent.Environment.dimensionality == "2D" and compartment == "all":
             warnings.warn(
                 "Plotting rate maps for all compartments in a 2D environment will "
                 "result in only the soma compartment appearing."
             )
 
-        if compartment not in ["soma", "dend", "inhibit", "all"]:
-            raise ValueError(
-                f"compartment must be 'soma', 'dend', 'inhibit' or 'all', not '{compartment}'."
-            )
-
-        if compartment == "inhibit" and not self.inhibit_dend:  # type: ignore[attr-defined]
-            raise ValueError(
-                "Cannot plot inhibition rate maps, as inhibition is not enabled."
-            )
-
-        if self.inhibit_dend and compartment in ["all", "inhibit"]:
-            ax_out = self.DendriteInhibition.plot_rate_map(
+        for comp in self.get_compartments(compartment)[::-1]:
+            ax_out = comp.plot_rate_map(
+                t_start=t_start,
+                t_end=t_end,
                 ax=ax,
-                autosave=False,
-                no_legend=no_legend,
+                no_legend=True,
+                autosave=autosave,
                 **kwargs,
             )
-
-            if ax is None:
-                ax = ax_out
-
-        if compartment in ["all", "dend"]:
-            ax_out = self.DendriteCompartment.plot_rate_map(
-                ax=ax,
-                autosave=False,
-                no_legend=no_legend,
-                **kwargs,
-            )
-
-            if ax is None:
-                ax = ax_out
-
-        if compartment in ["all", "soma"]:
-            ax_out = self.SomaCompartment.plot_rate_map(
-                ax=ax,
-                autosave=False,
-                no_legend=no_legend,
-                **kwargs,
-            )
-
-            if ax is None:
-                ax = ax_out
+            ax = ax or ax_out
 
         if not no_legend and self.Agent.Environment.dimensionality == "1D":
-            sub_ax = ax
-            if compartment in ["all", "soma"]:
-                sub_ax.plot([], [], color=self.SomaCompartment.color, label="soma")
-            if compartment in ["all", "dend"]:
-                sub_ax.plot([], [], color=self.DendriteCompartment.color, label="dend")
-            if self.inhibit_dend and compartment in ["all", "inhibit"]:
-                sub_ax.plot([], [], color=self.DendriteInhibition.color, label="inhib.")
-            sub_ax.legend(loc="lower right")
+            self.add_compartment_legend(ax, compartment=compartment, loc="lower right")
 
         fig = np.asarray(ax).ravel()[0].figure
         plot_util.save_figure(fig, f"{self.name}_ratemaps", save=autosave)  # type: ignore[attr-defined]
@@ -763,56 +875,20 @@ class TwoCompLayer(object):
                 "environment will result in only the soma compartment appearing."
             )
 
-        if compartment not in ["soma", "dend", "inhibit", "all"]:
-            raise ValueError(
-                f"compartment must be 'soma', 'dend', 'inhibit' or 'all', not '{compartment}'."
-            )
-
-        if compartment == "inhibit" and not self.inhibit_dend:  # type: ignore[attr-defined]
-            raise ValueError(
-                "Cannot plot inhibition rate maps, as inhibition is not enabled."
-            )
-
-        if self.inhibit_dend and compartment in ["all", "inhibit"]:
-            axes_out = self.DendriteInhibition.plot_rate_maps_across_learning(
+        for comp in self.get_compartments(compartment)[::-1]:
+            axes_out = comp.plot_rate_maps_across_learning(
                 axes=axes,
                 autosave=False,
-                no_legend=no_legend,
+                no_legend=True,
                 **kwargs,
             )
-            if axes is None:
-                axes = axes_out
-
-        if compartment in ["all", "dend"]:
-            axes_out = self.DendriteCompartment.plot_rate_maps_across_learning(
-                axes=axes,
-                autosave=False,
-                no_legend=no_legend,
-                **kwargs,
-            )
-            if axes is None:
-                axes = axes_out
-
-        if compartment in ["all", "soma"]:
-            axes_out = self.SomaCompartment.plot_rate_maps_across_learning(
-                axes=axes,
-                autosave=False,
-                no_legend=no_legend,
-                **kwargs,
-            )
-            if axes is None:
-                axes = axes_out
+            axes = axes or axes_out
 
         if not no_legend and self.Agent.Environment.dimensionality == "1D":
             sub_ax = np.asarray(axes).ravel()[0]
-
-            if compartment in ["all", "soma"]:
-                sub_ax.plot([], [], color=self.SomaCompartment.color, label="soma")
-            if compartment in ["all", "dend"]:
-                sub_ax.plot([], [], color=self.DendriteCompartment.color, label="dend")
-            if self.inhibit_dend and compartment in ["all", "inhibit"]:
-                sub_ax.plot([], [], color=self.DendriteInhibition.color, label="inhib.")
-            sub_ax.legend(loc="lower right")
+            self.add_compartment_legend(
+                sub_ax, compartment=compartment, loc="lower right"
+            )
 
         if title is None:
             if compartment == "both":
@@ -837,6 +913,8 @@ class TwoCompLayer(object):
 
     def plot_rate_timeseries(
         self,
+        t_start: float | None = None,
+        t_end: float | None = None,
         ax: plt.Axes | np.ndarray | None = None,
         soma_color: str | None = None,
         dend_color: str | None = None,
@@ -844,6 +922,7 @@ class TwoCompLayer(object):
         lateral_color: str | None = None,
         separate_axes: bool = False,
         plot_lateral: bool = False,
+        norm_by: str | None = None,
         autosave: bool | None = None,
         **kwargs,
     ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
@@ -854,6 +933,8 @@ class TwoCompLayer(object):
         overlayed or split across subplots.
 
         Args:
+        - t_start (float, optional): Start time of the plot. Default is None.
+        - t_end (float, optional): End time. Default is None.
         - ax (1D np.ndarray or plt.Axes, optional): Subplot or 1D array of subplots
             if separate_axes (one per compartment). Default is None.
         - soma_color (str, optional): Color for soma compartment. Default is None.
@@ -877,14 +958,11 @@ class TwoCompLayer(object):
             if separate_axes (one per compartment).
         """
 
-        if separate_axes:
-            titles = ["Soma compartment", "Dendrite compartment"]
-            if self.inhibit_dend:  # type: ignore[attr-defined]
-                titles.append("Inhibitory interneuron")
-            if plot_lateral and self.mutual_inhibition_weight is not None:
-                titles.append("Lateral inhibitor")
-            num_rows = len(titles)
+        compartments = self.get_compartments("all", incl_lateral=plot_lateral)
 
+        if separate_axes:
+            num_rows = len(compartments)
+            norm_by = norm_by or "max"
             if ax is None:
                 _, ax = plt.subplots(
                     num_rows,
@@ -907,62 +985,59 @@ class TwoCompLayer(object):
             if "sub_ax" in kwargs.keys() and ax is None:
                 ax = kwargs.pop("sub_ax")
             sub_ax = ax
+            norm_by = norm_by or "shared_max"
 
-        soma_color = soma_color or self.SomaCompartment.color
-        soma_ax = ax1D[0] if separate_axes else sub_ax
-        ax_out = self.SomaCompartment.plot_rate_timeseries(
-            sub_ax=soma_ax,
-            color=soma_color,
-            autosave=False,
-            **kwargs,
-        )
-        if not separate_axes and sub_ax is None:
-            sub_ax = ax_out
+        if norm_by == "shared_max":
+            norm_by = self.get_min_max_firingrates(
+                t_start=t_start, t_end=t_end, incl_lateral=plot_lateral
+            )[1]
 
-        dend_color = dend_color or self.DendriteCompartment.color
-        dend_ax = ax1D[1] if separate_axes else sub_ax
-        self.DendriteCompartment.plot_rate_timeseries(
-            sub_ax=dend_ax,
-            color=dend_color,
-            autosave=False,
-            **kwargs,
-        )
-
-        if self.inhibit_dend:
-            inhibit_color = inhibit_color or self.DendriteInhibition.color
-            inh_ax = ax1D[2] if separate_axes else sub_ax
-            self.DendriteInhibition.plot_rate_timeseries(
-                sub_ax=inh_ax,
-                color=inhibit_color,
-                autosave=False,
-                **kwargs,
-            )
-
+        colors = [soma_color, dend_color]
+        separate_titles = ["Soma compartment", "Dendrite compartment"]
+        if self.inhibit_dend:  # type: ignore[attr-defined]
+            colors.append(inhibit_color)
+            separate_titles.append("Inhibitory interneuron")
         if plot_lateral and self.mutual_inhibition_weight is not None:
-            lateral_color = lateral_color or self.LateralInhibition.color
-            lat_ax = ax1D[-1] if separate_axes else sub_ax
-            self.LateralInhibition.plot_rate_timeseries(
-                sub_ax=lat_ax,
-                color=lateral_color,
+            colors.append(lateral_color)
+            separate_titles.append("Lateral inhibitor")
+
+        if len(compartments) != len(colors):
+            raise NotImplementedError(
+                "Number of compartments does not match number of colors."
+            )
+
+        for c, comp in enumerate(compartments):
+            color = colors[c] or comp.color
+            use_sub_ax = ax1D[c] if separate_axes else sub_ax
+            sub_ax_out = comp.plot_rate_timeseries(
+                t_start=t_start,
+                t_end=t_end,
+                sub_ax=use_sub_ax,
+                color=color,
+                norm_by=norm_by,
                 autosave=False,
                 **kwargs,
             )
+            if not separate_axes:
+                sub_ax = sub_ax or sub_ax_out
 
         if separate_axes:
             for s, sub_ax in enumerate(ax1D):
-                sub_ax.set_title(titles[s])
+                sub_ax.set_title(separate_titles[s])
                 plot_fcts.mark_target_and_reset_points(self.Agent, self, sub_ax=sub_ax)
                 if s != len(ax1D) - 1:
                     sub_ax.set_xlabel("")
             fig = np.asarray(ax).ravel()[0].figure
         else:
-            sub_ax.plot([], [], color=soma_color, label="soma")
-            sub_ax.plot([], [], color=dend_color, label="dend")
-            if self.inhibit_dend:
-                sub_ax.plot([], [], color=inhibit_color, label="inhib.")
-            if plot_lateral and self.mutual_inhibition_weight is not None:
-                sub_ax.plot([], [], color=lateral_color, label="lat. inhib.")
-            sub_ax.legend()
+            self.add_compartment_legend(
+                sub_ax,
+                compartment="all",
+                plot_lateral=plot_lateral,
+                soma_color=soma_color,
+                dend_color=dend_color,
+                inhibit_color=inhibit_color,
+                lateral_color=lateral_color,
+            )
             fig = sub_ax.figure
 
         plot_util.save_figure(fig, f"{self.name}_firingrate", save=autosave)  # type: ignore[attr-defined]
@@ -972,7 +1047,7 @@ class TwoCompLayer(object):
     def plot_distances_to_target(
         self,
         neuron_num=0,
-        target_src_name="LEC",
+        target_src_name="Obj",
         sub_ax=None,
         mark_soma_BTSP=True,
         mark_teleport=True,
@@ -989,8 +1064,8 @@ class TwoCompLayer(object):
 
         Args:
         - neuron_num (int, optional): Neuron number. Default is 0.
-        - target_src_name (str, optional): Name of the input place cell layer.
-            Default is "LEC".
+        - target_src_name (str, optional): Name of the input layer
+            (must be a place cell-derived layer). Default is "Obj".
         - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
         - mark_soma_BTSP (bool, optional): Whether to mark the soma compartment BTSP
             points. Default is True.
@@ -1064,7 +1139,7 @@ class TwoCompLayer(object):
 
     def plot_distances_to_targets(
         self,
-        target_src_name="LEC",
+        target_src_name="Obj",
         num_neurons="all",
         mark_soma_BTSP=True,
         mark_teleport=True,
@@ -1083,8 +1158,8 @@ class TwoCompLayer(object):
         of the main input to the neuron's dendrite, over time.
 
         Args:
-        - target_src_name (str, optional): Name of the input place cell layer.
-            Default is "LEC".
+        - target_src_name (str, optional): Name of the input layer
+            (must be a place cell-derived layer). Default is "Obj".
         - axes (2D np.ndarray): Array of subplots to plot on (one per neuron).
             Default is None.
         - neuron_num (int, optional): Neuron number. Default is 0.
@@ -1190,7 +1265,7 @@ class TwoCompLayer(object):
     def plot_neuron_properties_at_BTSP_and_closest_to_target_steps(
         self,
         neuron_num=0,
-        target_src_name="LEC",
+        target_src_name="Obj",
         t_start=None,
         t_end=None,
         axes=None,
@@ -1205,8 +1280,8 @@ class TwoCompLayer(object):
 
         Args:
         - neuron_num (int, optional): Neuron number. Default is 0.
-        - target_src_name (str, optional): Name of the input place cell layer.
-            Default is "LEC".
+        - target_src_name (str, optional): Name of the input layer
+            (must be a place cell-derived layer). Default is "Obj".
         - t_start (int, optional): Start time for plotting. Default is None.
         - t_end (int, optional): End time for plotting. Default is None.
         - axes (2D np.ndarray, optional): Array of subplots to plot on. Default is None.
@@ -1238,7 +1313,7 @@ class TwoCompLayer(object):
         )[:, 1]
 
         steps_dict = self.match_closest_to_target_steps_to_BTSP_steps(
-            target_src_name="LEC", neuron_num=neuron_num, t_start=t_start, t_end=t_end
+            target_src_name="Obj", neuron_num=neuron_num, t_start=t_start, t_end=t_end
         )
 
         for i, (x_data_type, x_data, sub_ax) in enumerate(
@@ -1281,7 +1356,7 @@ class TwoCompLayer(object):
 
     def plot_properties_at_BTSP_and_closest_to_target_steps(
         self,
-        target_src_name="LEC",
+        target_src_name="Obj",
         sort_by_num_BTSP=False,
         t_start=None,
         t_end=None,
@@ -1294,8 +1369,8 @@ class TwoCompLayer(object):
         Plot properties at BTSP and closest to target steps for all neurons.
 
         Args:
-        - target_src_name (str, optional): Name of the input place cell layer.
-            Default is "LEC".
+        - target_src_name (str, optional): Name of the input layer
+            (must be a place cell-derived layer). Default is "Obj".
         - sort_by_num_BTSP (bool, optional): If True, neurons are sorted by number of
             BTSP events. Default is False.
         - t_start (int, optional): Start time for plotting. Default is None.

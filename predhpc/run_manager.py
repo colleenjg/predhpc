@@ -22,53 +22,53 @@ from predhpc.util import gen_util, plot_util, params_util
 ### 2D FUNCTIONS ###
 
 
-def extract_objects_from_CA1s(CA1s):
+def extract_objects_from_Pyrs(Pyrs):
     """
-    extract_objects_from_CA1s(CA1s)
+    extract_objects_from_Pyrs(Pyrs)
 
-    Extract objects from a CA1s object.
+    Extract objects from a Pyrs object.
 
     Args:
-    - CA1s (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
-        CA1 neuron layer
+    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
+        Pyr. neuron layer
 
     Returns:
     - Env (env.Environment): Environment
     - Ag (agent.Agent): Agent
-    - CA3_PCs (riab_neurons.PlaceCells): CA3 place cells
-    - CA1s (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
-        CA1 neuron layer
-    - ECs (object_neurons.ObjectCells or object_neurons.ObjectInstanceCells):
+    - PCs (riab_neurons.PlaceCells): Place cells
+    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
+        Pyr. neuron layer
+    - Objs (object_neurons.ObjectCells or object_neurons.ObjectInstanceCells):
         Object cells
     """
 
-    Env = CA1s.Agent.Environment
+    Env = Pyrs.Agent.Environment
 
-    Ag = CA1s.Agent
+    Ag = Pyrs.Agent
 
-    if isinstance(CA1s, two_comp_neurons.TwoCompLayer):
-        EC_key = list(CA1s.DendriteCompartment.inputs.keys())[-1]
-        ECs = CA1s.DendriteCompartment.inputs[EC_key]["layer"]
+    if isinstance(Pyrs, two_comp_neurons.TwoCompLayer):
+        Obj_key = list(Pyrs.DendriteCompartment.inputs.keys())[-1]
+        Objs = Pyrs.DendriteCompartment.inputs[Obj_key]["layer"]
 
-        CA3_key = list(CA1s.SomaCompartment.inputs.keys())[0]
-        CA3_PCs = CA1s.SomaCompartment.inputs[CA3_key]["layer"]
+        PC_key = list(Pyrs.SomaCompartment.inputs.keys())[0]
+        PCs = Pyrs.SomaCompartment.inputs[PC_key]["layer"]
     else:
-        ECs = None
-        CA3_key = list(CA1s.inputs.keys())[0]
-        CA3_PCs = CA1s.inputs[CA3_key]["layer"]
+        Objs = None
+        PC_key = list(Pyrs.inputs.keys())[0]
+        PCs = Pyrs.inputs[PC_key]["layer"]
 
-    return Env, Ag, CA3_PCs, CA1s, ECs
+    return Env, Ag, PCs, Pyrs, Objs
 
 
-def plot_2D_initial_conditions(CA1s, num_samples=10, autosave: bool | None = None):
+def plot_2D_initial_conditions(Pyrs, num_samples=10, autosave: bool | None = None):
     """
-    plot_2D_initial_conditions(CA1s)
+    plot_2D_initial_conditions(Pyrs)
 
     Plot initial conditions for a 2D environment experiment.
 
     Args:
-    - CA1s (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
-        CA1 neuron layer
+    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
+        Pyr. neuron layer
     - num_samples (int, optional): Number of samples to plot. Default is 10.
     - autosave (bool, optional): Whether to autosave the figure. If None, the global
         autosave setting for ratinabox is used. Default is None.
@@ -80,15 +80,15 @@ def plot_2D_initial_conditions(CA1s, num_samples=10, autosave: bool | None = Non
         fields plotted, with shape (3,).
     """
 
-    Env, _, CA3_PCs, CA1s, ECs = extract_objects_from_CA1s(CA1s)
+    Env, _, PCs, Pyrs, Objs = extract_objects_from_Pyrs(Pyrs)
 
     # Plot fields
-    if ECs is None:
-        num_cols = min(CA3_PCs.n, num_samples)
-        neurons = [CA3_PCs]
+    if Objs is None:
+        num_cols = min(PCs.n, num_samples)
+        neurons = [PCs]
     else:
-        num_cols = min(max(CA3_PCs.n, ECs.n), num_samples)
-        neurons = [ECs, CA3_PCs]
+        num_cols = min(max(PCs.n, Objs.n), num_samples)
+        neurons = [Objs, PCs]
 
     fields_fig, fields_axes = plt.subplots(
         len(neurons), num_cols, figsize=(num_cols * 2, len(neurons) * 2), squeeze=False
@@ -114,12 +114,12 @@ def plot_2D_initial_conditions(CA1s, num_samples=10, autosave: bool | None = Non
     aggreg_ax1D[0].set_title("Environment")
 
     plot_fcts.plot_overlayed_rate_maps(
-        CA3_PCs, method="max", colorbar=False, sub_ax=aggreg_ax1D[1], autosave=False
+        PCs, method="max", colorbar=False, sub_ax=aggreg_ax1D[1], autosave=False
     )
-    aggreg_ax1D[1].set_title("CA3 overlayed place fields")
+    aggreg_ax1D[1].set_title("Overlayed place fields")
 
-    CA3_PCs.plot_place_cell_locations(sub_ax=aggreg_ax1D[2], autosave=False)
-    aggreg_ax1D[2].set_title("CA3 place cell centers")
+    PCs.plot_place_cell_locations(sub_ax=aggreg_ax1D[2], autosave=False)
+    aggreg_ax1D[2].set_title("Place cell centers")
 
     if autosave:
         plot_util.save_figure(fields_fig, "openfield_init_fields", save=autosave)
@@ -131,9 +131,9 @@ def plot_2D_initial_conditions(CA1s, num_samples=10, autosave: bool | None = Non
 def init_2D_env_objects(
     env_params: dict[str, Any] | None = None,
     agent_params: dict[str, Any] | None = None,
-    CA3_PC_params: dict[str, Any] | None = None,
-    CA1_params: dict[str, Any] | None = None,
-    EC_params: dict[str, Any] | None = None,
+    PC_params: dict[str, Any] | None = None,
+    Pyr_params: dict[str, Any] | None = None,
+    Obj_params: dict[str, Any] | None = None,
     environment="openfield",
     two_compartment: bool = True,
     autosave: bool | None = None,
@@ -142,15 +142,15 @@ def init_2D_env_objects(
     """
     init_2D_env_objects()
 
-    Initialize objects for a 2D environment experiment, and obtain CA1s.
+    Initialize objects for a 2D environment experiment, and obtain Pyrs.
 
     Args:
     - env_params (dict, optional): Parameters for the environment. Default is None.
     - agent_params (dict, optional): Parameters for the agent. Default is None.
-    - CA3_PC_params (dict, optional): Parameters for the CA3 place cells. Default is
+    - PC_params (dict, optional): Parameters for the place cells. Default is
         None.
-    - CA1_params (dict, optional): Parameters for the CA1 neurons. Default is None.
-    - EC_params (dict, optional): Parameters for the EC neurons. Default is None.
+    - Pyr_params (dict, optional): Parameters for the Pyr. neurons. Default is None.
+    - Obj_params (dict, optional): Parameters for the object neurons. Default is None.
     - two_compartment (bool, optional): Whether to use two-compartment model.
         Default is True.
     - autosave (bool, optional): Whether to autosave the figure. If None, the global
@@ -159,8 +159,8 @@ def init_2D_env_objects(
         True.
 
     Returns:
-    - CA1s (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
-        CA1 neuron layer
+    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
+        Pyr. neuron layer
     """
     env_params = env_params or params_util.get_env_params(environment=environment)
     agent_params = agent_params or params_util.get_agent_params(environment=environment)
@@ -174,25 +174,23 @@ def init_2D_env_objects(
     else:
         raise ValueError(f"Invalid environment: {environment}")
 
-    CA3_PC_params = CA3_PC_params or params_util.get_CA3_PC_params(
-        environment=environment
-    )
-    CA3_PCs = riab_neurons.PlaceCells(Ag, params=CA3_PC_params)
+    PC_params = PC_params or params_util.get_PC_params(environment=environment)
+    PCs = riab_neurons.PlaceCells(Ag, params=PC_params)
 
     if two_compartment:
-        EC_params = EC_params or params_util.get_EC_params(environment=environment)
+        Obj_params = Obj_params or params_util.get_Obj_params(environment=environment)
         if environment == "tmaze":
-            ECs = object_neurons.ObjectCells(Ag, params=EC_params)
+            Objs = object_neurons.ObjectCells(Ag, params=Obj_params)
         else:
-            ECs = object_neurons.ObjectInstanceCells(Ag, params=EC_params)
+            Objs = object_neurons.ObjectInstanceCells(Ag, params=Obj_params)
     else:
-        if EC_params is not None:
-            warnings.warn("EC_params will be ignored if two_compartment is False.")
-        ECs = None
+        if Obj_params is not None:
+            warnings.warn("Obj_params will be ignored if two_compartment is False.")
+        Objs = None
 
-    if CA1_params is None:
-        n_kwargs = {"n": ECs.n} if two_compartment else dict()
-        CA1_params = params_util.get_CA1_params(
+    if Pyr_params is None:
+        n_kwargs = {"n": Objs.n} if two_compartment else dict()
+        Pyr_params = params_util.get_Pyr_params(
             environment=environment,
             BTSP=True,
             NMDA=two_compartment,
@@ -201,40 +199,40 @@ def init_2D_env_objects(
         )
 
     if two_compartment:
-        CA1_params["soma_input_layers"] = [CA3_PCs]  # type: ignore[assignment]
-        if CA1_params["n"] is None:
-            CA1_params["n"] = ECs.n
-        elif CA1_params["n"] != ECs.n:
+        Pyr_params["soma_input_layers"] = [PCs]  # type: ignore[assignment]
+        if Pyr_params["n"] is None:
+            Pyr_params["n"] = Objs.n
+        elif Pyr_params["n"] != Objs.n:
             raise ValueError(
-                f"If provided, CA1_params['n'] ({CA1_params['n']}) must be equal to "
-                f"ECs.n ({ECs.n})."
+                f"If provided, Pyr_params['n'] ({Pyr_params['n']}) must be equal to "
+                f"Objs.n ({Objs.n})."
             )
     else:
-        CA1_params["input_layers"] = [CA3_PCs]  # type: ignore[assignment]
+        Pyr_params["input_layers"] = [PCs]  # type: ignore[assignment]
 
     if two_compartment:
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="No input layers")
-            CA1s = two_comp_neurons.TwoCompLayer(Ag, params=CA1_params)
+            Pyrs = two_comp_neurons.TwoCompLayer(Ag, params=Pyr_params)
 
-        EC_to_CA1_w = gen_util.get_weights(ECs.n, CA1s.n)
-        CA1s.DendriteCompartment.add_input(ECs, w=EC_to_CA1_w)
-        CA1s.set_BTSP_learn(soma=True, dend=False)
+        Obj_to_Pyr_w = gen_util.get_weights(Objs.n, Pyrs.n)
+        Pyrs.DendriteCompartment.add_input(Objs, w=Obj_to_Pyr_w)
+        Pyrs.set_BTSP_learn(soma=True, dend=False)
     else:
-        CA1s = learning_neurons.BTSPLayer(Ag, params=CA1_params)
-        CA1s.set_BTSP_learn()
+        Pyrs = learning_neurons.BTSPLayer(Ag, params=Pyr_params)
+        Pyrs.set_BTSP_learn()
 
     if plot:
-        plot_2D_initial_conditions(CA1s, autosave=autosave)
+        plot_2D_initial_conditions(Pyrs, autosave=autosave)
 
-    return CA1s
+    return Pyrs
 
 
 ### 2D (OPENFIELD) FUNCTIONS ###
 
 
 def learn_openfield_BTSP(
-    CA1s: learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | None = None,
+    Pyrs: learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | None = None,
     max_num_steps: int = 10000,
     record_weights_at_BTSP: bool = True,
     use_Hebbian: bool = False,
@@ -269,15 +267,15 @@ def learn_openfield_BTSP(
     - **init_kwargs: Keyword arguments for init_2D_env_objects().
 
     Returns:
-    - CA1s (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
-        CA1 neuron layer
+    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
+        Pyr. neuron layer
     - weights_at_BTSP (dict): Dictionary with keys "weights" and "steps" in which
-        input weights from CA3 and steps are recorded. None if record_weights_at_BTSP
-        is False.
+        input weights from place cells and steps are recorded. None if
+        record_weights_at_BTSP is False.
     """
 
-    if CA1s is None:
-        CA1s = init_2D_env_objects(
+    if Pyrs is None:
+        Pyrs = init_2D_env_objects(
             two_compartment=two_compartment,
             environment="openfield",
             autosave=autosave,
@@ -285,46 +283,46 @@ def learn_openfield_BTSP(
             **init_kwargs,
         )
 
-    _, Ag, CA3_PCs, CA1s, ECs = extract_objects_from_CA1s(CA1s)
+    _, Ag, PCs, Pyrs, Objs = extract_objects_from_Pyrs(Pyrs)
 
     if two_compartment:
-        CA1s.set_BTSP_learn(soma=True, dend=False)
-        CA1s_for_weights = CA1s.SomaCompartment
-        CA1s.set_learn(soma=use_Hebbian, dend=False, inhibit=False)
+        Pyrs.set_BTSP_learn(soma=True, dend=False)
+        Pyrs_for_weights = Pyrs.SomaCompartment
+        Pyrs.set_learn(soma=use_Hebbian, dend=False, inhibit=False)
     else:
-        CA1s.set_BTSP_learn()
-        CA1s_for_weights = CA1s
-        CA1s.set_learn(use_Hebbian)
+        Pyrs.set_BTSP_learn()
+        Pyrs_for_weights = Pyrs
+        Pyrs.set_learn(use_Hebbian)
 
     # run learning
-    start_step = len(CA1s_for_weights.history["t"])
+    start_step = len(Pyrs_for_weights.history["t"])
     stop_BTSP = max(0, start_step + max_num_steps - num_end_without_BTSP)
 
     BTSP_stopped = False
-    start_num_BTSP = len(CA1s_for_weights.history["BTSP_events"])
+    start_num_BTSP = len(Pyrs_for_weights.history["BTSP_events"])
 
     BTSP_steps, weights, steps = list(), list(), list()
     for i in tqdm(range(max_num_steps)):
         Ag.update(speed_fact=3, drift_to_random_strength_ratio=1)
-        ECs.update()
-        CA3_PCs.update()
-        CA1s.update()
+        Objs.update()
+        PCs.update()
+        Pyrs.update()
         if record_weights_at_BTSP:
-            num_BTSP = len(CA1s_for_weights.history["BTSP_events"])
+            num_BTSP = len(Pyrs_for_weights.history["BTSP_events"])
             if num_BTSP > len(BTSP_steps) + start_num_BTSP:
-                BTSP_steps.append(len(CA1s_for_weights.history["t"]))
+                BTSP_steps.append(len(Pyrs_for_weights.history["t"]))
 
         if not BTSP_stopped and i + start_step >= stop_BTSP:
             if two_compartment:
-                CA1s.set_BTSP_learn(soma=False, dend=False)
+                Pyrs.set_BTSP_learn(soma=False, dend=False)
             else:
-                CA1s.set_BTSP_learn()
+                Pyrs.set_BTSP_learn()
             print(f"BTSP blocked from step {i + start_step}.")
             BTSP_stopped = True
 
-        if CA1s_for_weights.BTSP_applied.any():
-            weights.append(copy.deepcopy(CA1s_for_weights.inputs["CA3_PCs"]["w"]))
-            steps.append(len(CA1s_for_weights.history["t"]))
+        if Pyrs_for_weights.BTSP_applied.any():
+            weights.append(copy.deepcopy(Pyrs_for_weights.inputs["PCs"]["w"]))
+            steps.append(len(Pyrs_for_weights.history["t"]))
 
     BTSP_steps = np.asarray(BTSP_steps)
     print(
@@ -337,7 +335,7 @@ def learn_openfield_BTSP(
     if record_weights_at_BTSP:
         weights_at_BTSP = {"weights": np.asarray(weights), "steps": steps}
 
-    return CA1s, weights_at_BTSP
+    return Pyrs, weights_at_BTSP
 
 
 ### 2D (T-MAZE) FUNCTIONS ###
@@ -345,25 +343,25 @@ def learn_openfield_BTSP(
 
 def plot_T_maze(
     Ag: agent.TAgent,
-    CA3_PCs: riab_neurons.PlaceCells,
-    CA1s_or_ECs: learning_neurons.BTSPLayer | object_neurons.ObjectCells,
+    PCs: riab_neurons.PlaceCells,
+    Pyrs_or_Objs: learning_neurons.BTSPLayer | object_neurons.ObjectCells,
     method: str = "groundtruth",
     autosave: bool | None = None,
 ):
     """
-    plot_T_maze(Ag, CA3_PCs, CA1s_or_ECs)
+    plot_T_maze(Ag, PCs, Pyrs_or_Objs)
 
     Plot the T-maze environment:
         (1) Agent trajectories,
-        (2) CA3 place cell locations, and
-        (3) CA1 or EC overlayed rate maps.
+        (2) Place cell locations, and
+        (3) Pyr. or Obj. overlayed rate maps.
 
     Args:
     - Ag (agent.Agent): Agent.
-    - CA3_PCs (riab_neurons.PlaceCells): CA3 place cells.
-    - CA1s_or_ECs (learning_neurons.BTSPLayer or object_neurons.ObjectCells):
-        CA1s layer.
-    - method (str, optional): Method to use for plotting the CA1 rate map. Default
+    - PCs (riab_neurons.PlaceCells): Place cells.
+    - Pyrs_or_Objs (learning_neurons.BTSPLayer or object_neurons.ObjectCells):
+        Pyrs layer.
+    - method (str, optional): Method to use for plotting the Pyr. rate map. Default
         is "groundtruth".
     - autosave (bool, optional): Whether to autosave the figure. If None, the global
         autosave setting for ratinabox is used. Default is None.
@@ -380,11 +378,11 @@ def plot_T_maze(
     Ag.plot_trajectories(scale_cmap_per=False, s_2D=5, alpha=0.3, sub_ax=ax1D[0])
     ax1D[0].set_title("Trajectories")
 
-    # Plot CA3 place cell locations on T-maze
+    # Plot place cell locations on T-maze
     plot_fcts.plot_overlayed_rate_maps(
-        CA3_PCs, sub_ax=ax1D[1], method="max", colorbar=False
+        PCs, sub_ax=ax1D[1], method="max", colorbar=False
     )
-    CA3_PCs.plot_place_cell_locations(sub_ax=ax1D[1])
+    PCs.plot_place_cell_locations(sub_ax=ax1D[1])
     ax1D[1].scatter(
         *Ag.target_position,
         marker=".",
@@ -392,21 +390,21 @@ def plot_T_maze(
         s=18,
         zorder=5,
     )
-    ax1D[1].set_title("CA3 rate maps")
+    ax1D[1].set_title("Place cell rate maps")
 
-    # Plot CA1 rate map on T-maze
-    if isinstance(CA1s_or_ECs, learning_neurons.BTSPLayer):
-        CA1s_or_ECs.plot_rate_map(ax=ax1D[2], method=method)
-        title = f"{CA1s_or_ECs.name.replace('_', ' ')} rate map"  # type: ignore[attr-defined]
+    # Plot Pyr. rate map on T-maze
+    if isinstance(Pyrs_or_Objs, learning_neurons.BTSPLayer):
+        Pyrs_or_Objs.plot_rate_map(ax=ax1D[2], method=method)
+        title = f"{Pyrs_or_Objs.name.replace('_', ' ')} rate map"  # type: ignore[attr-defined]
     else:
         plot_fcts.plot_overlayed_rate_maps(
-            CA1s_or_ECs,
+            Pyrs_or_Objs,
             sub_ax=ax1D[2],
             method="max",
             colorbar=False,
             replot_env=True,
         )
-        title = "EC rate map"
+        title = "Obj. rate map"
     ax1D[2].scatter(
         *Ag.target_position,
         marker=".",
@@ -422,7 +420,7 @@ def plot_T_maze(
 
 
 def learn_T_maze_BTSP(
-    CA1s: learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | None = None,
+    Pyrs: learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | None = None,
     num_rewards: int = 200,
     max_num_steps: int = 10000,
     weight_recording_freq: int = 100,
@@ -446,9 +444,9 @@ def learn_T_maze_BTSP(
     Args:
     - env_params (dict, optional): Parameters for the environment. Default is None.
     - agent_params (dict, optional): Parameters for the agent. Default is None.
-    - CA3_PC_params (dict, optional): Parameters for the CA3 place cells. Default is
+    - PC_params (dict, optional): Parameters for the place cells. Default is
         None.
-    - CA1_params (dict, optional): Parameters for the CA1 neurons. Default is None.
+    - Pyr_params (dict, optional): Parameters for the Pyr. neurons. Default is None.
     - num_rewards (int, optional): Target number of rewards to reach. Default is 200.
     - max_steps (int, optional): Maximum number of steps to run. Default is 10000.
     - weight_recording_freq (int, optional): Frequency at which to record weights.
@@ -462,12 +460,12 @@ def learn_T_maze_BTSP(
     - **init_kwargs: Keyword arguments for init_2D_env_objects().
 
     Returns:
-    - CA1s (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
-        CA1 neuron layer
+    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
+        Pyr. neuron layer
     """
 
-    if CA1s is None:
-        CA1s = init_2D_env_objects(
+    if Pyrs is None:
+        Pyrs = init_2D_env_objects(
             two_compartment=two_compartment,
             environment="tmaze",
             autosave=autosave,
@@ -475,34 +473,34 @@ def learn_T_maze_BTSP(
             **init_kwargs,
         )
 
-    _, Ag, CA3_PCs, CA1s, ECs = extract_objects_from_CA1s(CA1s)
+    _, Ag, PCs, Pyrs, Objs = extract_objects_from_Pyrs(Pyrs)
 
     if two_compartment:
-        CA1s.set_BTSP_learn(soma=True, dend=False)
-        CA1s_for_weights = CA1s.SomaCompartment
-        CA1s.set_learn(soma=use_Hebbian, dend=False, inhibit=False)
+        Pyrs.set_BTSP_learn(soma=True, dend=False)
+        Pyrs_for_weights = Pyrs.SomaCompartment
+        Pyrs.set_learn(soma=use_Hebbian, dend=False, inhibit=False)
     else:
-        CA1s.set_BTSP_learn()
-        CA1s_for_weights = CA1s
-        CA1s.set_learn(use_Hebbian)
+        Pyrs.set_BTSP_learn()
+        Pyrs_for_weights = Pyrs
+        Pyrs.set_learn(use_Hebbian)
 
     # run learning
     restarted = False
-    CA1_weights = [CA1s_for_weights.inputs[CA3_PCs.name]["w"].copy()]  # type: ignore[attr-defined]
+    Pyr_weights = [Pyrs_for_weights.inputs[PCs.name]["w"].copy()]  # type: ignore[attr-defined]
     break_in_n = -1
     for i in tqdm(range(max_num_steps)):
         Ag.update(speed_fact=3, drift_to_random_strength_ratio=1)
 
-        if ECs is not None:
-            ECs.update()
+        if Objs is not None:
+            Objs.update()
 
-        CA3_PCs.update()
+        PCs.update()
 
         # check whether a restart BTSP signal should go out
         if not two_compartment:
             BTSP_targets = []
-            if restarted and CA1s.n > 1:  # type: ignore[attr-defined]
-                BTSP_targets = [CA1s.n - 1]  # type: ignore[attr-defined]
+            if restarted and Pyrs.n > 1:  # type: ignore[attr-defined]
+                BTSP_targets = [Pyrs.n - 1]  # type: ignore[attr-defined]
 
             # check whether a target BTSP signal should go out
             if (
@@ -516,11 +514,11 @@ def learn_T_maze_BTSP(
 
         # run update
         if two_compartment:
-            CA1s.update()
+            Pyrs.update()
         else:
-            CA1s.update(BTSP_targets=BTSP_targets)
+            Pyrs.update(BTSP_targets=BTSP_targets)
         if not i % weight_recording_freq:
-            CA1_weights.append(CA1s_for_weights.inputs[CA3_PCs.name]["w"].copy())  # type: ignore[attr-defined]
+            Pyr_weights.append(Pyrs_for_weights.inputs[PCs.name]["w"].copy())  # type: ignore[attr-defined]
 
         if break_in_n < 0:
             if len(Ag.target_df) > num_rewards:
@@ -540,15 +538,15 @@ def learn_T_maze_BTSP(
     Ag.log_trajectory_stats_to_date(log_as_time=False)
 
     if two_compartment:
-        plot_T_maze(Ag, CA3_PCs, ECs, autosave=autosave, method="history")  # type: ignore[arg-type]
+        plot_T_maze(Ag, PCs, Objs, autosave=autosave, method="history")  # type: ignore[arg-type]
     else:
-        plot_T_maze(Ag, CA3_PCs, CA1s, autosave=autosave, method="groundtruth")  # type: ignore[arg-type]
+        plot_T_maze(Ag, PCs, Pyrs, autosave=autosave, method="groundtruth")  # type: ignore[arg-type]
 
-    CA1s.plot_rate_maps_across_learning()  # type: ignore[attr-defined]
+    Pyrs.plot_rate_maps_across_learning()  # type: ignore[attr-defined]
 
-    plot_fcts.plot_time_series_with_BTSP_events(CA1s)  # type: ignore[arg-type]
+    plot_fcts.plot_time_series_with_BTSP_events(Pyrs)  # type: ignore[arg-type]
 
-    return CA1s
+    return Pyrs
 
 
 ### 1D (LINEAR TRACK) FUNCTIONS ###
@@ -556,27 +554,31 @@ def learn_T_maze_BTSP(
 
 def plot_1D_spatial_info(
     Ag: agent.ResetableAgent,
-    CA3_PCs: riab_neurons.PlaceCells,
-    CA1s: learning_neurons.BTSPLayer,
-    CA1_weights: list[np.ndarray[tuple[int, int], np.dtype[np.float64]]] | None = None,
+    PCs: riab_neurons.PlaceCells,
+    Pyrs: learning_neurons.BTSPLayer,
+    Pyr_weights: list[np.ndarray[tuple[int, int], np.dtype[np.float64]]] | None = None,
+    Pyrs_norm_by: str | float | None = None,
     autosave: bool | None = None,
 ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
     """
-    plot_1D_spatial_info(Ag, CA3_PCs, CA1s)
+    plot_1D_spatial_info(Ag, PCs, Pyrs)
 
     Plot spatial info for a 1D environment experiment:
         (1) Environment,
-        (2) CA3 place cell locations,
-        (3) CA1 overlayed rate map,
-        (4, optional) CA1 input weights (if provided),
-        (5-7) CA1 rate map across learning
+        (2) Place cell locations,
+        (3) Pyr. overlayed rate map,
+        (4, optional) Pyr. input weights (if provided),
+        (5-7) Pyr. rate map across learning
         (8) Environment (again).
 
     Args:
     - Ag (agent.ResetableAgent): Agent.
-    - CA3_PCs (riab_neurons.PlaceCells): CA3 place cells.
-    - CA1s (learning_neurons.BTSPLayer): CA1 neurons.
-    - CA1_weights (list): List of CA1 weights with shape (num_epochs, num_cells, num_PCs).
+    - PCs (riab_neurons.PlaceCells): Place cells.
+    - Pyrs (learning_neurons.BTSPLayer): Pyr. neurons.
+    - Pyr_weights (list): List of Pyr. weights with shape (num_epochs, num_cells, num_PCs).
+        Default is None.
+    - Pyrs_norm_by (str, optional): Normalization method for rate maps. If None,
+        default is used. Default is None.
     - autosave (bool, optional): Whether to autosave the figure. If None, the global
         autosave setting for ratinabox is used. Default is None.
 
@@ -587,7 +589,7 @@ def plot_1D_spatial_info(
 
     # 7 or 8 plots
     height_ratios = [1, 1.2, 1.5, 1, 1, 1, 1]
-    if CA1_weights is not None:
+    if Pyr_weights is not None:
         height_ratios.insert(3, 2)  # add height ratio for weights
     gridspec_kw = {"height_ratios": height_ratios}
     figsize = plot_util.get_figsize(sum(height_ratios), squat_height=True)
@@ -603,36 +605,34 @@ def plot_1D_spatial_info(
     # Plot environment
     plot_fcts.plot_1D_reset_environment(Ag, sub_ax=ax1D[0], autosave=False)
 
-    # Plot CA3 place cell locations
-    CA3_PCs.plot_place_cell_locations(
-        sub_ax=ax1D[1], autosave=False, plot_objects=False
-    )
+    # Plot place cell locations
+    PCs.plot_place_cell_locations(sub_ax=ax1D[1], autosave=False, plot_objects=False)
     plot_fcts.plot_overlayed_rate_maps(
-        CA3_PCs, sub_ax=ax1D[1], method="max", autosave=False
+        PCs, sub_ax=ax1D[1], method="max", autosave=False
     )
     ymin, ymax = ax1D[1].get_ylim()
     ymin = min(ymin, 0)
     ax1D[1].set_ylim((ymin - 0.05 * (ymax - ymin)), ymax)
-    ax1D[1].set_title("CA3 place cell locations")
+    ax1D[1].set_title("Place cell locations")
 
-    # Plot CA3 rate map
-    CA3_PCs.plot_rate_map(chosen_neurons="all", ax=ax1D[2], autosave=False)
-    ax1D[2].set_title("CA3 rate map")
+    # Plot place cell rate map
+    PCs.plot_rate_map(chosen_neurons="all", ax=ax1D[2], autosave=False)
+    ax1D[2].set_title("Place cell rate map")
 
-    # Plot CA1 weights
+    # Plot Pyr. weights
     i = 3
-    if CA1_weights is not None:
+    if Pyr_weights is not None:
         plot_fcts.plot_1D_input_place_cell_weights(
-            np.asarray(CA1_weights),
-            CA3_PCs,
+            np.asarray(Pyr_weights),
+            PCs,
             sub_ax=ax1D[i],
             autosave=False,
         )
         i += 1
 
-    # Plot CA1 rate maps across learning
+    # Plot Pyr. rate maps across learning
     plot_fcts.plot_1D_rate_map_across_learning(
-        Ag, CA1s, axes=ax1D[i : i + 3], autosave=False  # type: ignore[arg-type]
+        Ag, Pyrs, axes=ax1D[i : i + 3], norm_by=Pyrs_norm_by, autosave=False  # type: ignore[arg-type]
     )
 
     # Plot environment
@@ -651,22 +651,25 @@ def plot_1D_spatial_info(
 
 def plot_1D_time_info(
     Ag: agent.ResetableAgent,
-    CA3_PCs: riab_neurons.PlaceCells,
-    CA1s: learning_neurons.BTSPLayer,
+    PCs: riab_neurons.PlaceCells,
+    Pyrs: learning_neurons.BTSPLayer,
+    Pyrs_norm_by: str | float | None = None,
     autosave: bool | None = None,
 ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
     """
-    plot_1D_time_info(Ag, CA3_PCs, CA1s)
+    plot_1D_time_info(Ag, PCs, Pyrs)
 
     Plot time info for a 1D experiment:
         (1) Trajectories,
-        (2) CA3 rate timeseries,
-        (3) CA1 rate timeseries
+        (2) Place cell rate timeseries,
+        (3) Pyr. rate timeseries
 
     Args:
     - Ag (agent.ResetableAgent): Agent.
-    - CA3_PCs (riab_neurons.PlaceCells): CA3 place cells.
-    - CA1s (learning_neurons.BTSPLayer): CA1 neurons.
+    - PCs (riab_neurons.PlaceCells): Place cells.
+    - Pyrs (learning_neurons.BTSPLayer): Pyr. neurons.
+    - Pyrs_norm_by (str, optional): Normalization method for rate maps. If None,
+        default is used. Default is None.
     - autosave (bool, optional): Whether to autosave the figure. If None, the global
         autosave setting for ratinabox is used. Default is None.
 
@@ -676,7 +679,7 @@ def plot_1D_time_info(
     """
 
     # 3 plots
-    height_ratios = [1.5, 1, 1.1**CA1s.n]
+    height_ratios = [1.5, 1, 1.1**Pyrs.n]
     gridspec_kw = {"height_ratios": height_ratios}
     figsize = plot_util.get_figsize(sum(height_ratios), squat_height=True)
     fig, axes = plt.subplots(
@@ -694,24 +697,28 @@ def plot_1D_time_info(
     )
     ax1D[0].set_title("Trajectories")
 
-    # Plot CA3 rate timeseries
-    CA3_PCs.plot_rate_timeseries(
+    # Plot place cell rate timeseries
+    PCs.plot_rate_timeseries(
         chosen_neurons="all", spikes=False, sub_ax=ax1D[1], autosave=False
     )
-    ax1D[1].set_title("CA3 rate timeseries")
+    ax1D[1].set_title("Place cell rate timeseries")
 
-    # Plot CA1 rate timeseries
-    CA1s.plot_rate_timeseries(
+    # Plot Pyr. rate timeseries
+    kwargs = dict()
+    if Pyrs_norm_by is not None:
+        kwargs["norm_by"] = Pyrs_norm_by
+    Pyrs.plot_rate_timeseries(
         chosen_neurons="all",
         spikes=True,
         sub_ax=ax1D[2],
         shift=-10,
         overlap=1,
         autosave=False,
+        **kwargs,
     )
-    ax1D[2].set_title("CA1 rate timeseries")
+    ax1D[2].set_title("Pyr. rate timeseries")
 
-    plot_fcts.mark_target_and_reset_points(Ag, CA1s, sub_ax=ax1D[2])
+    plot_fcts.mark_target_and_reset_points(Ag, Pyrs, sub_ax=ax1D[2])
 
     for sub_ax in ax1D[:-1]:
         sub_ax.set_xlabel("")
@@ -724,8 +731,8 @@ def plot_1D_time_info(
 def learn_1D_BTSP(
     env_params: dict[str, Any] | None = None,
     agent_params: dict[str, Any] | None = None,
-    CA3_PC_params: dict[str, Any] | None = None,
-    CA1_params: dict[str, Any] | None = None,
+    PC_params: dict[str, Any] | None = None,
+    Pyr_params: dict[str, Any] | None = None,
     num_rewards: int = 10,
     max_num_steps: int = 5000,
     weight_recording_freq: int = 100,
@@ -747,9 +754,9 @@ def learn_1D_BTSP(
     Args:
     - env_params (dict, optional): Parameters for the environment. Default is None.
     - agent_params (dict, optional): Parameters for the agent. Default is None.
-    - CA3_PC_params (dict, optional): Parameters for the CA3 place cells.
+    - PC_params (dict, optional): Parameters for the place cells.
         Default is None.
-    - CA1_params (dict, optional): Parameters for the CA1 neurons. Default is None.
+    - Pyr_params (dict, optional): Parameters for the Pyr. neurons. Default is None.
     - num_rewards (int, optional): Target number of rewards to reach.
         Default is 200.
     - max_num_steps (int, optional): Maximum number of steps to run.
@@ -766,8 +773,8 @@ def learn_1D_BTSP(
         autosave setting for ratinabox is used. Default is None.
 
     Returns:
-    - CA1s (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
-        CA1 neuron layer
+    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
+        Pyr. neuron layer
     - spatial_axes (2D np.ndarray): Array of subplots with 1D environment experiment
         info plotted, with shape (8, 1). See run_manager.plot_1D_spatial_info() for
         details.
@@ -781,41 +788,41 @@ def learn_1D_BTSP(
     agent_params = agent_params or params_util.get_agent_params(environment="linear")
     Ag = agent.ResetableAgent(Env, params=agent_params)
 
-    CA3_PC_params = CA3_PC_params or params_util.get_CA3_PC_params(environment="linear")
-    CA3_PCs = riab_neurons.PlaceCells(Ag, params=CA3_PC_params)
+    PC_params = PC_params or params_util.get_PC_params(environment="linear")
+    PCs = riab_neurons.PlaceCells(Ag, params=PC_params)
 
-    if CA1_params is None:
-        CA1_params = params_util.get_CA1_params(
+    if Pyr_params is None:
+        Pyr_params = params_util.get_Pyr_params(
             environment="linear",
             BTSP=True,
             NMDA=two_compartment,
             two_compartment=two_compartment,
         )
 
-    CA1_params["input_layers"] = [CA3_PCs]
+    Pyr_params["input_layers"] = [PCs]
     if two_compartment:
-        CA1s = two_comp_neurons.TwoCompLayer(Ag, params=CA1_params)
+        Pyrs = two_comp_neurons.TwoCompLayer(Ag, params=Pyr_params)
     else:
-        CA1s = learning_neurons.BTSPLayer(Ag, params=CA1_params)
-    CA1s.set_learn(use_Hebbian)
-    CA1s.set_BTSP_learn()
+        Pyrs = learning_neurons.BTSPLayer(Ag, params=Pyr_params)
+    Pyrs.set_learn(use_Hebbian)
+    Pyrs.set_BTSP_learn()
 
     # run learning
     restarted = False
-    CA3_PCs_name = CA3_PCs.name  # type: ignore[attr-defined]
-    CA1s_n = CA1s.n  # type: ignore[attr-defined]
-    CA1_weights = [CA1s.inputs[CA3_PCs_name]["w"].copy()]
+    PCs_name = PCs.name  # type: ignore[attr-defined]
+    Pyrs_n = Pyrs.n  # type: ignore[attr-defined]
+    Pyr_weights = [Pyrs.inputs[PCs_name]["w"].copy()]
     break_in_n = -1
     for i in tqdm(range(max_num_steps)):
         Ag.update()
-        CA3_PCs.update()
+        PCs.update()
 
         # check whether a restart BTSP signal should go out
         if not two_compartment:
             BTSP_targets = list()
             if len(Ag.target_df) == BTSP_after_num_target_reaches + 1:
-                if restarted and CA1s_n > 1:
-                    BTSP_targets = [CA1s_n - 1]
+                if restarted and Pyrs_n > 1:
+                    BTSP_targets = [Pyrs_n - 1]
 
                 # check whether a target BTSP signal should go out
                 if Ag.reached_target:
@@ -826,11 +833,11 @@ def learn_1D_BTSP(
 
         # run update
         if two_compartment:
-            CA1s.update()
+            Pyrs.update()
         else:
-            CA1s.update(BTSP_targets=BTSP_targets)
+            Pyrs.update(BTSP_targets=BTSP_targets)
         if not i % weight_recording_freq:
-            CA1_weights.append(CA1s.inputs[CA3_PCs_name]["w"].copy())
+            Pyr_weights.append(Pyrs.inputs[PCs_name]["w"].copy())
 
         if break_in_n < 0:
             if len(Ag.target_df) > num_rewards:
@@ -849,43 +856,41 @@ def learn_1D_BTSP(
     Ag.log_trajectory_stats_to_date()
     Ag.log_trajectory_stats_to_date(log_as_time=False)
 
-    spatial_axes = plot_1D_spatial_info(
-        Ag, CA3_PCs, CA1s, CA1_weights, autosave=autosave
-    )
+    spatial_axes = plot_1D_spatial_info(Ag, PCs, Pyrs, Pyr_weights, autosave=autosave)
 
-    time_axes = plot_1D_time_info(Ag, CA3_PCs, CA1s, autosave=autosave)
+    time_axes = plot_1D_time_info(Ag, PCs, Pyrs, autosave=autosave)
 
-    return CA1s, spatial_axes, time_axes
+    return Pyrs, spatial_axes, time_axes
 
 
-def plot_interleaved_openfield_rate_maps(CA1s, ECs, num_cols=10):
+def plot_interleaved_openfield_rate_maps(Pyrs, Objs, num_cols=10):
     """
-    plot_interleaved_openfield_rate_maps(CA1s, ECs)
+    plot_interleaved_openfield_rate_maps(Pyrs, Objs)
 
-    Plot interleaved open field rate maps for CA1 neuron somata and the EC neurons that
-    target their dendrites.
+    Plot interleaved open field rate maps for Pyr. neuron somata and the object neurons
+    thattarget their dendrites.
 
     Rate maps are computed theoretically based on place cell inputs.
 
     Args:
-    - CA1s (learning_neurons.BTSPLayer): CA1 neurons.
-    - ECs (object_neurons.ObjectCells): EC neurons.
+    - Pyrs (learning_neurons.BTSPLayer): Pyr. neurons.
+    - Objs (object_neurons.ObjectCells): Object neurons.
     """
 
-    if CA1s.n != ECs.n:
-        raise ValueError("CA1s and ECs should have the same number of neurons.")
+    if Pyrs.n != Objs.n:
+        raise ValueError("Pyrs and Objs should have the same number of neurons.")
 
-    num_cols = min(10, ECs.n)
-    num_rows = int(np.ceil(ECs.n / num_cols)) * 2
+    num_cols = min(10, Objs.n)
+    num_rows = int(np.ceil(Objs.n / num_cols)) * 2
 
     _, axes = plt.subplots(
         num_rows, num_cols, figsize=(1.5 * num_cols, 1.5 * num_rows), squeeze=False
     )
 
-    ECs.plot_rate_map(ax=axes[::2].ravel()[: ECs.n], no_legend=True)
+    Objs.plot_rate_map(ax=axes[::2].ravel()[: Objs.n], no_legend=True)
     plot_fcts.plot_2D_input_place_cell_weights(
-        CA1s.SomaCompartment,
-        ax=axes[1::2].ravel()[: ECs.n],
+        Pyrs.SomaCompartment,
+        ax=axes[1::2].ravel()[: Objs.n],
         alpha=0.5,
         plot_BTSP_events=True,
         no_legend=True,
@@ -895,6 +900,6 @@ def plot_interleaved_openfield_rate_maps(CA1s, ECs, num_cols=10):
 
 
 if __name__ == "__main__":
-    CA1s, spatial_axes, time_axes = learn_1D_BTSP()
+    Pyrs, spatial_axes, time_axes = learn_1D_BTSP()
 
     breakpoint()

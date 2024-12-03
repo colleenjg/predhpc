@@ -608,7 +608,7 @@ def add_colorbars(axes, im, vmin=None, vmax=None, label=None, end_only=False):
 
     Args:
     - axes (list or np.ndarray): List or array of axes to add the colorbar to.
-    - im (mpl.image.AxesImage): Image to add the colorbar to.
+    - im (mpl.image.AxesImage): Image to add the colorbar(s) to.
     - vmin (float, optional): Minimum value. Default is None.
     - vmax (float, optional): Maximum value. Default is None.
     - label (str, optional): Label for the colorbar. Default is None.
@@ -628,12 +628,18 @@ def add_colorbars(axes, im, vmin=None, vmax=None, label=None, end_only=False):
     else:
         dividers = [make_axes_locatable(ax_row[-1]) for ax_row in axes]
 
+    if vmin is None:
+        vmin = im.get_array().min()
+    if vmax is None:
+        vmax = im.get_array().max()
+
     cbars = list()
     for divider in dividers:
         cax = divider.append_axes("right", size="5%", pad=0.05)
         cbar = plt.colorbar(im, cax=cax)
         cbar.ax.tick_params(length=0)
-        cbar.set_label(label, labelpad=-10)
+        if label is not None:
+            cbar.set_label(label, labelpad=-10)
 
         vmin_tick = np.around(vmin, 2)
         vmax_tick = np.around(vmax, 2)

@@ -225,18 +225,18 @@ def plot_trajectory_lengths(
 
 def mark_target_and_reset_points(
     Ag: "ResetableAgent",
-    CA1s: "riab_neurons.Neurons",
+    Pyrs: "riab_neurons.Neurons",
     sub_ax: plt.Axes,
     restore_xlims: bool = True,
 ):
     """
-    mark_target_and_reset_points(Ag, CA1s, sub_ax)
+    mark_target_and_reset_points(Ag, Pyrs, sub_ax)
 
     Add target and reset points to a timeseries plot.
 
     Args:
     - Ag (Agent): Agent for which to add target and reset points.
-    - CA1s (riab_neurons.Neurons): CA1 layer to plot.
+    - Pyrs (riab_neurons.Neurons): Pyr. layer to plot.
     - sub_ax (plt.Axes): Subplot to add target and reset points to.
     - restore_xlims (bool, optional): Whether to restore x limits. Default is True.
     """
@@ -257,8 +257,13 @@ def mark_target_and_reset_points(
         positions = positions[np.isfinite(positions)].astype(int)
 
         for t in positions:
+            if t == len(Pyrs.Agent.history["t"]):
+                if t - 1 in positions:
+                    continue
+                else:
+                    t = t - 1
             sub_ax.axvline(
-                CA1s.Agent.history["t"][t] / 60,
+                Pyrs.Agent.history["t"][t] / 60,
                 alpha=0.7,
                 zorder=-1,
                 lw=1,
@@ -841,16 +846,16 @@ def plot_property_at_BTSP_and_closest_to_target_steps(
 
 
 def plot_time_series_with_BTSP_events(
-    CA1s: "learning_neurons.BTSPLayer",
+    Pyrs: "learning_neurons.BTSPLayer",
     sub_ax: plt.Axes | None = None,
 ) -> plt.Axes:
     """
-    plot_time_series_with_BTSP_events(CA1s)
+    plot_time_series_with_BTSP_events(Pyrs)
 
-    Plot the time series of the CA1s layer with BTSP events marked.
+    Plot the time series of the Pyrs layer with BTSP events marked.
 
     Args:
-    - CA1s (learning_neurons.BTSPLayer): CA1s layer.
+    - Pyrs (learning_neurons.BTSPLayer): Pyrs layer.
     - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
         created. Default is None.
 
@@ -859,12 +864,12 @@ def plot_time_series_with_BTSP_events(
     """
 
     if sub_ax is None:
-        _, sub_ax = plt.subplots(figsize=(6, 1.2**CA1s.n))
+        _, sub_ax = plt.subplots(figsize=(6, 1.2**Pyrs.n))
 
-    CA1s.plot_rate_timeseries(chosen_neurons="all", spikes=True, sub_ax=sub_ax)
+    Pyrs.plot_rate_timeseries(chosen_neurons="all", spikes=True, sub_ax=sub_ax)
     lo, hi = sub_ax.get_ylim()
 
-    target_reached_step = CA1s.Agent.target_df["reached_step"].to_numpy()  # type: ignore[attr-defined]
+    target_reached_step = Pyrs.Agent.target_df["reached_step"].to_numpy()  # type: ignore[attr-defined]
     if np.isnan(target_reached_step[-1]):
         target_reached_step = target_reached_step[:-1]
     target_reached_step = target_reached_step.astype(int)
@@ -872,7 +877,7 @@ def plot_time_series_with_BTSP_events(
     for t in target_reached_step:
         y_hei = lo + (hi - lo) * 0.82
         sub_ax.scatter(
-            CA1s.Agent.history["t"][t] / 60,
+            Pyrs.Agent.history["t"][t] / 60,
             y_hei,
             marker=mpl_markers.MarkerStyle("o"),
             s=6,
@@ -881,17 +886,17 @@ def plot_time_series_with_BTSP_events(
         )
 
     # add distance from target below
-    all_positions = np.asarray(CA1s.Agent.history["pos"])
-    time_in_min = np.asarray(CA1s.Agent.history["t"]) / 60
+    all_positions = np.asarray(Pyrs.Agent.history["pos"])
+    time_in_min = np.asarray(Pyrs.Agent.history["t"]) / 60
     distances = np.linalg.norm(
-        CA1s.Agent.target_position - all_positions, ord=2, axis=1  # type: ignore[attr-defined]
+        Pyrs.Agent.target_position - all_positions, ord=2, axis=1  # type: ignore[attr-defined]
     )
     norm_dist = distances / distances.max()
     sub_ax.plot(time_in_min, -norm_dist, color="black", alpha=0.6, lw=1)
     sub_ax.set_ylim(-norm_dist.max() * 1.2, sub_ax.get_ylim()[1])
 
     sub_ax.set_title(
-        "CA1 time series with BTSP events (with proximity to target)", y=1.1
+        "Pyr. time series with BTSP events (with proximity to target)", y=1.1
     )
 
     return sub_ax
@@ -957,26 +962,29 @@ def plot_1D_reset_environment(
 
 def plot_1D_rate_map_across_learning(
     Ag: "ResetableAgent",
-    CA1s: "riab_neurons.Neurons",
+    Pyrs: "riab_neurons.Neurons",
     axes: np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]] | None = None,
     plot_proportion: float = 0.3,
     min_num_steps: int = 100,
+    norm_by: str | float | None = None,
     autosave: bool | None = None,
 ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
     """
-    plot_1D_rate_map_across_learning(Ag, CA1s)
+    plot_1D_rate_map_across_learning(Ag, Pyrs)
 
     Plot the rate map of a layer across learning from stimulated activity in the
     first, mid and final steps.
 
     Args:
     - Ag (Agent): Agent for which to plot the rate map.
-    - CA1s (riab_neurons.Neurons): CA1 layer to plot.
+    - Pyrs (riab_neurons.Neurons): Pyr. layer to plot.
     - axes (1 or 2D np.ndarray, optional): Array of subplots to plot on (3 total).
         Default is None.
     - plot_proportion (float, optional): Proportion of the total steps to plot.
         Default is 0.3.
     - min_num_steps (int, optional): Minimum number of steps to plot. Default is 100.
+    - norm_by (str, optional): Normalization method for rate maps. If None, default is
+        used. Default is None.
     - autosave (bool, optional): Whether to save the figure. Default is None.
 
     Returns:
@@ -999,7 +1007,11 @@ def plot_1D_rate_map_across_learning(
             f"Number of axes must match number of start points ({len(map_start_pts)})."
         )
 
-    suptitle = f"CA1 rate maps across learning: "
+    kwargs = dict()
+    if norm_by is not None:
+        kwargs["norm_by"] = norm_by
+
+    suptitle = f"Pyramidal rate maps across learning: "
 
     dt = float(Ag.dt)
     for s, start in enumerate(map_start_pts):
@@ -1015,7 +1027,7 @@ def plot_1D_rate_map_across_learning(
         t_end = min(Ag.num_steps_total + 1, t_start + num_seconds_to_plot)
 
         no_legend = s != len(map_start_pts) - 1
-        CA1s.plot_rate_map(
+        Pyrs.plot_rate_map(
             chosen_neurons="all",
             ax=ax1D[s],
             t_start=t_start,  # type: ignore[type-arg]
@@ -1025,6 +1037,7 @@ def plot_1D_rate_map_across_learning(
             method="history",
             autosave=False,
             no_legend=no_legend,
+            **kwargs,
         )
 
         lead = suptitle if s == 0 else ""
@@ -1040,7 +1053,7 @@ def plot_1D_rate_map_across_learning(
             ax1D[s].set_ylabel("")
 
     fig = ax1D[0].figure
-    plot_util.save_figure(fig, f"{CA1s.name}_1D_rate_map_across_learning", save=autosave)  # type: ignore[attr-defined]
+    plot_util.save_figure(fig, f"{Pyrs.name}_1D_rate_map_across_learning", save=autosave)  # type: ignore[attr-defined]
 
     return axes
 
@@ -1155,7 +1168,7 @@ def plot_previous_1D_input_place_cell_weights(
     """
     plot_previous_1D_input_place_cell_weights(weights_t, weights, input_centres)
 
-    Plots the input weights from CA3 place cells to a CA1 soma, across time, for a
+    Plots the input weights from place cells to a Pyr. soma, across time, for a
     linear track environment.
 
     Args:
@@ -1235,7 +1248,7 @@ def plot_previous_1D_input_place_cell_weights(
 
 def plot_2D_input_place_cell_weights(
     target_neurons: "riab_neurons.Neurons",
-    PCs_input_name: str = "CA3_PCs",
+    PCs_input_name: str = "PCs",
     place_weights: np.ndarray[tuple[int, int], np.dtype[np.float64]] | None = None,
     chosen_neurons: (
         str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
@@ -1372,10 +1385,13 @@ def plot_2D_input_place_cell_weights(
         ax, im, vmin=vmin, vmax=vmax, label="Weights", end_only=single_colorbar
     )
 
-    vmin_tick = np.around(vmin, 2)
-    vmax_tick = np.around(vmax, 2)
+    v_ticks = [np.around(vmin, 2), np.around(vmax, 2)]
     for cbar in cbars:
-        cbar.set_ticklabels([f"{vmin_tick:.1f}", f"{vmax_tick:.1f}"])
+        if np.diff(v_ticks) < 0.1:
+            tick_labels = [f"{tick:.2f}" for tick in v_ticks]
+        else:
+            tick_labels = [f"{tick:.1f}" for tick in v_ticks]
+        cbar.set_ticklabels(tick_labels)
 
     fig = ax1D[-1].figure
 
@@ -1465,7 +1481,7 @@ def plot_series_of_2D_input_place_cell_weights(
 
 def plot_place_cell_inputs_over_time(
     target_neurons: "riab_neurons.Neurons",
-    PCs_input_name: str = "CA3_PCs",
+    PCs_input_name: str = "PCs",
     filter_key: str | None = None,
     plot_position: bool = True,
     downsample_pos: int = 1,
@@ -1482,7 +1498,7 @@ def plot_place_cell_inputs_over_time(
     Args:
     - target_neurons (riab_neurons.Neurons): Target neurons.
     - PCs_input_name (str, optional): Name of the input place cell layer. Default is
-        "CA3_PCs".
+        "PCs".
     - filter_key (str, optional): Filter key to use. Default is None.
     - plot_position (bool, optional): Whether to plot the agent's position.
         Default is True.
@@ -1661,13 +1677,7 @@ def plot_overlayed_rate_maps(
         im = sub_ax.imshow(rate_map, extent=ex, zorder=0, cmap="inferno")
 
         if colorbar == True:
-            cax = sub_ax.figure.append_axes("right", size="5%", pad=0.05)  # type: ignore[has-method]
-            cbar = plt.colorbar(im, cax=cax)
-            vmin, vmax = rate_map.min(), rate_map.max()
-            lim_v = vmax if vmax > -vmin else vmin
-            cbar.set_ticks([0, lim_v])
-            cbar.set_ticklabels([0, round(lim_v, 1)])
-            cbar.outline.set_visible(False)
+            plot_util.add_colorbars(axes=sub_ax, im=im, label="")
 
     # PLOT 1D
     elif NeuronLayer.Agent.Environment.dimensionality == "1D":

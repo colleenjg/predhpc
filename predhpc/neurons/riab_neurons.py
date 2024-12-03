@@ -31,6 +31,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
     Adds the following methods to a ratinabox.Neurons.Neurons object:
     • self.get_chosen_neurons()
     • self.get_plotting_times()
+    • self.get_min_max_firingrates()
     • self.get_oscillation_df()
     • self.log_oscillation_stats()
     • self.plot_oscillations()
@@ -102,6 +103,35 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         t = t[startid : endid + 1]
 
         return t, startid, endid
+
+    def get_min_max_firingrates(
+        self,
+        t_start: float | None = None,
+        t_end: float | None = None,
+    ):
+        """
+        self.get_min_max_firingrates()
+
+        Obtain the minimum and maximum firing rates of the layer.
+
+        Args:
+        - t_start (float, optional): Start time for obtaining firingrate min and max.
+            Default is None.
+        - t_end (float, optional): Stop time for obtaining firingrate min and max.
+            Default is None.
+
+        Returns:
+        - min_firingrate (float): Minimum firing rate.
+        - max_firingrate (float): Maximum firing rate.
+        """
+
+        _, startid, endid = self.get_plotting_times(t_start, t_end)
+        firingrates = np.asarray(self.history["firingrate"])[startid : endid + 1]
+
+        min_firingrate = np.min(firingrates)
+        max_firingrate = np.max(firingrates)
+
+        return min_firingrate, max_firingrate
 
     def get_oscillation_df(
         self,

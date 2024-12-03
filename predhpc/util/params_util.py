@@ -1,14 +1,14 @@
 from predhpc.util import ext_util
 
-SCALE_LINEAR = 3.0
-SCALE_TMAZE = 2.0
+SCALE_LINEAR = 4.0
+SCALE_TMAZE = 3.0
 SCALE = 1.0
 DT = 0.03
 
-EC_COLOR = "#22772E"  # dark green
-CA3_COLOR = "#99193A"  # dark red
-CA1_SOMA_COLOR = "#3D3D79"  # dark purple
-CA1_DEND_COLOR = "#8787C9"  # light purple
+OBJ_COLOR = "#22772E"  # dark green
+PC_COLOR = "#99193A"  # dark red
+PYR_SOMA_COLOR = "#3D3D79"  # dark purple
+PYR_DEND_COLOR = "#8787C9"  # light purple
 
 LINEAR_SIGMOID_ACTIVATION_FUNCTION = ext_util.get_standard_sigmoid_params(
     min_fr=0.0, max_fr=10.0, mid_x=6.0, width_x=8.0
@@ -73,6 +73,7 @@ def get_env_params(scale=None, environment="linear", **kwargs):
         env_params = {
             "dimensionality": "1D",
             "scale": scale,
+            "boundary_conditions": "periodic",
         }
 
     elif environment == "tmaze":
@@ -162,123 +163,123 @@ def get_agent_params(dt=DT, scale=None, environment="linear", **kwargs):
     return agent_params
 
 
-def get_EC_params(n=None, environment="linear", vector=False, **kwargs):
+def get_Obj_params(n=None, environment="linear", vector=False, **kwargs):
     """
-    get_EC_params()
+    get_Obj_params()
 
-    Obtain default parameters to initialise an entorhinal cortex (EC) layer
+    Obtain default parameters to initialise an object layer ("Obj")
     (object_neurons.ObjectCells).
 
     Args:
-    - n (int, optional): The number of EC neurons.
+    - n (int, optional): The number of object neurons.
     - environment (str, optional): The environment type
         (e.g., linear, tmaze, openfield).
     - vector (bool, optional): Whether to use a vector representation.
 
     Keyword args:
-    - **kwargs: Additional EC parameters to include (can overwrite default
+    - **kwargs: Additional Obj. layer parameters to include (can overwrite default
         parameters).
 
     Returns:
-    - EC_params (dict): EC initialisation parameters.
+    - Obj_params (dict): Obj. layer initialisation parameters.
     """
 
     environment = check_environment(environment)
 
-    EC_params = {
-        "name": "LEC",
+    Obj_params = {
+        "name": "Obj",
         "description": "gaussian",
         "min_fr": 0,
         "max_fr": 10,
-        "color": EC_COLOR,
+        "color": OBJ_COLOR,
     }
 
     if vector:
-        EC_params["line_of_sight"] = True
+        Obj_params["line_of_sight"] = True
 
     if environment == "linear":
-        EC_params["widths"] = 0.1
+        Obj_params["widths"] = 0.1
 
     elif environment == "tmaze":
-        EC_params["widths"] = 0.1
+        Obj_params["widths"] = 0.1
 
     elif environment == "openfield":
-        EC_params["widths"] = 0.07
+        Obj_params["widths"] = 0.07
 
     if n is not None:
-        EC_params["n"] = n
+        Obj_params["n"] = n
 
     for key, value in kwargs.items():
-        EC_params[key] = value
+        Obj_params[key] = value
 
-    return EC_params
+    return Obj_params
 
 
-def get_CA3_PC_params(n=None, environment="linear", **kwargs):
+def get_PC_params(n=None, environment="linear", **kwargs):
     """
-    get_CA3_PC_params()
+    get_PC_params()
 
-    Obtain default parameters to initialise CA3 place cells (riab_neurons.PlaceCells).
+    Obtain default parameters to initialise place cells (riab_neurons.PlaceCells).
 
     Args:
-    - n (int, optional): The number of CA3 place cells.
+    - n (int, optional): The number of place cells.
     - environment (str, optional): The environment type
         (e.g., linear, tmaze, openfield).
 
     Keyword args:
-    - **kwargs: Additional CA3 place cell parameters to include (can overwrite default
+    - **kwargs: Additional place cell parameters to include (can overwrite default
         parameters).
 
     Returns:
-    - CA3_PC_params (dict): CA3 place cell initialisation parameters.
+    - PC_params (dict): Place cell initialisation parameters.
     """
 
     environment = check_environment(environment)
 
-    CA3_PC_params = {
-        "name": "CA3_PCs",
+    PC_params = {
+        "name": "PCs",
         "description": "gaussian_threshold",
         "place_cell_centres": "uniform",
         "min_fr": 0,
         "max_fr": 10,
-        "color": CA3_COLOR,
+        "color": PC_COLOR,
         "widths": 0.2,
     }
 
     if environment == "linear":
         n = 32 if n is None else n
-        CA3_PC_params["n"] = n
+        PC_params["n"] = n
 
     elif environment == "tmaze":
         n = 177 if n is None else n  # 40 for one row, one column
-        CA3_PC_params["n"] = n
-        CA3_PC_params["wall_geometry"] = "line_of_sight"  # due to environment shape
+        PC_params["n"] = n
+        PC_params["wall_geometry"] = "line_of_sight"  # due to environment shape
 
     elif environment == "openfield":
         n = 30**2 if n is None else n
-        CA3_PC_params["n"] = n
-        CA3_PC_params["wall_geometry"] = "line_of_sight"  # due to environment shape
+        PC_params["n"] = n
+        PC_params["wall_geometry"] = "line_of_sight"  # due to environment shape
 
     if n is not None:
-        CA3_PC_params["n"] = n
+        PC_params["n"] = n
 
     for key, value in kwargs.items():
-        CA3_PC_params[key] = value
+        PC_params[key] = value
 
-    return CA3_PC_params
+    return PC_params
 
 
-def get_CA1_params(
+def get_Pyr_params(
     n=1, environment="linear", two_compartment=True, BTSP=True, NMDA=True, **kwargs
 ):
     """
-    get_CA1_params()
+    get_Pyr_params()
 
-    Obtain default parameters to initialise CA1 neurons (CA1)
+    Obtain default parameters to initialise Pyr. neurons (Pyr.)
     (learning_neurons.HebbianLayer).
 
     Args:
-    - n (int, optional): The number of CA1 neurons.
+    - n (int, optional): The number of Pyr. neurons.
     - environment (str, optional): The environment type
         (e.g., linear, tmaze, openfield).
     - two_compartment (bool, optional): Whether to use a two-compartment model.
@@ -288,7 +289,7 @@ def get_CA1_params(
         whether to include learning_neurons.NMDALayer parameters.
 
     Keyword args:
-    - **kwargs: Additional CA1 parameters to include (can overwrite default
+    - **kwargs: Additional Pyr. parameters to include (can overwrite default
         parameters).
 
     Raises:
@@ -296,7 +297,7 @@ def get_CA1_params(
     - ValueError: If two_compartment is True, but BTSP or NMDA is False.
 
     Returns:
-    - CA1_params (dict): CA1 initialisation parameters.
+    - Pyr_params (dict): Pyr. initialisation parameters.
     """
 
     environment = check_environment(environment)
@@ -307,8 +308,8 @@ def get_CA1_params(
         raise ValueError("Two-compartment model requires BTSP and NMDA.")
 
     if two_compartment:
-        CA1_params = {
-            "name": "CA1_TwoComp",
+        Pyr_params = {
+            "name": "Pyr_TwoComp",
             "n": n,
             "biases": None,
             "dend_init_weights_zero": False,
@@ -317,8 +318,8 @@ def get_CA1_params(
             "dend_activation_function": DEND_SIGMOID_ACTIVATION_FUNCTION,
             "inhibit_activation_function": LINEAR_SIGMOID_ACTIVATION_FUNCTION,
             "soma_apply_Ojas_rule": False,  # subtractive normalization may blow up with high clamping
-            "soma_color": CA1_SOMA_COLOR,
-            "dend_color": CA1_DEND_COLOR,
+            "soma_color": PYR_SOMA_COLOR,
+            "dend_color": PYR_DEND_COLOR,
             "inhibit_dend": True,
             "dend_first": True,
             "soma_single_BTSP": False,
@@ -346,10 +347,10 @@ def get_CA1_params(
             "lateral_tau": 0.3,
         }
     else:
-        CA1_params = {
-            "name": "CA1",
+        Pyr_params = {
+            "name": "Pyr",
             "n": n,
-            "color": CA1_SOMA_COLOR,
+            "color": PYR_SOMA_COLOR,
             "biases": None,
             "init_weights_zero": False,
             "w_init_loc": 0.1,
@@ -360,17 +361,19 @@ def get_CA1_params(
             "p": 1,
         }
         if BTSP:
-            CA1_params["name"] = "CA1_BTSP"
-            CA1_params["BTSP_lr_fact"] = 5e3  # very high clamp
-            CA1_params["BTSP_filter_tau"] = 4
-            CA1_params["BTSP_trend_tau"] = None  # BTSP kernel tau
+            Pyr_params["name"] = "Pyr_BTSP"
+            Pyr_params["BTSP_lr_fact"] = 5e3  # very high clamp
+            Pyr_params["BTSP_filter_tau"] = 4
+            Pyr_params["BTSP_trend_tau"] = None  # BTSP kernel tau
 
             if NMDA:
-                CA1_params["NMDA_activation_threshold"] = (
+                Pyr_params["NMDA_activation_threshold"] = (
                     2  # threshold for NMDA activation
                 )
-                CA1_params["BTSP_induction_threshold"] = 8  # sustainedrequired for BTSP
-                CA1_params["BTSP_plateau_length"] = (
+                Pyr_params["BTSP_induction_threshold"] = (
+                    8  # firing rate required for BTSP
+                )
+                Pyr_params["BTSP_plateau_length"] = (
                     0.12  # plateau length required for BTSP
                 )
 
@@ -384,27 +387,27 @@ def get_CA1_params(
 
     elif environment == "tmaze":
         if two_compartment:
-            CA1_params["soma_regularization_alpha"] = 0.3
-            CA1_params["inhibit_weight"] = 4.0
+            Pyr_params["soma_regularization_alpha"] = 0.3
+            Pyr_params["inhibit_weight"] = 4.0
         else:
-            CA1_params["regularization_alpha"] = 0.3
+            Pyr_params["regularization_alpha"] = 0.3
             if BTSP:
-                CA1_params["BTSP_lr_fact"] = 8e3
+                Pyr_params["BTSP_lr_fact"] = 8e3
                 if NMDA:
                     pass
 
     elif environment == "openfield":
         if two_compartment:
-            CA1_params["soma_regularization_alpha"] = 0.3
-            CA1_params["inhibit_weight"] = 4.0
+            Pyr_params["soma_regularization_alpha"] = 0.3
+            Pyr_params["inhibit_weight"] = 4.0
         else:
-            CA1_params["regularization_alpha"] = 0.3
+            Pyr_params["regularization_alpha"] = 0.3
             if BTSP:
-                CA1_params["BTSP_lr_fact"] = 5e3
+                Pyr_params["BTSP_lr_fact"] = 5e3
                 if NMDA:
                     pass
 
     for key, value in kwargs.items():
-        CA1_params[key] = value
+        Pyr_params[key] = value
 
-    return CA1_params
+    return Pyr_params

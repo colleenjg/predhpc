@@ -57,7 +57,7 @@ def get_divisors(n: int) -> list[int]:
     return divisors
 
 
-def get_minima_indices(data, min_pts_btw=20, minimum=None, single_direction=False):
+def get_minima_indices(data, min_pts_btw=50, minimum=None, single_direction=False):
     """
     get_minima_indices(data)
 
@@ -66,7 +66,7 @@ def get_minima_indices(data, min_pts_btw=20, minimum=None, single_direction=Fals
     Args:
     - data (1D np.ndarray): Data.
     - min_pts_btw (int, optional): Minimum number of points between minima.
-        Default is 20.
+        Default is 50.
     - minimum (float, optional): Minimum value to consider point a minimum.
         Default is None.
     - single_direction (bool, optional): If True, only counts minima in the provided
@@ -100,7 +100,7 @@ def get_minima_indices(data, min_pts_btw=20, minimum=None, single_direction=Fals
             - 1
             - get_minima_indices(
                 data[::-1],
-                min_pts_btw=min_pts_btw,
+                min_pts_btw=0,
                 minimum=minimum,
                 single_direction=True,
             )
@@ -114,9 +114,13 @@ def get_minima_indices(data, min_pts_btw=20, minimum=None, single_direction=Fals
 
     if len(minimum_indices) and min_pts_btw > 1:
         keep = np.ones_like(minimum_indices, dtype=bool)
-        for i in np.argsort(data[minimum_indices]):
+        for i in np.argsort(data[minimum_indices]):  # lowest to highest
             if keep[i]:
-                keep[minimum_indices - minimum_indices[i] < min_pts_btw] = False
+                keep[
+                    np.absolute(minimum_indices - minimum_indices[i]) < min_pts_btw
+                ] = False
+                keep[i] = True
+        minimum_indices = minimum_indices[keep]
 
     return minimum_indices
 
@@ -961,14 +965,14 @@ def get_CC_sorter(CC, cut_off_thr=70, log=False):
     """
     get_CC_sorter(CC)
 
-    Sorts neurons by correlation coefficient.
+    Sorts items by correlation coefficient.
 
     Args:
         - CC (np.ndarray): correlation coefficients
         - cut_off_thr (float): threshold for each correlation group. If < 1,
             interpreted as a correlation coefficient value. Otherwise, interpreted as
             percentile across correlation coefficients. Default is 70.
-        - log (bool): Whether to print the number of neurons in each group.
+        - log (bool): Whether to print the number of items in each group.
             Default is False.
 
     Returns:

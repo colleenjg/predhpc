@@ -191,10 +191,10 @@ def fix_xlims_and_ticks(
 
 def plot_linear_track(
     Ag,
-    CA1s,
-    CA1s_weights,
-    CA1s_weights_t,
-    target_CA1_idx=0,
+    Pyrs,
+    Pyrs_weights,
+    Pyrs_weights_t,
+    target_Pyr_idx=0,
     axes=None,
     t_start=0,
     t_end=100,
@@ -204,27 +204,27 @@ def plot_linear_track(
     **kwargs,
 ):
     """
-    plot_linear_track(Ag, CA1s, CA1s_weights, CA1s_weights_t)
+    plot_linear_track(Ag, Pyrs, Pyrs_weights, Pyrs_weights_t)
 
     Plots linear track experiment for a specific timepoint. The plot consists of
     the following subplots:
         (1) 1D environment with agent's trajectory and target position.
-        (2) CA3 input weights to first CA1 soma.
+        (2) Place cell input weights to first Pyr. soma.
         (3) (Blank subplot.)
-        (3) Time series of CA1 soma.
-        (4) Time series of CA1 apical dendrite.
-        (5) Time series of CA1 interneuron.
+        (3) Time series of Pyr. soma.
+        (4) Time series of Pyr. apical dendrite.
+        (5) Time series of Pyr. interneuron.
 
 
     Args:
     - Ag (agent.ResetableAgent): Agent.
-    - CA1s (two_comp_neurons.TwoComp): CA1 neurons.
-    - CA1s_weights (list): List of input weights from CA3 place cells to CA1 somata,
-        across time, where input weights have shape (n_CA1, n_CA3).
-    - CA1s_weights_t (list): List of timepoints for the input weights from CA3 place
-        cells to CA1 somata.
-    - target_CA1_idx (int, optional): Index of the target CA1 neuron for which to plot
-        input CA3 weights. Default is 0.
+    - Pyrs (two_comp_neurons.TwoComp): Pyr. neurons.
+    - Pyrs_weights (list): List of input weights from place cells to Pyr. somata,
+        across time, where input weights have shape (n_Pyrs, n_PCs).
+    - Pyrs_weights_t (list): List of timepoints for the input weights from place
+        cells to Pyr. somata.
+    - target_Pyr_idx (int, optional): Index of the target Pyr. neuron for which to plot
+        input place cell weights. Default is 0.
     - axes (2D np.ndarray, optional): Array of 6 subplots. Default is None.
     - t_start (float, optional): Start timepoint for the plot. Default is 0.
     - t_end (float, optional): End timepoint for the plot. Default is 100.
@@ -256,7 +256,7 @@ def plot_linear_track(
 
     fig.suptitle(suptitle, fontweight="bold", y=0.95)
 
-    CA3_PCs = CA1s.SomaCompartment.inputs["CA3_PCs"]["layer"]
+    PCs = Pyrs.SomaCompartment.inputs["PCs"]["layer"]
 
     current_target_position, previous_target_positions = get_previous_target_positions(
         previous_target_positions, target_move_times, t_end=t_end
@@ -282,7 +282,7 @@ def plot_linear_track(
             ncol += 1
 
         agent_kwargs = plot_util.get_plot_marker_kwargs("agent")
-        agent_kwargs["color"] = CA1s.SomaCompartment.color
+        agent_kwargs["color"] = Pyrs.SomaCompartment.color
         ax1D[0].scatter(
             Ag.history["pos"][t_idx_end],
             0,
@@ -297,38 +297,40 @@ def plot_linear_track(
         ax1D[0].set_ylim([-0.5, 2.0])
         ax1D[0].legend(ncol=ncol, frameon=False, loc="upper right")
 
-        # plot CA3 input weights to CA1
+        # plot place cell input weights to Pyr.
         plot_fcts.plot_previous_1D_input_place_cell_weights(
-            np.asarray(CA1s_weights)[:, target_CA1_idx],
-            CA1s_weights_t,
-            input_centres=CA3_PCs.place_cell_centres,
-            color=CA3_PCs.color,
+            np.asarray(Pyrs_weights)[:, target_Pyr_idx],
+            Pyrs_weights_t,
+            input_centres=PCs.place_cell_centres,
+            color=PCs.color,
             sub_ax=ax1D[1],
             t_start=t_start,
             t_end=t_end,
         )
 
-        target_CA1_idx_str = ""
-        if target_CA1_idx >= CA1s.n:
+        target_Pyr_idx_str = ""
+        if target_Pyr_idx >= Pyrs.n:
             raise ValueError(
-                f"weight_target_idx ({target_CA1_idx}) must be less than "
-                f"CA1s.n ({CA1s.n})"
+                f"weight_target_idx ({target_Pyr_idx}) must be less than "
+                f"Pyrs.n ({Pyrs.n})"
             )
-        elif CA1s.n > 1:
-            target_CA1_idx_str = f" (#{target_CA1_idx})"
+        elif Pyrs.n > 1:
+            target_Pyr_idx_str = f" (#{target_Pyr_idx})"
 
         ax1D[1].axvline(current_target_position[0], ls="dashed", color="k")
         ax1D[1].spines[["top", "right", "left", "bottom"]].set_visible(False)
         ax1D[1].set_xticks([])
         ax1D[1].set_yticks([])
-        ax1D[1].set_ylabel(f"Input weights\nCA3 to CA1 soma{target_CA1_idx_str}")
+        ax1D[1].set_ylabel(
+            f"Input weights\nplace cells to Pyr. soma{target_Pyr_idx_str}"
+        )
         plot_util.pad_axis(ax1D[1], axis="y", pad_prop=0.2)
 
         # turn off buffer axis
         ax1D[2].axis("off")
 
         # plot time series
-        CA1s.plot_rate_timeseries(
+        Pyrs.plot_rate_timeseries(
             t_start=t_start,
             t_end=t_end,
             ax=ax1D[3:],
@@ -338,14 +340,14 @@ def plot_linear_track(
             **kwargs,
         )
 
-        t = CA1s.SomaCompartment.get_plotting_times(t_start, t_end)[0]
+        t = Pyrs.SomaCompartment.get_plotting_times(t_start, t_end)[0]
         actual_t_end = t[-1] if len(t) else None
         fix_xlims_and_ticks(
             ax1D[3:],
             t_start,
             t_end,
             actual_t_end=actual_t_end,
-            dt=CA1s.Agent.dt,
+            dt=Pyrs.Agent.dt,
             convert_to_min=True,
         )
 
@@ -358,44 +360,44 @@ def plot_linear_track(
 
 def plot_openfield(
     Ag,
-    CA1s,
-    CA1s_weights,
-    CA1s_weights_t,
-    target_CA1_idx=0,
+    Pyrs,
+    Pyrs_weights,
+    Pyrs_weights_t,
+    target_Pyr_idx=0,
     axes=None,
     t_start=0,
     t_end=100,
     addendum=None,
     traj_kwargs=dict(),
-    CA1_kwargs=dict(),
+    Pyr_kwargs=dict(),
 ):
     """
-    plot_openfield(Ag, CA1s, CA1s_weights, CA1s_weights_t)
+    plot_openfield(Ag, Pyrs, Pyrs_weights, Pyrs_weights_t)
 
     Plots open field experiment for a specific timepoint. The plot consists of
     the following subplots:
         (1) Agent's trajectory (top left).
-        (2) CA3 input weights to CA1 soma (top right).
-        (3) Time series of CA1 soma (next top, full width).
-        (4) Time series of CA1 apical dendrite (mid, full width).
-        (5) Time series of CA1 interneuron (bottom, full width).
+        (2) Place cell input weights to Pyr. soma (top right).
+        (3) Time series of Pyr. soma (next top, full width).
+        (4) Time series of Pyr. apical dendrite (mid, full width).
+        (5) Time series of Pyr. interneuron (bottom, full width).
 
     Args:
     - Ag (agent.ResetableAgent): Agent.
-    - CA1s (Resetable.Neuron): CA1 neuron.
-    - CA1s_weights (list): List of input weights from CA3 place cells to CA1 somata,
-        across time, where input weights have shape (n_CA1, n_CA3).
-    - CA1s_weights_t (list): List of timepoints for the input weights from CA3 place
-        cells to CA1 somata.
-    - target_CA1_idx (int, optional): Index of the target CA1 neuron for which to plot
-        input CA3 weights. Default is 0.
+    - Pyrs (Resetable.Neuron): Pyr. neuron.
+    - Pyrs_weights (list): List of input weights from place cells to Pyr. somata,
+        across time, where input weights have shape (n_Pyrs, n_PCs).
+    - Pyrs_weights_t (list): List of timepoints for the input weights from place
+        cells to Pyr. somata.
+    - target_Pyr_idx (int, optional): Index of the target Pyr. neuron for which to plot
+        input place cell weights. Default is 0.
     - axes (2D np.ndarray, optional): Array of 5 subplots. Default is None.
     - t_start (float, optional): Start timepoint for the plot. Default is 0.
     - t_end (float, optional): End timepoint for the plot. Default is 100.
     - addendum (str, optional): Addendum for the title. Default is None.
     - traj_kwargs (dict, optional): Keyword arguments passed to
         agent.ResetableAgent.plot_trajectories(). Default is dict().
-    - CA1_kwargs (dict, optional): Keyword arguments passed to
+    - Pyr_kwargs (dict, optional): Keyword arguments passed to
         two_comp_neurons.TwoComp.plot_rate_timeseries(). Default is dict().
 
     Returns:
@@ -429,21 +431,21 @@ def plot_openfield(
 
     ax1D[0].set_title("Trajectories")
 
-    # plot CA3 input weights to CA1
-    target_CA1_idx_str = ""
-    if target_CA1_idx >= CA1s.n:
+    # plot place cell input weights to Pyr.
+    target_Pyr_idx_str = ""
+    if target_Pyr_idx >= Pyrs.n:
         raise ValueError(
-            f"weight_target_idx ({target_CA1_idx}) must be less than "
-            f"CA1s.n ({CA1s.n})"
+            f"weight_target_idx ({target_Pyr_idx}) must be less than "
+            f"Pyrs.n ({Pyrs.n})"
         )
-    elif CA1s.n > 1:
-        target_CA1_idx_str = f" (#{target_CA1_idx})"
+    elif Pyrs.n > 1:
+        target_Pyr_idx_str = f" (#{target_Pyr_idx})"
 
-    weight_idx = np.where(np.asarray(CA1s_weights_t) < t_end)[0][-1]
+    weight_idx = np.where(np.asarray(Pyrs_weights_t) < t_end)[0][-1]
     plot_fcts.plot_2D_input_place_cell_weights(
-        CA1s.SomaCompartment,
-        PCs_input_name="CA3_PCs",
-        place_weights=CA1s_weights[weight_idx][target_CA1_idx : target_CA1_idx + 1],
+        Pyrs.SomaCompartment,
+        PCs_input_name="PCs",
+        place_weights=Pyrs_weights[weight_idx][target_Pyr_idx : target_Pyr_idx + 1],
         alpha=0.3,
         t_end=t_end,
         plot_BTSP_events=True,
@@ -451,27 +453,29 @@ def plot_openfield(
         ax=ax1D[1],
     )
     ax1D[1].set_ylabel("")
-    ax1D[1].set_title(f"Input weights from CA3 to CA1 soma{target_CA1_idx_str}")
+    ax1D[1].set_title(
+        f"Input weights from place cells to Pyr. soma{target_Pyr_idx_str}"
+    )
 
     # plot time series
-    CA1s.plot_rate_timeseries(
+    Pyrs.plot_rate_timeseries(
         t_start=t_start,
         t_end=t_end,
         ax=ax1D[2:],
         adjust_xlim=True,
         autosave=False,
         separate_axes=True,
-        **CA1_kwargs,
+        **Pyr_kwargs,
     )
 
-    t = CA1s.SomaCompartment.get_plotting_times(t_start, t_end)[0]
+    t = Pyrs.SomaCompartment.get_plotting_times(t_start, t_end)[0]
     actual_t_end = t[-1] if len(t) else None
     fix_xlims_and_ticks(
         ax1D[2:],
         t_start,
         t_end,
         actual_t_end=actual_t_end,
-        dt=CA1s.Agent.dt,
+        dt=Pyrs.Agent.dt,
         convert_to_min=True,
     )
 
@@ -485,10 +489,10 @@ def plot_openfield(
 
 def animate(
     Ag,
-    CA1s,
-    CA1s_weights,
-    CA1s_weights_t,
-    target_CA1_idx=0,
+    Pyrs,
+    Pyrs_weights,
+    Pyrs_weights_t,
+    target_Pyr_idx=0,
     t_start=None,
     t_end=None,
     fps=5,
@@ -497,23 +501,23 @@ def animate(
     embed_limit=None,
     environment="linear_track",
     traj_kwargs=dict(),
-    CA1_kwargs=dict(),
+    Pyr_kwargs=dict(),
     autosave=None,
 ):
     """
-    animate(Ag, CA1s, CA1s_weights, CA1s_weights_t)
+    animate(Ag, Pyrs, Pyrs_weights, Pyrs_weights_t)
 
-    Animates the agent's trajectory and the activity of the CA1 neurons over time.
+    Animates the agent's trajectory and the activity of the Pyr. neurons over time.
 
     Args:
     - Ag (agent.ResetableAgent): Agent.
-    - CA1s (two_comp_neurons.TwoComp): CA1 neurons.
-    - CA1s_weights (list): List of input weights from CA3 place cells to CA1 somata,
-        across time, where input weights have shape (n_CA1, n_CA3).
-    - CA1s_weights_t (list): List of timepoints for the input weights from CA3 place
-        cells to CA1 somata.
-    - target_CA1_idx (int, optional): Index of the target CA1 neuron for which to plot
-        input CA3 weights. Default is 0.
+    - Pyrs (two_comp_neurons.TwoComp): Pyr. neurons.
+    - Pyrs_weights (list): List of input weights from place cells to Pyr. somata,
+        across time, where input weights have shape (n_Pyrs, n_PCs).
+    - Pyrs_weights_t (list): List of timepoints for the input weights from place
+        cells to Pyr. somata.
+    - target_Pyr_idx (int, optional): Index of the target Pyr. neuron for which to plot
+        input place cell weights. Default is 0.
     - t_start (float, optional): Start timepoint for the animation. Default is None.
     - t_end (float, optional): End timepoint for the animation. Default is None.
     - fps (int, optional): Frames per second. Default is 5.
@@ -525,7 +529,7 @@ def animate(
         is "linear_track".
     - traj_kwargs (dict, optional): Keyword arguments passed to
         agent.ResetableAgent.plot_trajectories(). Default is dict().
-    - CA1_kwargs (dict, optional): Keyword arguments passed to
+    - Pyr_kwargs (dict, optional): Keyword arguments passed to
         two_comp_neurons.TwoComp.plot_rate_timeseries(). Default is dict().
     - autosave (bool, optional): Whether to autosave the animation. If None, the
         global autosave setting for ratinabox is used. Default is None.
@@ -556,12 +560,12 @@ def animate(
     if t_end == None:
         t_end = Ag.history["t"][-1]
 
-    def animate_(i, axes, t_start, speed_up, dt, traj_kwargs, CA1_kwargs):
+    def animate_(i, axes, t_start, speed_up, dt, traj_kwargs, Pyr_kwargs):
         """
-        animate_(i, axes, t_start, speed_up, dt, traj_kwargs, CA1_kwargs)
+        animate_(i, axes, t_start, speed_up, dt, traj_kwargs, Pyr_kwargs)
 
         Plots a single frame for an animation of the agent's trajectory and the
-        activity of the CA1 neurons over time.
+        activity of the Pyr. neurons over time.
 
         Args:
         - i (int): Frame index.
@@ -571,7 +575,7 @@ def animate(
         - dt (float): Time step for the animation frame.
         - traj_kwargs (dict): Keyword arguments passed to
             agent.ResetableAgent.plot_trajectories().
-        - CA1_kwargs (dict): Keyword arguments passed to
+        - Pyr_kwargs (dict): Keyword arguments passed to
             two_comp_neurons.TwoComp.plot_rate_timeseries().
         """
 
@@ -595,15 +599,15 @@ def animate(
             )
             plot_fct(
                 Ag,
-                CA1s,
-                CA1s_weights,
-                CA1s_weights_t,
-                target_CA1_idx=target_CA1_idx,
+                Pyrs,
+                Pyrs_weights,
+                Pyrs_weights_t,
+                target_Pyr_idx=target_Pyr_idx,
                 axes=axes,
                 t_start=t_start,
                 t_end=t_end,
                 traj_kwargs=traj_kwargs,
-                CA1_kwargs=CA1_kwargs,
+                Pyr_kwargs=Pyr_kwargs,
             )
 
         if environment == "openfield":
@@ -617,7 +621,7 @@ def animate(
         interval=1000 * dt,
         frames=int((t_end - t_start) / (dt * speed_up)),
         blit=False,
-        fargs=(axes, t_start, speed_up, dt, traj_kwargs, CA1_kwargs),
+        fargs=(axes, t_start, speed_up, dt, traj_kwargs, Pyr_kwargs),
     )
 
     rutils.save_animation(anim, savename, anim_save_types=["gif", "mp4"], save=autosave)
