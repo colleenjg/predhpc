@@ -571,6 +571,43 @@ def get_filtered_signal(
     return X_t1, T_t1
 
 
+def get_exponential(
+    filter_tau: float | None = None,
+    trend_tau: float | None = None,
+    dt: float = 0.03,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    get_exponential()
+
+    Obtain an exponential signal using specific filtering parameters.
+
+    Args:
+    - filter_tau (float, optional): Filter time constant. Default is None.
+    - trend_tau (float, optional): Trend time constant. Default is None.
+    - dt (float, optional): Time step. Default is 0.03.
+
+    Returns:
+    - exponential (np.ndarray): Exponential signal.
+    """
+
+    X_ts = [np.ones(1)]
+    T_t = np.zeros(1)
+    while not np.isclose(X_ts[-1], 0):
+        X_t1, T_t = get_filtered_signal(
+            f_t1=np.zeros(1),
+            X_t=X_ts[-1],
+            T_t=T_t,
+            filter_tau=filter_tau,
+            trend_tau=trend_tau,
+            dt=dt,
+        )
+        X_ts.append(X_t1)
+
+    X_ts = np.asarray(X_ts).reshape(-1)
+
+    return X_ts
+
+
 def get_exponential_AUC(
     filter_tau: float | None = None,
     trend_tau: float | None = None,
@@ -591,19 +628,7 @@ def get_exponential_AUC(
     - AUC (float): Area under the curve of the exponential signal
     """
 
-    X_ts = [np.ones(1)]
-    T_t = np.zeros(1)
-    while not np.isclose(X_ts[-1], 0):
-        X_t1, T_t = get_filtered_signal(
-            f_t1=np.zeros(1),
-            X_t=X_ts[-1],
-            T_t=T_t,
-            filter_tau=filter_tau,
-            trend_tau=trend_tau,
-            dt=dt,
-        )
-        X_ts.append(X_t1)
-
+    X_ts = get_exponential(filter_tau, trend_tau, dt)
     AUC = np.sum(X_ts)
 
     return AUC

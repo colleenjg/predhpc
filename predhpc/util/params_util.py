@@ -10,11 +10,11 @@ PC_COLOR = "#99193A"  # dark red
 PYR_SOMA_COLOR = "#3D3D79"  # dark purple
 PYR_DEND_COLOR = "#8787C9"  # light purple
 
-LINEAR_SIGMOID_ACTIVATION_FUNCTION = ext_util.get_standard_sigmoid_params(
+LINEAR_SIGMOID_ACTIVATION_PARAMS = ext_util.get_standard_sigmoid_params(
     min_fr=0.0, max_fr=10.0, mid_x=6.0, width_x=8.0
 )
 
-DEND_SIGMOID_ACTIVATION_FUNCTION = ext_util.get_standard_sigmoid_params(
+DEND_SIGMOID_ACTIVATION_PARAMS = ext_util.get_standard_sigmoid_params(
     min_fr=0.0, max_fr=10.0, mid_x=5.0, width_x=6.0
 )
 
@@ -314,9 +314,9 @@ def get_Pyr_params(
             "biases": None,
             "dend_init_weights_zero": False,
             "soma_init_weights_zero": False,
-            "soma_activation_function": LINEAR_SIGMOID_ACTIVATION_FUNCTION,
-            "dend_activation_function": DEND_SIGMOID_ACTIVATION_FUNCTION,
-            "inhibit_activation_function": LINEAR_SIGMOID_ACTIVATION_FUNCTION,
+            "soma_activation_function": LINEAR_SIGMOID_ACTIVATION_PARAMS,
+            "dend_activation_function": DEND_SIGMOID_ACTIVATION_PARAMS,
+            "inhibit_activation_function": LINEAR_SIGMOID_ACTIVATION_PARAMS,
             "soma_apply_Ojas_rule": False,  # subtractive normalization may blow up with high clamping
             "soma_color": PYR_SOMA_COLOR,
             "dend_color": PYR_DEND_COLOR,

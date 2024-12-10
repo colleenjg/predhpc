@@ -28,7 +28,7 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer):
 
     default_params = {
         "n": 10,
-        "activation_function": params_util.LINEAR_SIGMOID_ACTIVATION_FUNCTION,
+        "activation_function": params_util.LINEAR_SIGMOID_ACTIVATION_PARAMS,
         "name": "SmoothFeedForwardLayer",
         "input_filter_tau": 0.1,  # in sec
         "input_trend_tau": None,  # in sec
@@ -50,7 +50,7 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer):
 
     default_params = {
         "n": 10,
-        "activation_function": params_util.LINEAR_SIGMOID_ACTIVATION_FUNCTION,
+        "activation_function": params_util.LINEAR_SIGMOID_ACTIVATION_PARAMS,
         "name": "SmoothFeedForwardLayer",
         "input_filter_tau": 0.1,  # in sec
         "input_trend_tau": None,  # in sec
@@ -1429,18 +1429,10 @@ class BTSPLayer(HebbianLayer):
         - pre_BTSP_exp_AUC (float): Exponential AUC of the pre BTSP filter.
         """
 
-        if isinstance(self.post_BTSP_filter_tau, str):
-            if self.post_BTSP_filter_tau == "half":
-                div = 2
-            elif self.post_BTSP_filter_tau == "third":
-                div = 3
-            elif self.post_BTSP_filter_tau == "equal":
-                div = 1
-            else:
-                raise ValueError(
-                    f"Invalid post_BTSP_filter_tau value: {self.post_BTSP_filter_tau}"
-                )
-            self.post_BTSP_filter_tau = self.BTSP_filter_tau / div  # type: ignore[attr-defined]
+        self.post_BTSP_filter_tau = learn_util.get_relative_filter_tau(
+            self.post_BTSP_filter_tau,  # type: ignore[attr-defined]
+            self.BTSP_filter_tau,  # type: ignore[attr-defined]
+        )
 
         # start at 0
         self.filtered_post_BTSP_activity = np.zeros(self.n)  # type: ignore[attr-defined]

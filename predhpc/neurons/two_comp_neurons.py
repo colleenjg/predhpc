@@ -38,7 +38,7 @@ class TwoCompLayer(object):
         "inhibit_dend": True,
         "inhibit_color": "k",
         "inhibit_weight": 3.0,  # multiplied by -1 identity matrix
-        "inhibit_activation_function": params_util.LINEAR_SIGMOID_ACTIVATION_FUNCTION,
+        "inhibit_activation_function": params_util.LINEAR_SIGMOID_ACTIVATION_PARAMS,
         "inhibit_input_filter_tau": 3,
         "inhibit_input_trend_tau": None,
         "mutual_inhibition_weight": None,
@@ -77,7 +77,7 @@ class TwoCompLayer(object):
         "inhibit_dend": True,
         "inhibit_color": "k",
         "inhibit_weight": 3.0,  # multiplied by -1 identity matrix
-        "inhibit_activation_function": params_util.LINEAR_SIGMOID_ACTIVATION_FUNCTION,
+        "inhibit_activation_function": params_util.LINEAR_SIGMOID_ACTIVATION_PARAMS,
         "inhibit_input_filter_tau": 3,
         "inhibit_input_trend_tau": None,
         "mutual_inhibition_weight": None,

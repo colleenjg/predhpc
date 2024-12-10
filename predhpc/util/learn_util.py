@@ -368,3 +368,31 @@ def perform_Oja_update_(
         b -= lr * alpha * b_subtrahend  # type: ignore[operator]
 
     return
+
+
+def get_relative_filter_tau(filter_tau="half", base_filter_tau=4):
+    """
+    get_relative_filter_tau()
+
+    Obtain a filter tau relative to a base value.
+
+    Args:
+    - filter_tau (str, optional): Filter tau to compute. Default is "half".
+    - base_filter_tau (float, optional): Base filter tau. Default is 4.
+
+    Returns:
+    - filter_tau (float): Calculated BTSP filter tau
+    """
+
+    if isinstance(filter_tau, str):
+        if filter_tau == "half":
+            div = 2
+        elif filter_tau == "third":
+            div = 3
+        elif filter_tau == "equal":
+            div = 1
+        else:
+            raise ValueError(f"Invalid post_BTSP_filter_tau value: {filter_tau}")
+        filter_tau = base_filter_tau / div
+
+    return filter_tau
