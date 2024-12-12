@@ -1123,20 +1123,22 @@ def plot_1D_input_place_cell_weights(
             lw = 2 * 0.8**num_cells
             sub_ax.axhline(offset, color="k", alpha=0.3, lw=lw, ls="dotted", zorder=-12)
 
-    sub_ax.axvline(
-        PCs.Agent.target_position,
-        alpha=0.7,
-        zorder=-1,
-        lw=1,
-        ls="dotted",
-        color="k",
-    )
+    if PCs.Agent.target_position is not None:
+        sub_ax.axvline(
+            PCs.Agent.target_position,
+            alpha=0.7,
+            zorder=-1,
+            lw=1,
+            ls="dotted",
+            color="k",
+        )
     if single_sample:
         title = "Input weights"
     else:
-        sub_ax.plot([], color=colors[0], label="first", alpha=0.8)
-        sub_ax.plot([], color=colors[-1], label="last", alpha=0.8)
-        sub_ax.legend(ncol=2, frameon=False)
+        if len(colors) > 1:
+            sub_ax.plot([], color=colors[0], label="first", alpha=0.8)
+            sub_ax.plot([], color=colors[-1], label="last", alpha=0.8)
+            sub_ax.legend(ncol=2, frameon=False)
         title = "Input weights across learning"
 
     sub_ax.set_xlabel("Input place cell center / m")

@@ -1235,14 +1235,25 @@ class HebbianLayer(LearnLayer):
                 b = copy.deepcopy(b)  # disconnected from the original biases
 
         alpha = self.get_regularization_alpha()
-        if self.apply_Ojas_rule and not calculate_only:  # type: ignore[attr-defined]
-            learn_util.perform_Oja_update_(Is, ws, O, lr=lr, b=b, alpha=alpha)
-        elif self.normalize_weights_divisively and not calculate_only:  # type: ignore[attr-defined]
-            learn_util.perform_divisively_normalized_Hebbian_update_(
-                Is, ws, O, lr=lr, b=b, p=self.p, alpha=alpha
-            )
+
+        if calculate_only:  # do not use Ojas rule or divisive normalization
+            apply_Ojas_rule = False
+            normalize_weights_divisively = False
         else:
-            learn_util.perform_Hebbian_update_(Is, ws, O, lr=lr, b=b)
+            apply_Ojas_rule = self.apply_Ojas_rule
+            normalize_weights_divisively = self.normalize_weights_divisively
+
+        learn_util.perform_update_(
+            Is,
+            ws,
+            O,
+            lr=lr,
+            b=b,
+            normalize_weights_divisively=normalize_weights_divisively,
+            p=self.p,
+            alpha=alpha,
+            apply_Ojas_rule=apply_Ojas_rule,
+        )
 
         if calculate_only:
             ws_delta = [ws[i] - ws_pre[i] for i in range(len(ws))]
@@ -1429,7 +1440,7 @@ class BTSPLayer(HebbianLayer):
         - pre_BTSP_exp_AUC (float): Exponential AUC of the pre BTSP filter.
         """
 
-        self.post_BTSP_filter_tau = learn_util.get_relative_filter_tau(
+        self.post_BTSP_filter_tau = gen_util.get_relative_filter_tau(
             self.post_BTSP_filter_tau,  # type: ignore[attr-defined]
             self.BTSP_filter_tau,  # type: ignore[attr-defined]
         )
@@ -2605,7 +2616,7 @@ class BTSPLayer(HebbianLayer):
         """
 
         if axes is None:
-            _, axes = plt.subplots(2, 1, figsize=[8, 5], sharex=True, squeeze=False)
+            _, axes = plt.subplots(2, 1, figsize=[7, 3], sharex=True, squeeze=False)
         elif axes.shape != (2, 1) and axes.shape != (2,):
             raise ValueError("axes must have shape (2, 1) or (2, ).")
 
@@ -3642,7 +3653,7 @@ class NMDALayer(BTSPLayer):
         """
 
         if axes is None:
-            _, axes = plt.subplots(3, 1, figsize=[8, 5], sharex=True, squeeze=False)
+            _, axes = plt.subplots(3, 1, figsize=[7, 4], sharex=True, squeeze=False)
         elif axes.shape != (3, 1) and axes.shape != (3,):
             raise ValueError("axes must have shape (3, 1) or (3, ).")
 

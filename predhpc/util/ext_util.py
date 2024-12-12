@@ -651,3 +651,30 @@ def get_weighted_object_types(weight_dict, n=10, allow_omit_object_types=False):
     np.random.shuffle(object_types)
 
     return object_types
+
+
+def estimate_1D_place_cell_density(PCs):
+    """
+    estimate_1D_place_cell_density(PCs)
+
+    Estimate 1D the place cell density based on the number of place cells and the
+    environment the place cells are in.
+
+    Args:
+    - PCs (PlaceCells): Place cell object.
+
+    Returns:
+    - PC_density_1D (float): Place cell density (PC/m).
+    """
+
+    Env = PCs.Agent.Environment
+    if Env.D == 1:
+        env_scale = Env.scale
+        PC_density_1D = PCs.n / env_scale
+    else:
+        if hasattr(Env, "get_area"):
+            PC_density_1D = np.sqrt(PCs.n / Env.get_area())
+        else:
+            raise NotImplementedError(f"Env type {type(Env)} not supported.")
+
+    return PC_density_1D

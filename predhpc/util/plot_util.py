@@ -600,7 +600,7 @@ def init_rate_map_axes(
     return axes
 
 
-def add_colorbars(axes, im, vmin=None, vmax=None, label=None, end_only=False):
+def add_colorbars(axes, im, vmin=None, vmax=None, label=None, end_only=False, round=2):
     """
     add_colorbars(axes, im)
 
@@ -614,6 +614,7 @@ def add_colorbars(axes, im, vmin=None, vmax=None, label=None, end_only=False):
     - label (str, optional): Label for the colorbar. Default is None.
     - end_only (bool, optional): Whether to add colorbars only to the end of each row.
         Default is False.
+    - round (int, optional): Number of decimal places to round to. Default is 2.
 
     Returns:
     - cbars (list): Colorbars.
@@ -633,6 +634,9 @@ def add_colorbars(axes, im, vmin=None, vmax=None, label=None, end_only=False):
     if vmax is None:
         vmax = im.get_array().max()
 
+    if round is None:
+        round = -int(np.floor(np.log10(np.absolute(vmax - vmin))))
+
     cbars = list()
     for divider in dividers:
         cax = divider.append_axes("right", size="5%", pad=0.05)
@@ -641,8 +645,8 @@ def add_colorbars(axes, im, vmin=None, vmax=None, label=None, end_only=False):
         if label is not None:
             cbar.set_label(label, labelpad=-10)
 
-        vmin_tick = np.around(vmin, 2)
-        vmax_tick = np.around(vmax, 2)
+        vmin_tick = np.around(vmin, round)
+        vmax_tick = np.around(vmax, round)
         cbar.set_ticks([vmin_tick, vmax_tick])
         cbar.outline.set_visible(False)
         cbars.append(cbar)
@@ -964,6 +968,69 @@ def plot_rate_correlations(firingrates, sub_ax=None, cut_off_thr=None):
     return sub_ax
 
 
+def plot_learning_kernel(Is, xs, kernel=None, kernel_xs=None):
+    """
+    plot_learning_kernel(Is, xs)
+
+    Plot a Gaussian-filtered learning kernel.
+
+    Args:
+    - Is (2D np.ndarray): Inferred 2D input (exponential dim x Gaussian only dim).
+    - xs (1D np.ndarray): Position coordinates along the first dimension of Is.
+    - kernel (2D np.ndarray, optional): Full 2D input kernel. Default is None.
+    - kernel_xs (1D np.ndarray, optional): Position coordinates along the first
+        dimension of kernel, required if kernel is provided. Default is None.
+
+    Returns:
+    - sub_ax (plt.Axes): Subplot with the learning kernel plotted.
+    """
+
+    if len(Is) != len(xs):
+        raise ValueError("Is and xs must have the same length.")
+
+    _, sub_ax = plt.subplots(figsize=(6, 2.5))
+    color = None
+    for y in range(Is.shape[1]):
+        alpha = Is[:, y].max() / Is.max()
+        sc = sub_ax.scatter(xs, Is[:, y], s=6, alpha=alpha, color=color)
+        if color is None:
+            color = sc.get_facecolor()[0]
+
+    if kernel is not None:
+        if kernel_xs is None:
+            raise ValueError("If providing kernel, must provide kernel_xs.")
+        if len(kernel) != len(kernel_xs):
+            raise ValueError("Kernel and kernel_xs must have the same length.")
+        if xs[0] > kernel_xs.min():
+            start_x = gen_util.get_index_of_closest(kernel_xs, xs[0], method="below")
+            kernel = kernel[start_x:]
+            kernel_xs = kernel_xs[start_x:]
+        if xs[-1] < kernel_xs.max():
+            stop_x = gen_util.get_index_of_closest(kernel_xs, xs[-1], method="above")
+            kernel = kernel[: stop_x + 1]
+            kernel_xs = kernel_xs[: stop_x + 1]
+
+        sub_ax.plot(
+            kernel_xs,
+            np.max(kernel, axis=1),
+            color="k",
+            # lw=1.5,
+            alpha=0.8,
+        )
+
+    # format
+    sub_ax.axhline(0, ls="dashed", color="k", alpha=0.6)
+    pad = 0.05 * (xs[-1] - xs[0])
+    sub_ax.set_xlim(xs[0] - pad, xs[-1] + pad)
+    sub_ax.set_ylim(-0.5, Is.max() + 0.5)
+    sub_ax.set_title("Learning kernel")
+    sub_ax.set_ylabel("Kernel-inferred input")
+    sub_ax.set_xlabel("Position")
+    sub_ax.spines[["top", "right"]].set_visible(False)
+
+    return sub_ax
+
+
 def plot_skewed_gaussian_kernel(
     wid_half_max: float = 1.5,
     prop: float = 4.0,
@@ -1065,3 +1132,81 @@ def plot_skewed_gaussian_kernel(
     save_figure(fig, "skewed_gaussian_kernel", save=autosave)
 
     return sub_ax, skewed_Gaussian_kernel, max_value_idx
+
+
+def plot_lr_factor_assessment(assessment_dict):
+    """
+    plot_lr_actor_assessment(assessment_dict)
+
+    Plot the assessment of the learning rate actor.
+
+    Args:
+    - assessment_dict (dict): Learning factor assessment dictionary with initial and
+        updated weights (under "ws"), computed output firing rates (under "Os"), and
+        biases if applicable (under "bs").
+
+    Returns:
+    - axes (2D np.ndarray): 2D array of subplots with the assessment plots.
+    """
+
+    num_subplots = len(assessment_dict["ws"])
+    num_rows, num_cols = get_nrows_ncols(num_subplots, num_cols=4)
+    width = num_cols * 2 + 1
+    if assessment_dict["ws"][0].shape[1] == 1:
+        base_height = 1
+        hspace = 0.75
+    else:
+        base_height = 2
+        hspace = 0.4
+    height = base_height * (num_rows + hspace * (num_rows - 1))
+    _, axes = plt.subplots(
+        num_rows,
+        num_cols,
+        figsize=(width, height),
+        gridspec_kw={"hspace": hspace},
+        squeeze=False,
+    )
+
+    vmin = 0
+    max_val = np.max(assessment_dict["ws"])
+    vmax_round = max(3, -int(np.floor(np.log10(np.absolute(max_val)))))
+    vmax = np.ceil(max_val * 10**vmax_round) / (10**vmax_round)
+    for i, w in enumerate(assessment_dict["ws"]):
+        sub_ax = axes.ravel()[i]
+        im = sub_ax.imshow(
+            w.T, vmin=vmin, vmax=vmax, aspect="auto", interpolation="none"
+        )
+
+        if i == 0:
+            title_str = r"$\bf{Initial\ setting}$"
+        else:
+            title_str = r"$\bf{Update\ " + str(i) + "}$"
+
+        num_max = (w == w.max()).sum()
+        if num_max == w.size:
+            max_str = "all weights"
+        elif num_max < 5:
+            max_str = f"{num_max} weight" if num_max == 1 else f"{num_max} weights"
+        else:
+            perc = f"{num_max/w.size * 100:2f}%"
+            max_str = f"{num_max}/{w.size} ({perc}) weights"
+        extr_strs = [
+            f"{max_str} at max ({w.max():.4f})",
+            f"weights sum to {w.sum():.4f}",
+        ]
+        if "bs" in assessment_dict.keys():
+            extr_strs.append(f"bias: {assessment_dict['bs'][i]:.4f}")
+        extr_strs.append(f"output: {assessment_dict['Os'][i]:.3f}")
+        extr_str = "\n".join(extr_strs)
+        title_str = f"{title_str}\n{extr_str}"
+
+        sub_ax.axis("off")
+        sub_ax.set_title(title_str)
+
+    for s, sub_ax in enumerate(axes.ravel()):
+        if s >= len(assessment_dict["ws"]):
+            sub_ax.axis("off")
+
+    add_colorbars(axes, im, vmin=0, vmax=vmax, label="Weights", round=vmax_round)
+
+    return axes

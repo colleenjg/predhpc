@@ -1,9 +1,14 @@
+import copy
+
+from ratinabox import utils as rutils
+
 from predhpc.util import ext_util
 
 SCALE_LINEAR = 4.0
 SCALE_TMAZE = 3.0
-SCALE = 1.0
+SCALE = 3.0
 DT = 0.03
+SPEED_MEAN = 0.08
 
 OBJ_COLOR = "#22772E"  # dark green
 PC_COLOR = "#99193A"  # dark red
@@ -45,6 +50,38 @@ def check_environment(environment="linear"):
         )
 
     return environment
+
+
+def get_activation_function(activation_function=None):
+    """
+    get_activation_function()
+
+    Obtain the activation function to use for a neuron layer.
+
+    Args:
+    - activation_function (str or dict, optional): The activation function to use.
+        If a string, the activation function is assumed to be a standard activation
+        function (e.g., "sigmoid", "relu"). If a dictionary, the dictionary should
+        contain the activation function and any additional parameters
+        (i.e., the keys: "activation", "min_fr", "max_fr", "mid_x", "width_x").
+
+    Returns:
+    - activation_function (function): The activation function to use.
+    """
+
+    if activation_function is None:
+        activation_function = LINEAR_SIGMOID_ACTIVATION_PARAMS
+
+    elif isinstance(activation_function, str):
+        activation_function = {"activation": activation_function}
+
+    if isinstance(activation_function, dict):
+        activation_params = copy.deepcopy(activation_function)
+        activation_function = lambda x, deriv=False: rutils.activate(
+            x, deriv=deriv, other_args=activation_params
+        )
+
+    return activation_function
 
 
 def get_env_params(scale=None, environment="linear", **kwargs):
@@ -238,7 +275,7 @@ def get_PC_params(n=None, environment="linear", **kwargs):
 
     PC_params = {
         "name": "PCs",
-        "description": "gaussian_threshold",
+        "description": "gaussian",
         "place_cell_centres": "uniform",
         "min_fr": 0,
         "max_fr": 10,
@@ -331,16 +368,16 @@ def get_Pyr_params(
             "soma_to_dend_weight": 0.2,
             "dend_to_soma_weight": 1,
             "soma_normalize_weights_divisively": True,
-            "soma_regularization_alpha": 0.6,
+            "soma_regularization_alpha": 0.45,
             "soma_p": 1,
-            "soma_lr": 5e-5,  # basic learning rate
-            "soma_BTSP_lr_fact": 20,  # BTSP clamp
+            "soma_lr": 3e-5,  # basic learning rate
+            "soma_BTSP_lr_fact": 100,  # BTSP clamp
             "soma_NMDA_activation_threshold": 2,  # threshold for NMDA activation
             "soma_BTSP_induction_threshold": 8,  # sustainedrequired for BTSP
             "soma_BTSP_plateau_length": 0.12,  # plateau length required for BTSP
             "soma_BTSP_filter_tau": 4,  # BTSP kernel tau
             "soma_BTSP_trend_tau": None,  # BTSP kernel tau
-            "inhibit_weight": 3.0,  # strength of dendritic inhibition from soma
+            "inhibit_weight": 1.3,  # strength of dendritic inhibition from soma
             "inhibit_input_filter_tau": 3,
             "inhibit_input_trend_tau": None,
             "mutual_inhibition_weight": None,
@@ -353,16 +390,18 @@ def get_Pyr_params(
             "color": PYR_SOMA_COLOR,
             "biases": None,
             "init_weights_zero": False,
-            "w_init_loc": 0.1,
+            "w_init_loc": 0.02,
             "w_init_scale": 0,
-            "regularization_alpha": 0.3,  # very low
-            "lr": 5e-5,
+            "regularization_alpha": 0.8,
+            "lr": 3e-5,
             "normalize_weights_divisively": True,
             "p": 1,
         }
         if BTSP:
             Pyr_params["name"] = "Pyr_BTSP"
-            Pyr_params["BTSP_lr_fact"] = 5e3  # very high clamp
+            Pyr_params["BTSP_lr_fact"] = (
+                3e4  # very high clamp, since activity during BTSP is likely low
+            )
             Pyr_params["BTSP_filter_tau"] = 4
             Pyr_params["BTSP_trend_tau"] = None  # BTSP kernel tau
 
@@ -376,36 +415,6 @@ def get_Pyr_params(
                 Pyr_params["BTSP_plateau_length"] = (
                     0.12  # plateau length required for BTSP
                 )
-
-    if environment == "linear":
-        if two_compartment:
-            pass
-        else:
-            if BTSP:
-                if NMDA:
-                    pass
-
-    elif environment == "tmaze":
-        if two_compartment:
-            Pyr_params["soma_regularization_alpha"] = 0.3
-            Pyr_params["inhibit_weight"] = 4.0
-        else:
-            Pyr_params["regularization_alpha"] = 0.3
-            if BTSP:
-                Pyr_params["BTSP_lr_fact"] = 8e3
-                if NMDA:
-                    pass
-
-    elif environment == "openfield":
-        if two_compartment:
-            Pyr_params["soma_regularization_alpha"] = 0.3
-            Pyr_params["inhibit_weight"] = 4.0
-        else:
-            Pyr_params["regularization_alpha"] = 0.3
-            if BTSP:
-                Pyr_params["BTSP_lr_fact"] = 5e3
-                if NMDA:
-                    pass
 
     for key, value in kwargs.items():
         Pyr_params[key] = value

@@ -215,7 +215,12 @@ def init_2D_env_objects(
             warnings.filterwarnings("ignore", message="No input layers")
             Pyrs = two_comp_neurons.TwoCompLayer(Ag, params=Pyr_params)
 
-        Obj_to_Pyr_w = gen_util.get_weights(Objs.n, Pyrs.n)
+        Obj_to_Pyr_w = gen_util.get_weights(
+            Objs.n,
+            Pyrs.n,
+            loc=Pyr_params["dend_w_init_loc"],
+            scale=Pyr_params["dend_w_init_scale"],
+        )
         Pyrs.DendriteCompartment.add_input(Objs, w=Obj_to_Pyr_w)
         Pyrs.set_BTSP_learn(soma=True, dend=False)
     else:

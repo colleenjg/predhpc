@@ -359,13 +359,9 @@ class TEnv(Environment):
         - (float): Proportion of the T-shape area that is occupied by the top arms.
         """
 
-        bottom_stem_height = (1 - self.arm_height_as_prop_of_y) * self.get_scale_y()
-        bottom_stem_width = self.stem_width_as_prop_of_x * self.get_scale_x()
-        bottom_stem_area = bottom_stem_height * bottom_stem_width
+        bottom_stem_area = self.get_area(area="bottom")
 
-        top_arms_height = self.arm_height_as_prop_of_y * self.get_scale_y()
-        top_arms_width = self.get_scale_x()
-        top_arms_area = top_arms_height * top_arms_width
+        top_arms_area = self.get_area(area="top")
 
         top_arms_prop_of_area = top_arms_area / (top_arms_area + bottom_stem_area)
 
@@ -394,6 +390,36 @@ class TEnv(Environment):
         """
 
         return self.scale_y  # type: ignore[attr-defined]
+
+    def get_area(self, area="both"):
+        """
+        self.get_area()
+
+        Obtain the area of the T-shaped environment.
+
+        Args:
+        - area (str, optional): Area to get extent for ("top", "bottom" or "both").
+            Default is "both".
+
+        Returns:
+        - total_area (float): Total area of the T-shaped environment.
+        """
+
+        total_area = 0
+        if area in ["top", "both"]:
+            top_arms_height = self.arm_height_as_prop_of_y * self.get_scale_y()
+            top_arms_width = self.get_scale_x()
+            top_arms_area = top_arms_height * top_arms_width
+            total_area += top_arms_area
+        if area in ["bottom", "both"]:
+            bottom_stem_height = (1 - self.arm_height_as_prop_of_y) * self.get_scale_y()
+            bottom_stem_width = self.stem_width_as_prop_of_x * self.get_scale_x()
+            bottom_stem_area = bottom_stem_height * bottom_stem_width
+            total_area += bottom_stem_area
+        if area not in ["top", "bottom", "both"]:
+            raise ValueError(f"Unknown area: {area}")
+
+        return total_area
 
     def get_T_extents(self, area="both"):
         """
@@ -893,6 +919,43 @@ class OpenField(Environment):
         for dict_attr_name in dict_attr_names:
             if hasattr(self, dict_attr_name):
                 delattr(self, dict_attr_name)
+
+    def get_area(self):
+        """
+        self.get_area()
+
+        Obtain the area of the open field environment.
+
+        Returns:
+        - area (float): Area of the open field environment.
+        """
+
+        if len(self.boundary) != 4:
+            raise NotImplementedError(
+                "get_area() method expects exactly four boundary walls."
+            )
+
+        boundaries = np.asarray(self.boundary)
+        distances = np.diff(np.append(boundaries, boundaries[0:1], axis=0), axis=0)
+
+        if (distances[:2] != -distances[3:]).all():
+            raise NotImplementedError("get_area() method expects a parallelogram.")
+
+        side_lengths = np.linalg.norm(distances[:2], ord=2, axis=1)
+        angle = np.deg2rad(
+            gen_util.get_angle_between_vectors(distances[0], distances[1])
+        )
+        short_idx = np.argmin(side_lengths)
+        height = np.sin(angle) * side_lengths[short_idx]
+
+        area = side_lengths[1 - short_idx] * height
+
+        if len(self.holes):
+            raise NotImplementedError(
+                "get_area() method does not yet take holes into account."
+            )
+
+        return area
 
     def check_if_walls_ends_too_close(
         self,

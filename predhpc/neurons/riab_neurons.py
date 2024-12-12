@@ -611,6 +611,12 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
 
+        place_cell_centres = self.params["place_cell_centres"]
+        if isinstance(place_cell_centres, str):
+            self.place_cell_centre_type = place_cell_centres
+        else:
+            self.place_cell_centre_type = "specified"
+
         super().__init__(Agent, params=params)
 
     def plot_place_cell_locations(self, sub_ax=None, autosave=None, **kwargs):

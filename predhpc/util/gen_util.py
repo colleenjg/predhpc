@@ -57,6 +57,27 @@ def get_divisors(n: int) -> list[int]:
     return divisors
 
 
+def get_index_of_closest(data, value=0, method="nearest"):
+
+    if len(data.shape) != 1:
+        raise NotImplementedError("Data must be 1D.")
+
+    if method == "nearest":
+        index = np.argmin(np.abs(data - value))
+    elif method in ["above", "below"]:
+        if method == "below":
+            sub_indices = np.where(data <= value)[0]
+        else:
+            sub_indices = np.where(data >= value)[0]
+        if len(sub_indices) == 0:
+            raise RuntimeError(f"No values {method} {value} in data.")
+        index = sub_indices[np.argmin(np.abs(data[sub_indices] - value))]
+    else:
+        raise NotImplementedError(f"Unknown method {method}.")
+
+    return index
+
+
 def get_minima_indices(data, min_pts_btw=50, minimum=None, single_direction=False):
     """
     get_minima_indices(data)
@@ -340,7 +361,7 @@ def pad_throughout(indices, pad_prop=0.1, min_val=None, max_val=None):
     return padded_indices
 
 
-def get_weights(num_in=10, num_out=10, distr="1to1"):
+def get_weights(num_in=10, num_out=10, distr="1to1", loc=1, scale=0):
     """
     get_weights()
 
@@ -351,10 +372,12 @@ def get_weights(num_in=10, num_out=10, distr="1to1"):
         num_out (int, optional): Number of output units. Default is 10.
         distr (str, optional): Distribution from which to set weights.
             Default is "1to1".
+        loc (float, optional): Mean of the distribution. Default is 1.
+        scale (float, optional): Standard deviation of the distribution. Default is 0.
 
     Raises:
         ValueError: If num_in != num_out and distr is "1to1".
-        NotImplementedError: If distr is not "1to1" or "rand".
+        NotImplementedError: If distr is not "1to1" or "randn".
 
     Returns:
         weights (2D np.ndarray): Weights matrix (out, in).
@@ -365,9 +388,9 @@ def get_weights(num_in=10, num_out=10, distr="1to1"):
             raise ValueError(
                 f"If distribution is 1 to 1, num_in ({num_in}) must match num_out ({num_out})."
             )
-        weights = np.eye(num_out)
-    elif distr == "rand":
-        weights = np.random.randn(num_out, num_in)
+        weights = np.eye(num_out) * (np.random.randn(num_out) * scale + loc)
+    elif distr == "randn":
+        weights = np.random.randn(num_out, num_in) * scale + loc
     else:
         raise NotImplementedError(f"Unknown distribution: {distr}.")
 
@@ -431,7 +454,7 @@ def get_angle_between_vectors(
 
     unit_v1 = v1 / np.linalg.norm(v1)
     unit_v2 = v2 / np.linalg.norm(v2)
-    angle = np.rad2deg(np.dot(unit_v1, unit_v2)) % 360
+    angle = np.rad2deg(np.arccos(np.dot(unit_v1, unit_v2))) % 360
     if not directional:
         angle = angle % 180
         angle = min(angle, 180 - angle)
@@ -571,6 +594,34 @@ def get_filtered_signal(
     return X_t1, T_t1
 
 
+def get_relative_filter_tau(filter_tau="half", base_filter_tau=4):
+    """
+    get_relative_filter_tau()
+
+    Obtain a filter tau relative to a base value.
+
+    Args:
+    - filter_tau (str, optional): Filter tau to compute. Default is "half".
+    - base_filter_tau (float, optional): Base filter tau. Default is 4.
+
+    Returns:
+    - filter_tau (float): Calculated BTSP filter tau
+    """
+
+    if isinstance(filter_tau, str):
+        if filter_tau == "half":
+            div = 2
+        elif filter_tau == "third":
+            div = 3
+        elif filter_tau == "equal":
+            div = 1
+        else:
+            raise ValueError(f"Invalid post_BTSP_filter_tau value: {filter_tau}")
+        filter_tau = base_filter_tau / div
+
+    return filter_tau
+
+
 def get_exponential(
     filter_tau: float | None = None,
     trend_tau: float | None = None,
@@ -608,10 +659,52 @@ def get_exponential(
     return X_ts
 
 
+def get_pre_post_exponential(
+    filter_tau: float | None = None,
+    trend_tau: float | None = None,
+    dt: float = 0.03,
+    post_filter_tau: float | str | None = None,
+    post_trend_tau: float | None = None,
+):
+    """
+    get_pre_post_exponential()
+
+    Obtain a pre and post combined exponential signal using specific filtering
+    parameters.
+
+    Args:
+    - filter_tau (float, optional): Filter time constant. Default is None.
+    - trend_tau (float, optional): Trend time constant. Default is None.
+    - dt (float, optional): Time step. Default is 0.03.
+    - post_filter_tau (float, str, optional): Post-filter time constant. Default is None.
+    - post_trend_tau (float, optional): Post-trend time constant. Default is None.
+
+    Returns:
+    - pre_post_exp (np.ndarray): Pre and post combined exponential signal.
+    """
+
+    pre_exp = get_exponential(filter_tau, trend_tau, dt=dt)[::-1]
+
+    if post_filter_tau is None:
+        post_exp = np.asarray([pre_exp[-1]])
+    else:
+        post_filter_tau = get_relative_filter_tau(post_filter_tau)
+        post_exp = get_exponential(post_filter_tau, post_trend_tau, dt=dt)
+
+    pre_post_exp = np.concatenate([pre_exp, post_exp[1:]])
+    peak_pt = len(pre_exp) - 1
+    pre_post_exp[peak_pt] = np.mean([pre_exp[-1], post_exp[0]])
+    pre_post_exp = pre_post_exp / pre_post_exp.max()
+
+    return pre_post_exp
+
+
 def get_exponential_AUC(
     filter_tau: float | None = None,
     trend_tau: float | None = None,
     dt: float = 0.03,
+    post_filter_tau: float | str | None = None,
+    post_trend_tau: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     get_exponential_AUC()
@@ -623,12 +716,20 @@ def get_exponential_AUC(
     - filter_tau (float, optional): Filter time constant. Default is None.
     - trend_tau (float, optional): Trend time constant. Default is None.
     - dt (float, optional): Time step. Default is 0.03.
+    - post_filter_tau (float, str, optional): Post-filter time constant. Default is None.
+    - post_trend_tau (float, optional): Post-trend time constant. Default is None.
 
     Returns:
     - AUC (float): Area under the curve of the exponential signal
     """
 
-    X_ts = get_exponential(filter_tau, trend_tau, dt)
+    X_ts = get_pre_post_exponential(
+        filter_tau=filter_tau,
+        trend_tau=trend_tau,
+        dt=dt,
+        post_filter_tau=post_filter_tau,
+        post_trend_tau=post_trend_tau,
+    )
     AUC = np.sum(X_ts)
 
     return AUC
@@ -881,6 +982,33 @@ def smooth_data(data, k=5, handle_nans=False):
         smoothed_data[nan_mask * (smoothed_data == 0)] = np.nan
 
     return smoothed_data
+
+
+def get_2D_Gaussian_kernel(sigma, aperture_prop=8, max_aperture=np.inf):
+    """
+    Create a 2D Gaussian kernel.
+
+    Parameters:
+    - sigma (float): Standard deviation of the Gaussian.
+    - aperture_prop (float): Aperture size to use relative to the standard
+        deviation. When the Gaussian kernel is used with scipy's fft_convolve(),
+        this aperture size appears to match the effective aperture size of
+        scipy's gaussian_filter(). Default is 8.
+    - max_aperture (float): Maximum aperture size to use. Default is np.inf.
+
+    Returns:
+    - kernel (2D np.ndarray): 2D Gaussian kernel.
+    """
+
+    aperture = int(np.ceil(min(sigma * aperture_prop, max_aperture)) // 2 * 2 + 1)
+
+    x = np.linspace(-(aperture // 2), aperture // 2, aperture)
+    xx, yy = np.meshgrid(x, x)
+
+    kernel = np.exp(-(xx**2 + yy**2) / (2 * sigma**2))
+    kernel /= np.sum(kernel)
+
+    return kernel
 
 
 def half_width_proportion_to_kernel_skew(half_width_proportion: float = 1 / 4) -> float:
