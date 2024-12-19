@@ -1,3 +1,4 @@
+import time
 import warnings
 
 import matplotlib
@@ -23,16 +24,6 @@ class TemporarilyMoveTarget:
         TemporarilyMoveTarget(Ag, temp_target_position)
 
         Initialises the context manager.
-
-        Attributes:
-        - Ag (Resetable.Agent): The agent whose target position should be temporarily
-            moved.
-        - original_target_position (float or 1D np.ndarray):
-            The original target position. Single value for a 1D environment.
-            [x, y] for a 2D environment.
-        - temp_target_position (float or 1D np.ndarray):
-            The temporary new target position. Single value for a 1D environment.
-            [x, y] for a 2D environment.
 
         Args:
         - Ag (Resetable.Agent): The agent whose target position should be temporarily
@@ -61,33 +52,92 @@ class TemporarilyMoveTarget:
         self.Agent.set_target_position(self.original_target_position)
 
 
-def init_linear_track_fig():
+class TemporarilyReshufflePlaceCells:
+    """
+    TemporarilyReshufflePlaceCells()
+
+    Context manager to temporarily reshuffle place cell positions.
+    """
+
+    def __init__(self, PCs, sorter):
+        """
+        TemporarilyReshufflePlaceCells(PCs, sorter)
+
+        Initialises the context manager.
+
+        Args:
+        - PCs (PlaceCells): Place cells.
+        - sorter (np.ndarray): Array of indices to resort the place cell positions,
+            based on original sorting.
+        """
+
+        self.PCs = PCs
+        self.original_sorter = PCs._current_sorter
+
+        if len(sorter) != PCs.n:
+            raise ValueError(
+                f"Length of 'sorter' ({len(sorter)}) must be equal to the number of "
+                f"place cells ({PCs.n})."
+            )
+        self.temp_sorter = sorter
+
+    def __enter__(self):
+        """
+        Temporarily shuffles the place cell order.
+        """
+
+        self.PCs.shuffle_place_cell_locations(
+            shuffle_sorter=self.temp_sorter, record=False
+        )
+
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        """
+        Restores the original place cell order.
+        """
+
+        self.PCs.shuffle_place_cell_locations(
+            shuffle_sorter=self.original_sorter, record=False
+        )
+
+
+def init_linear_track_fig(n=1):
     """
     init_linear_track_fig()
 
     Initialises a figure with subplots for a linear track environment.
+
+    Args:
+    - n (int, optional): Number of Pyr. neurons. Default is 1.
 
     Returns:
     - fig (mpl_figure.Figure): Figure.
     - axes (2D np.ndarray): Array of axes, with shape (6, 1).
     """
 
+    hei_each = min(max(1, (n - 1) // 20), 3)
+
     gridspec_kw = {
-        "height_ratios": [0.5, 1, 0.3, 1, 1, 1],
-        "hspace": 0.2,
+        "height_ratios": [0.5, 1, 0.3, hei_each, hei_each, hei_each],
+        "hspace": 0.24,
     }
+    num_plots = len(gridspec_kw["height_ratios"])
+
+    height = sum(gridspec_kw["height_ratios"]) + gridspec_kw["hspace"] * (num_plots - 1)
     fig, axes = plt.subplots(
-        6, 1, figsize=[6, 6], gridspec_kw=gridspec_kw, squeeze=False
+        num_plots, 1, figsize=[6, height], gridspec_kw=gridspec_kw, squeeze=False
     )
 
     return fig, axes
 
 
-def init_openfield_fig():
+def init_openfield_fig(n=1):
     """
     init_openfield_fig()
 
     Initialises a figure with subplots for an open field environment.
+
+    Args:
+    - n (int, optional): Number of Pyr. neurons. Default is 1.
 
     Returns:
     - fig (mpl_figure.Figure): Figure.
@@ -95,15 +145,21 @@ def init_openfield_fig():
         top left to bottom right, and with shape (5, 1).
     """
 
+    num_top = max(1, 3 - (n - 1) // 20)
     mosaic = [
-        ["left", "right"],
-        ["left", "right"],
-        ["left", "right"],
+        *[["left", "right"]] * num_top,
         ["top", "top"],
         ["middle", "middle"],
         ["bottom", "bottom"],
     ]
-    fig, axd = plt.subplot_mosaic(mosaic, layout="constrained", figsize=[7, 6])
+
+    height = 3.75 * (5 - num_top)
+    fig, axd = plt.subplot_mosaic(mosaic, layout="constrained", figsize=[7, height])
+
+    # adjust figure boundaries
+    engine = fig.get_layout_engine()
+    engine.set(rect=(0.01, 0.01, 0.96, 0.93))
+
     axes = np.asarray(
         [[axd["left"], axd["right"], axd["top"], axd["middle"], axd["bottom"]]]
     ).T  # shape (5, 1)
@@ -111,48 +167,52 @@ def init_openfield_fig():
     return fig, axes
 
 
-def get_previous_target_positions(
-    previous_target_positions, target_move_times, t_end=0
-):
+def get_previous_values(previous_values, change_times, t_end=0):
     """
-    get_previous_target_positions(previous_target_positions, target_move_times)
+    get_previous_values(previous_values, change_times)
 
-    Returns the current target position and the previous target positions.
+    Returns the current value and the previous values.
 
     Args:
-    - previous_target_positions (list): Previous target positions, before the final
-        position.
-    - target_move_times (list): Timepoints target moved. Should have the same length as
-        previous_target_positions.
+    - previous_values (list): Previous values, before the final value.
+    - change_times (list): Timepoints values changed. Should have the same length as
+        previous_values.
     - t_end (float, optional): End timepoint for the plot. Default is 0.
 
     Returns:
-    - current_target_position (float): Current target position.
-    - previous_target_positions (list): Previous target positions.
+    - current_value (float): Current value.
+    - previous_values (list): Previous values.
     """
 
-    if len(previous_target_positions) != len(target_move_times):
+    if len(previous_values) != len(change_times):
         raise ValueError(
-            "Length of 'previous_target_positions' "
-            f"({len(previous_target_positions)}) and 'target_move_times' "
-            f"({len(target_move_times)}) must be the same."
+            "Length of 'previous_values' "
+            f"({len(previous_values)}) and 'change_times' "
+            f"({len(change_times)}) must be the same."
         )
-    target_move_times = np.asarray(target_move_times)
-    if np.argsort(target_move_times) != np.arange(len(target_move_times)):
-        raise ValueError("'target_move_times' must be in ascending order.")
-    past = np.where(t_end > target_move_times)[0]
-    if len(past) == len(target_move_times):
-        current_target_position = None
-        previous_target_positions = previous_target_positions
-    else:
-        current_target_position = previous_target_positions[len(past)]
-        previous_target_positions = previous_target_positions[: len(past)]
+    change_times = np.asarray(change_times)
 
-    return current_target_position, previous_target_positions
+    if (np.argsort(change_times) != np.arange(len(change_times))).any():
+        raise ValueError("'change_times' must be in ascending order.")
+    past = np.where(t_end > change_times)[0]
+    if len(past) == len(change_times):
+        current_value = None
+        previous_values = previous_values
+    else:
+        current_value = previous_values[len(past)]
+        previous_values = previous_values[: len(past)]
+
+    return current_value, previous_values
 
 
 def fix_xlims_and_ticks(
-    axes, t_start, t_end, actual_t_end=None, dt=0.03, convert_to_min=False
+    axes,
+    t_start,
+    t_end,
+    actual_t_end=None,
+    dt=0.03,
+    convert_to_min=False,
+    ticks_last_only=False,
 ):
     """
     fix_xaxes(axes, t_start, t_end)
@@ -169,6 +229,8 @@ def fix_xlims_and_ticks(
         t_end. Default is 0.03.
     - convert_to_min (bool, optional): Whether to convert the x-axis to minutes.
         Default is False.
+    - ticks_last_only (bool, optional): Whether to set the ticks on the last subplot
+        only. Default is False.
     """
 
     if actual_t_end is not None:
@@ -179,18 +241,19 @@ def fix_xlims_and_ticks(
     if convert_to_min:
         factor = 1 / 60
 
-    for sub_ax in axes.ravel():
-        xticks = [t_start * factor, t_end * factor]
-        xticklabels = [f"{float(str(x)):.2f}" for x in xticks]
-        if xticks[0] == 0:
-            xticklabels[0] = "0.0"
+    xticks = [t_start * factor, t_end * factor]
+    xticklabels = [f"{float(str(x)):.2f}" for x in xticks]
+    if xticks[0] == 0:
+        xticklabels[0] = "0.0"
+
+    for i, sub_ax in enumerate(axes.ravel()):
         sub_ax.set_xlim(xticks)
-        sub_ax.set_xticks(xticks)
-        sub_ax.set_xticklabels(xticklabels)
+        if not ticks_last_only or i == len(axes) - 1:
+            sub_ax.set_xticks(xticks)
+            sub_ax.set_xticklabels(xticklabels)
 
 
 def plot_linear_track(
-    Ag,
     Pyrs,
     Pyrs_weights,
     Pyrs_weights_t,
@@ -201,10 +264,10 @@ def plot_linear_track(
     addendum=None,
     previous_target_positions=list(),
     target_move_times=list(),
-    **kwargs,
+    Pyr_kwargs=dict(),
 ):
     """
-    plot_linear_track(Ag, Pyrs, Pyrs_weights, Pyrs_weights_t)
+    plot_linear_track(Pyrs, Pyrs_weights, Pyrs_weights_t)
 
     Plots linear track experiment for a specific timepoint. The plot consists of
     the following subplots:
@@ -217,26 +280,24 @@ def plot_linear_track(
 
 
     Args:
-    - Ag (agent.ResetableAgent): Agent.
     - Pyrs (two_comp_neurons.TwoComp): Pyr. neurons.
     - Pyrs_weights (list): List of input weights from place cells to Pyr. somata,
         across time, where input weights have shape (n_Pyrs, n_PCs).
     - Pyrs_weights_t (list): List of timepoints for the input weights from place
         cells to Pyr. somata.
     - target_Pyr_idx (int, optional): Index of the target Pyr. neuron for which to plot
-        input place cell weights. Default is 0.
+        timeseries and input place cell weights. If "all", max across weights is
+        plotted. Default is 0.
     - axes (2D np.ndarray, optional): Array of 6 subplots. Default is None.
     - t_start (float, optional): Start timepoint for the plot. Default is 0.
     - t_end (float, optional): End timepoint for the plot. Default is 100.
     - addendum (str, optional): Addendum for the title. Default is None.
-    - previous_target_positions (list, optional): Previous target positions, before the
-        final position. Default is None.
-    - target_move_times (list, optional): Timepoints target moved. Should have the same
-    length as previous_target_positions. Default is None.
-
-    Keyword args:
-    - **kwargs: Additional keyword arguments for plotting, passed to
-        two_comp_neurons.TwoComp.plot_rate_timeseries().
+    - previous_target_positions (list): Previous target positions, before the
+        final position. Default is list().
+    - target_move_times (list): Timepoints target moved. Should have the same length as
+        previous_target_positions. Default is list().
+    - Pyr_kwargs (dict, optional): Keyword arguments dictionary passed to
+        two_comp_neurons.TwoComp.plot_rate_timeseries(). Default is dict().
 
     Returns:
     - axes (2D np.ndarray): Array of 6 subplots. If input axes is None, shape is
@@ -244,7 +305,7 @@ def plot_linear_track(
     """
 
     if axes is None:
-        fig, axes = init_linear_track_fig()
+        fig, axes = init_linear_track_fig(Pyrs.n)
     else:
         fig = np.asarray(axes).ravel()[0].figure
 
@@ -258,7 +319,8 @@ def plot_linear_track(
 
     PCs = Pyrs.SomaCompartment.inputs["PCs"]["layer"]
 
-    current_target_position, previous_target_positions = get_previous_target_positions(
+    Ag = Pyrs.Agent
+    current_target_position, previous_target_positions = get_previous_values(
         previous_target_positions, target_move_times, t_end=t_end
     )
     if current_target_position is None:
@@ -298,10 +360,10 @@ def plot_linear_track(
         ax1D[0].legend(ncol=ncol, frameon=False, loc="upper right")
 
         # plot place cell input weights to Pyr.
-        plot_fcts.plot_previous_1D_input_place_cell_weights(
+        plot_fcts.plot_recorded_1D_input_place_cell_weights(
             np.asarray(Pyrs_weights)[:, target_Pyr_idx],
-            Pyrs_weights_t,
             input_centres=PCs.place_cell_centres,
+            weights_t=Pyrs_weights_t,
             color=PCs.color,
             sub_ax=ax1D[1],
             t_start=t_start,
@@ -315,9 +377,10 @@ def plot_linear_track(
                 f"Pyrs.n ({Pyrs.n})"
             )
         elif Pyrs.n > 1:
-            target_Pyr_idx_str = f" (#{target_Pyr_idx})"
+            target_Pyr_idx_str = f" (#{target_Pyr_idx + 1})"
 
-        ax1D[1].axvline(current_target_position[0], ls="dashed", color="k")
+        if current_target_position is not None:
+            ax1D[1].axvline(current_target_position[0], ls="dotted", color="k")
         ax1D[1].spines[["top", "right", "left", "bottom"]].set_visible(False)
         ax1D[1].set_xticks([])
         ax1D[1].set_yticks([])
@@ -326,18 +389,28 @@ def plot_linear_track(
         )
         plot_util.pad_axis(ax1D[1], axis="y", pad_prop=0.2)
 
+        # match x lims for subplots 0 and 1
+        x_min = min([ax1D[i].get_xlim()[0] for i in range(2)])
+        x_max = max([ax1D[i].get_xlim()[1] for i in range(2)])
+        for i in range(2):
+            ax1D[i].set_xlim([x_min, x_max])
+
         # turn off buffer axis
         ax1D[2].axis("off")
 
         # plot time series
+        chosen_neurons = "all" if target_Pyr_idx == "all" else [target_Pyr_idx]
         Pyrs.plot_rate_timeseries(
             t_start=t_start,
             t_end=t_end,
             ax=ax1D[3:],
             adjust_xlim=True,
+            norm_by="max_per",
+            single_x_axis=True,
+            chosen_neurons=chosen_neurons,
             autosave=False,
             separate_axes=True,
-            **kwargs,
+            **Pyr_kwargs,
         )
 
         t = Pyrs.SomaCompartment.get_plotting_times(t_start, t_end)[0]
@@ -349,6 +422,7 @@ def plot_linear_track(
             actual_t_end=actual_t_end,
             dt=Pyrs.Agent.dt,
             convert_to_min=True,
+            ticks_last_only=True,
         )
 
         ax1D[3].set_ylabel("Soma")
@@ -359,11 +433,11 @@ def plot_linear_track(
 
 
 def plot_openfield(
-    Ag,
     Pyrs,
     Pyrs_weights,
     Pyrs_weights_t,
     target_Pyr_idx=0,
+    s=75,
     axes=None,
     t_start=0,
     t_end=100,
@@ -372,7 +446,7 @@ def plot_openfield(
     Pyr_kwargs=dict(),
 ):
     """
-    plot_openfield(Ag, Pyrs, Pyrs_weights, Pyrs_weights_t)
+    plot_openfield(Pyrs, Pyrs_weights, Pyrs_weights_t)
 
     Plots open field experiment for a specific timepoint. The plot consists of
     the following subplots:
@@ -383,21 +457,22 @@ def plot_openfield(
         (5) Time series of Pyr. interneuron (bottom, full width).
 
     Args:
-    - Ag (agent.ResetableAgent): Agent.
     - Pyrs (Resetable.Neuron): Pyr. neuron.
     - Pyrs_weights (list): List of input weights from place cells to Pyr. somata,
         across time, where input weights have shape (n_Pyrs, n_PCs).
     - Pyrs_weights_t (list): List of timepoints for the input weights from place
         cells to Pyr. somata.
     - target_Pyr_idx (int, optional): Index of the target Pyr. neuron for which to plot
-        input place cell weights. Default is 0.
+        timeseries and input place cell weights. If "all", max across weights is
+        plotted. Default is 0.
+    - s (int, optional): Marker size for the input weights. Default is 75.
     - axes (2D np.ndarray, optional): Array of 5 subplots. Default is None.
     - t_start (float, optional): Start timepoint for the plot. Default is 0.
     - t_end (float, optional): End timepoint for the plot. Default is 100.
     - addendum (str, optional): Addendum for the title. Default is None.
-    - traj_kwargs (dict, optional): Keyword arguments passed to
+    - traj_kwargs (dict, optional): Keyword arguments dictionary passed to
         agent.ResetableAgent.plot_trajectories(). Default is dict().
-    - Pyr_kwargs (dict, optional): Keyword arguments passed to
+    - Pyr_kwargs (dict, optional): Keyword arguments dictionary passed to
         two_comp_neurons.TwoComp.plot_rate_timeseries(). Default is dict().
 
     Returns:
@@ -406,7 +481,7 @@ def plot_openfield(
     """
 
     if axes is None:
-        fig, axes = init_openfield_fig()
+        fig, axes = init_openfield_fig(Pyrs.n)
     else:
         fig = np.asarray(axes).ravel()[0].figure
 
@@ -414,10 +489,10 @@ def plot_openfield(
     if addendum is not None and len(addendum):
         suptitle = f"{suptitle}\n({addendum})"
 
-    fig.suptitle(suptitle, fontweight="bold", y=1.02)
+    fig.suptitle(suptitle, fontweight="bold", y=0.98)
 
     ax1D = np.asarray(axes).ravel()
-    Ag.plot_trajectories(
+    Pyrs.Agent.plot_trajectories(
         t_start=t_start,
         t_end=t_end,
         sub_ax=ax1D[0],
@@ -432,30 +507,52 @@ def plot_openfield(
     ax1D[0].set_title("Trajectories")
 
     # plot place cell input weights to Pyr.
+    Pyrs_weights = np.asarray(Pyrs_weights)
+
     target_Pyr_idx_str = ""
-    if target_Pyr_idx >= Pyrs.n:
+    if target_Pyr_idx == "all":
+        target_Pyr_idx = 0
+        chosen_neurons = "all"
+        if Pyrs.n > 1:
+            Pyrs_weights = Pyrs_weights.max(axis=1, keepdims=True)
+            target_Pyr_idx_str = f" (max)"
+    elif target_Pyr_idx >= Pyrs.n:
         raise ValueError(
             f"weight_target_idx ({target_Pyr_idx}) must be less than "
             f"Pyrs.n ({Pyrs.n})"
         )
-    elif Pyrs.n > 1:
-        target_Pyr_idx_str = f" (#{target_Pyr_idx})"
+    else:
+        chosen_neurons = [target_Pyr_idx]
+        if Pyrs.n > 1:
+            target_Pyr_idx_str = f" (#{target_Pyr_idx})"
 
     weight_idx = np.where(np.asarray(Pyrs_weights_t) < t_end)[0][-1]
-    plot_fcts.plot_2D_input_place_cell_weights(
-        Pyrs.SomaCompartment,
-        PCs_input_name="PCs",
-        place_weights=Pyrs_weights[weight_idx][target_Pyr_idx : target_Pyr_idx + 1],
-        alpha=0.3,
-        t_end=t_end,
-        plot_BTSP_events=True,
-        no_legend=True,
-        ax=ax1D[1],
+
+    # handle any reshuffling of place cells
+    PCs = Pyrs.SomaCompartment.inputs["PCs"]["layer"]
+
+    previous_values = ([np.arange(PCs.n)] + PCs.shuffle_sorters)[:-1]
+    current_sorter, _ = get_previous_values(
+        previous_values, PCs.shuffle_times, t_end=t_end
     )
+    if current_sorter is None:
+        current_sorter = PCs._current_sorter
+
+    with TemporarilyReshufflePlaceCells(PCs, current_sorter):
+        plot_fcts.plot_2D_input_place_cell_weights(
+            Pyrs.SomaCompartment,
+            PCs_input_name="PCs",
+            place_weights=Pyrs_weights[weight_idx][target_Pyr_idx : target_Pyr_idx + 1],
+            alpha=0.3,
+            s=s,
+            chosen_neurons=chosen_neurons,
+            t_end=t_end,
+            plot_BTSP_events=True,
+            no_legend=True,
+            ax=ax1D[1],
+        )
     ax1D[1].set_ylabel("")
-    ax1D[1].set_title(
-        f"Input weights from place cells to Pyr. soma{target_Pyr_idx_str}"
-    )
+    ax1D[1].set_title(f"Input weights from PCs to Pyr. soma{target_Pyr_idx_str}")
 
     # plot time series
     Pyrs.plot_rate_timeseries(
@@ -463,6 +560,9 @@ def plot_openfield(
         t_end=t_end,
         ax=ax1D[2:],
         adjust_xlim=True,
+        norm_by="max_per",
+        single_x_axis=True,
+        chosen_neurons=chosen_neurons,
         autosave=False,
         separate_axes=True,
         **Pyr_kwargs,
@@ -477,6 +577,7 @@ def plot_openfield(
         actual_t_end=actual_t_end,
         dt=Pyrs.Agent.dt,
         convert_to_min=True,
+        ticks_last_only=True,
     )
 
     ax1D[0].set_xlabel("")
@@ -488,55 +589,54 @@ def plot_openfield(
 
 
 def animate(
-    Ag,
     Pyrs,
     Pyrs_weights,
     Pyrs_weights_t,
     target_Pyr_idx=0,
     t_start=None,
     t_end=None,
-    fps=5,
-    speed_up=6,
+    fps=8,
+    speed_up=3,
+    environment="linear_track",
     savename="animation",
     embed_limit=None,
-    environment="linear_track",
-    traj_kwargs=dict(),
-    Pyr_kwargs=dict(),
     autosave=None,
+    **kwargs,
 ):
     """
-    animate(Ag, Pyrs, Pyrs_weights, Pyrs_weights_t)
+    animate(Pyrs, Pyrs_weights, Pyrs_weights_t)
 
     Animates the agent's trajectory and the activity of the Pyr. neurons over time.
 
     Args:
-    - Ag (agent.ResetableAgent): Agent.
     - Pyrs (two_comp_neurons.TwoComp): Pyr. neurons.
     - Pyrs_weights (list): List of input weights from place cells to Pyr. somata,
         across time, where input weights have shape (n_Pyrs, n_PCs).
     - Pyrs_weights_t (list): List of timepoints for the input weights from place
         cells to Pyr. somata.
     - target_Pyr_idx (int, optional): Index of the target Pyr. neuron for which to plot
-        input place cell weights. Default is 0.
+        timeseries and input place cell weights. If "all", max across weights is
+        plotted. Default is 0.
     - t_start (float, optional): Start timepoint for the animation. Default is None.
     - t_end (float, optional): End timepoint for the animation. Default is None.
-    - fps (int, optional): Frames per second. Default is 5.
-    - speed_up (int, optional): Speed up factor. Default is 6.
+    - fps (int, optional): Frames per second. Default is 10.
+    - speed_up (int, optional): Speed up factor. Default is 3.
+    - environment (str, optional): Environment in which the agent is moving. Default
+        is "linear_track".
     - savename (str, optional): Name of the file to save the animation. Default is
         "animation".
     - embed_limit (int, optional): Limit for embedding the animation. Default is None.
-    - environment (str, optional): Environment in which the agent is moving. Default
-        is "linear_track".
-    - traj_kwargs (dict, optional): Keyword arguments passed to
-        agent.ResetableAgent.plot_trajectories(). Default is dict().
-    - Pyr_kwargs (dict, optional): Keyword arguments passed to
-        two_comp_neurons.TwoComp.plot_rate_timeseries(). Default is dict().
     - autosave (bool, optional): Whether to autosave the animation. If None, the
         global autosave setting for ratinabox is used. Default is None.
+
+    Keyword Args:
+    - kwargs: Additional keyword arguments passed to plotting function.
 
     Returns:
     - anim (matplotlib.animation.FuncAnimation): Animation object.
     """
+
+    start_time = time.perf_counter()
 
     if embed_limit is not None:
         matplotlib.rcParams["animation.embed_limit"] = embed_limit
@@ -550,19 +650,19 @@ def animate(
     else:
         raise ValueError(f"Unknown environment: {environment}")
 
-    fig, axes = init_fct()
+    n = Pyrs.n if target_Pyr_idx == "all" else 1
+    fig, axes = init_fct(n)
 
     plt.rcParams["animation.html"] = "jshtml"  # for animation rendering in juypter
 
     dt = 1 / fps
-    if t_start == None:
-        t_start = Ag.history["t"][0]
-    if t_end == None:
-        t_end = Ag.history["t"][-1]
 
-    def animate_(i, axes, t_start, speed_up, dt, traj_kwargs, Pyr_kwargs):
+    t = Pyrs.Agent.get_plotting_times(t_start, t_end)[0]
+    t_start, t_end = t[0], t[-1]
+
+    def animate_(i, axes, dt, t_start=0, speed_up=3, kwargs=dict()):
         """
-        animate_(i, axes, t_start, speed_up, dt, traj_kwargs, Pyr_kwargs)
+        animate_(i, axes, dt)
 
         Plots a single frame for an animation of the agent's trajectory and the
         activity of the Pyr. neurons over time.
@@ -570,25 +670,20 @@ def animate(
         Args:
         - i (int): Frame index.
         - axes (2D np.ndarray): Array of subplots.
-        - t_start (float): Start timepoint for the animation frame. Default is None.
-        - speed_up (int): Speed up factor.
         - dt (float): Time step for the animation frame.
-        - traj_kwargs (dict): Keyword arguments passed to
-            agent.ResetableAgent.plot_trajectories().
-        - Pyr_kwargs (dict): Keyword arguments passed to
-            two_comp_neurons.TwoComp.plot_rate_timeseries().
+        - t_start (float): Start timepoint for the animation frame. Default is 0.
+        - speed_up (int): Speed up factor. Default is 3.
+        - kwargs (dict): Dictionary of additional keyword arguments passed to plotting
+            function. Default is dict().
         """
 
         t_end = t_start + (i + 1) * speed_up * dt
 
         ax1D = np.asarray(axes).ravel()
         if environment == "openfield":
-            if len(ax1D[1].images) == 2:
-                cbar = ax1D[1].images[0].colorbar
-                if cbar is None:
-                    raise RuntimeError("Colorbar not found.")
-                cbar.set_label("")
-                cbar.set_ticks([])
+            all_axes = ax1D[-1].figure.axes
+            if len(all_axes) == 6:
+                fig.delaxes(all_axes[5])
 
         for sub_ax in ax1D:
             sub_ax.clear()
@@ -597,8 +692,8 @@ def animate(
             warnings.filterwarnings(
                 "ignore", category=UserWarning, message="This figure was using"
             )
+
             plot_fct(
-                Ag,
                 Pyrs,
                 Pyrs_weights,
                 Pyrs_weights_t,
@@ -606,12 +701,11 @@ def animate(
                 axes=axes,
                 t_start=t_start,
                 t_end=t_end,
-                traj_kwargs=traj_kwargs,
-                Pyr_kwargs=Pyr_kwargs,
+                **kwargs,
             )
 
         if environment == "openfield":
-            plot_util.remove_prev_handle_labels(ax1D[0])
+            plot_util.remove_duplicate_handle_labels(ax1D[0])
             plt.close()
         return
 
@@ -621,9 +715,14 @@ def animate(
         interval=1000 * dt,
         frames=int((t_end - t_start) / (dt * speed_up)),
         blit=False,
-        fargs=(axes, t_start, speed_up, dt, traj_kwargs, Pyr_kwargs),
+        fargs=(axes, dt, t_start, speed_up, kwargs),
     )
 
-    rutils.save_animation(anim, savename, anim_save_types=["gif", "mp4"], save=autosave)
+    rutils.save_animation(anim, savename, anim_save_types=["mp4", "gif"], save=autosave)
+
+    stop_time = time.perf_counter()
+    time_min = (stop_time - start_time) / 60
+
+    print(f"Animation took {time_min:.2f} min. to create.")
 
     return anim

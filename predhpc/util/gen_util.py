@@ -6,7 +6,20 @@ from numpy.lib.stride_tricks import sliding_window_view
 import scipy  # type: ignore[import]
 from scipy.optimize import curve_fit
 
+import ratinabox
 from ratinabox import utils as rutils  # type: ignore[import]
+
+
+class TempFigureDirectory:
+    def __init__(self, figure_directory):
+        self.figure_directory = str(figure_directory)
+
+    def __enter__(self):
+        self.original_figure_directory = ratinabox.figure_directory
+        ratinabox.figure_directory = self.figure_directory
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        ratinabox.figure_directory = self.original_figure_directory
 
 
 def trim_dict(data_dict):
@@ -78,7 +91,7 @@ def get_index_of_closest(data, value=0, method="nearest"):
     return index
 
 
-def get_minima_indices(data, min_pts_btw=50, minimum=None, single_direction=False):
+def get_minima_indices(data, min_pts_btw=30, minimum=None, single_direction=False):
     """
     get_minima_indices(data)
 
@@ -87,7 +100,7 @@ def get_minima_indices(data, min_pts_btw=50, minimum=None, single_direction=Fals
     Args:
     - data (1D np.ndarray): Data.
     - min_pts_btw (int, optional): Minimum number of points between minima.
-        Default is 50.
+        Default is 30.
     - minimum (float, optional): Minimum value to consider point a minimum.
         Default is None.
     - single_direction (bool, optional): If True, only counts minima in the provided
@@ -214,6 +227,42 @@ def get_nonzero_edges(data, num_consec_thr=5):
     edges = np.asarray(edges).T
 
     return edges
+
+
+def get_rayleigh_sigma(mean):
+    """
+    get_rayleigh_sigma(mean)
+
+    Obtain the sigma of a Rayleigh distribution from a target mean.
+
+    Args:
+    - mean (float): Target mean of the Rayleigh distribution.
+
+    Returns:
+    - sigma (float): Sigma of the Rayleigh distribution.
+    """
+
+    sigma = mean / np.sqrt(np.pi / 2)
+
+    return sigma
+
+
+def get_rayleigh_mean(sigma):
+    """
+    get_rayleigh_mean(sigma)
+
+    Compute the mean of a Rayleigh distribution from its sigma parameter.
+
+    Args:
+    - sigma (float): Sigma of the Rayleigh distribution.
+
+    Returns:
+    - mean (float): Target mean of the Rayleigh distribution.
+    """
+
+    mean = sigma * np.sqrt(np.pi / 2)
+
+    return mean
 
 
 def fit_exp(xs, ys, log=True):
@@ -509,6 +558,113 @@ def get_distance_to_target(positions, target):
     return distances
 
 
+def get_binned_rates(
+    rate,
+    rel_pos,
+    vel=None,
+    num_bins=100,
+    part_run=0.2,
+    merge=True,
+    new_trial=0.2,
+    vel_sign_smooth=39,  # 5,
+):
+    """
+    get_binned_rates(rate, rel_pos)
+
+    Bin rates by relative position. Individual runs are identified by large changes
+    in position and changes in velocity sign, if velocity is provided.
+
+    Args:
+    - rate (2D np.ndarray): Rates, with shape (time, neurons).
+    - rel_pos (1D np.ndarray): Relative position.
+    - vel (1D np.ndarray, optional): Velocity. Default is None.
+    - num_bins (int, optional): Number of bins. Default is 100.
+    - part_run (float, optional): Proportion of a run to consider for run merging
+        or deletion. Default is 0.2.
+    - merge (bool, optional): Whether to merge trials that are too short. If False,
+        short trials are deleted. Default is True.
+    - new_trial (float, optional): Minimum change in relative position to consider
+        a new trial. Default is 0.3.
+    - vel_sign_smooth (int, optional): Number of points to smooth velocity sign.
+        Default is 5.
+
+    Returns:
+    - binned_rate_means (3D np.ndarray): Mean rates binned by relative position, with
+        shape (trials, bins, neurons).
+    - occupancy (2D np.ndarray): Number of occurrences in each bin, with shape
+        (trials, bins).
+    """
+
+    if len(rel_pos.shape) != 1:
+        raise ValueError("Relative position must be 1D.")
+    if rel_pos.min() < 0 or rel_pos.max() > 1:
+        raise ValueError("Relative position must be between 0 and 1.")
+    if len(rate) != len(rel_pos):
+        raise ValueError("Rate and relative position must have the same length.")
+
+    num_neurons = rate.shape[1]
+
+    # bin rate by
+    rel_pos_bins = np.linspace(0, 1, num_bins + 1)
+    binned_rel_pos = np.digitize(rel_pos, rel_pos_bins) - 1
+
+    change_pts = np.where(np.abs(np.diff(rel_pos)) > new_trial)[0] + 1
+
+    if vel is not None:
+        if len(vel) != len(rel_pos):
+            raise ValueError(
+                "Velocity and relative position must have the same length."
+            )
+        vel_sign = np.sign(vel)
+        if vel_sign_smooth > 1:
+            if vel_sign_smooth % 2 == 0:
+                raise ValueError("vel_sign_smooth must be odd.")
+            vel_sign = np.sign(smooth_data(vel_sign.astype(float), vel_sign_smooth))
+        vel_change_pts = np.where(np.diff(vel_sign))[0] + 1
+        change_pts = np.concatenate([change_pts, vel_change_pts])
+
+    change_pts = np.sort(np.unique(np.concatenate([[0], change_pts, [len(rel_pos)]])))
+
+    binned_rate_sums = np.zeros((len(change_pts) - 1, num_bins, num_neurons))
+    occupancy = np.zeros((len(change_pts) - 1, num_bins))
+    prev_used = None
+    for i, change_pt in enumerate(change_pts[1:]):
+        start = change_pts[i]
+        end = change_pt
+        curr_num_vals = np.asarray(
+            [sum(binned_rel_pos[start:end] == i) for i in range(num_bins)]
+        )
+        if len(np.where(curr_num_vals)[0]) >= num_bins * part_run:
+            i = 0 if prev_used is None else i
+            prev_used = i
+        elif merge:
+            i = 0 if prev_used is None else prev_used  # merge back
+        else:
+            continue
+
+        occupancy[i] += curr_num_vals
+
+        to_add = np.asarray(
+            [
+                np.sum(
+                    rate[start:end][np.where(binned_rel_pos[start:end] == i)[0]], axis=0
+                )
+                for i in range(num_bins)
+            ]
+        )
+
+        binned_rate_sums[i] += to_add
+
+    empty = np.where(occupancy.sum(axis=1) == 0)
+    occupancy = np.delete(occupancy, empty, axis=0)
+    binned_rate_sums = np.delete(binned_rate_sums, empty, axis=0)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        binned_rate_means = binned_rate_sums / occupancy.reshape(*occupancy.shape, 1)
+
+    return binned_rate_means, occupancy
+
+
 def get_filtered_signal(
     f_t1: np.ndarray,
     X_t: np.ndarray | None = None,
@@ -688,7 +844,9 @@ def get_pre_post_exponential(
     if post_filter_tau is None:
         post_exp = np.asarray([pre_exp[-1]])
     else:
-        post_filter_tau = get_relative_filter_tau(post_filter_tau)
+        post_filter_tau = get_relative_filter_tau(
+            post_filter_tau, base_filter_tau=filter_tau
+        )
         post_exp = get_exponential(post_filter_tau, post_trend_tau, dt=dt)
 
     pre_post_exp = np.concatenate([pre_exp, post_exp[1:]])
@@ -967,7 +1125,7 @@ def smooth_data(data, k=5, handle_nans=False):
     if len(data.shape) == 1:
         smoothed_data = convolve1D(data)
 
-    if len(data.shape) == 2:
+    elif len(data.shape) == 2:
         smoothed_data = np.asarray([convolve1D(data1D) for data1D in data])
 
     elif len(data.shape) == 3:

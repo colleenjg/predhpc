@@ -1,3 +1,4 @@
+import time
 from typing import Any, TYPE_CHECKING, Callable, Sequence
 import warnings
 
@@ -14,7 +15,7 @@ from ratinabox import Agent as riabAgent  # type: ignore[import]
 from ratinabox import utils as rutils
 
 from predhpc import env, plot_fcts
-from predhpc.util import gen_util, plot_util, ext_util
+from predhpc.util import gen_util, plot_util, ext_util, params_util
 
 
 class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
@@ -36,9 +37,10 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         "reset_position": None,  # position to reset trajectories from
         "target_position": None,  # position to use as target
         "wait_between_targets": 10,  # number of steps to wait between target reaching
-        "reset_reached_within_tol_prop_to_speed_dt": 0.55,  # proportion of current speed to use as reset tolerance
-        "target_reached_within_tol_prop_to_speed_dt": 0.55,  # proportion of current speed to use as target tolerance
+        "reset_reached_within_tol_prop_to_speed_dt": None,  # proportion of current expected step size to use as reset tolerance
+        "target_reached_within_tol_prop_to_speed_dt": None,  # proportion of current expected step size to use as target tolerance
         "fixed_direction": False,  # keep same direction (1D environment only)
+        "wait_at_end": 0,  # number of steps to wait at the end of a trajectory (1D environment only)
     }
 
     List of properties (in addition to ratinabox.Agent properties):
@@ -82,9 +84,10 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         "reset_position": None,  # position to reset trajectories from
         "target_position": None,  # position to use as target
         "wait_between_targets": 10,  # number of steps to wait between target reaching
-        "reset_reached_within_tol_prop_to_speed_dt": 0.55,  # proportion of current speed * dt to use as reset tolerance
-        "target_reached_within_tol_prop_to_speed_dt": 0.55,  # proportion of current speed * dt to use as target tolerance
+        "reset_reached_within_tol_prop_to_speed_dt": None,  # proportion of current expected step size to use as reset tolerance
+        "target_reached_within_tol_prop_to_speed_dt": None,  # proportion of current expected step size to use as target tolerance
         "fixed_direction": False,  # keep same direction (1D environment only)
+        "wait_at_end": 0,  # number of steps to wait at the end of a trajectory (1D environment only)
     }
 
     ignored_param_keys = list()  # type: list[str]
@@ -114,6 +117,9 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         self.check_if_ignored_params(params)
         params = self.add_fixed_params(params)
 
+        if Env.D == 2 and "speed_std" in params and params["speed_std"] != 0:
+            warnings.warn("Speed std is ignored in a 2D environment, unless set to 0.")
+
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
 
@@ -128,6 +134,10 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         if self.Environment.dimensionality == "2D":
             self.fixed_direction = False
+            self.wait_at_end = 0
+        self._waiting_at_end = 0
+
+        self._init_tolerances()
 
         self.set_all_positions()
         self._init_trajectory_lengths()
@@ -204,6 +214,35 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             self._trajectory_df_columns = trajectory_df_columns
 
         return self._trajectory_df_columns
+
+    def _init_tolerances(self):
+        """
+        self._init_tolerances()
+
+        Initialise the tolerances for checking if the reset and target positions are
+        reached.
+
+        Attributes:
+        - reset_reached_within_tol_prop_to_speed_dt (float): Proportion of current
+            expected step size (speed * dt) to use as reset tolerance.
+        - target_reached_within_tol_prop_to_speed_dt (float): Proportion of current
+            expected step size (speed * dt) to use as target tolerance.
+        """
+
+        if self.Environment.D == 1:
+            val = params_util.TOLERANCE_LINEAR
+        else:
+            val = params_util.TOLERANCE_2D
+
+        if self.reset_reached_within_tol_prop_to_speed_dt is None:
+            if self.target_reached_within_tol_prop_to_speed_dt is not None:
+                val = self.target_reached_within_tol_prop_to_speed_dt
+            self.reset_reached_within_tol_prop_to_speed_dt = val
+
+        if self.target_reached_within_tol_prop_to_speed_dt is None:
+            if self.reset_reached_within_tol_prop_to_speed_dt is not None:
+                val = self.reset_reached_within_tol_prop_to_speed_dt
+            self.target_reached_within_tol_prop_to_speed_dt = val
 
     def _init_trajectory_df(self):
         """
@@ -410,6 +449,128 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         self.velocity = new_velocity
 
+    def get_speed(
+        self,
+        linear: bool = True,
+        directional: bool = False,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        cm: bool = True,
+        smooth_k: int = 1,
+        ignore_near_zero: bool = False,
+        thr: float = 1e-4,
+    ):
+        """
+        self.get_speed()
+
+        Obtain the speed or velocity of of the agent.
+
+        Args:
+        - linear (bool, optional): Whether to plot the linear speed, if environment is
+            2D. Default is True.
+        - directional (bool, optional): Whether to plot the directional speed
+            (velocity), if environment is 1D or linear is False. Default is False.
+        - t_start (float, optional): Start time. Default is None.
+        - t_end (float, optional): End time. Default is None.
+        - cm (bool, optional): Whether to plot in cm/s. Default is True.
+        - smooth_k (int, optional): Smoothing factor. Default is 1.
+        - ignore_near_zero (bool, optional): Whether to ignore near zero speed values.
+            Default is False.
+        - thr (float, optional): Threshold for ignoring near zero speed values.
+            Default is 1e-4.
+
+        Returns:
+        - speed (2D np.ndarray): Speed of the agent, with shape (frames, dim).
+        """
+
+        _, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
+
+        speed = np.asarray(self.history["vel"])[startid : endid + 1]
+
+        if ignore_near_zero:
+            zero_mask = (np.absolute(speed) < thr).all(axis=1)
+            speed = speed[~zero_mask]
+
+        if self.Environment.D == 2 and linear:
+            if directional:
+                raise ValueError(
+                    "Directional and linear are not compatible for 2D environments."
+                )
+            speed = np.linalg.norm(speed, ord=2, axis=1)
+            speed = speed.reshape(-1, 1)
+        elif not directional:
+            speed = np.absolute(speed)
+
+        if cm:
+            speed *= 100
+
+        if smooth_k > 1:
+            speed = gen_util.smooth_data(speed.T, k=smooth_k).T
+
+        return speed
+
+    def log_speed_stats(
+        self,
+        linear: bool = True,
+        directional: bool = False,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        cm: bool = True,
+        ignore_near_zero: bool = False,
+        thr: float = 1e-4,
+    ):
+        """
+        self.log_speed_stats()
+
+        Log the mean and standard deviation of the speed.
+
+        Args:
+        - linear (bool, optional): Whether to plot the linear speed, if environment is
+            2D. Default is True.
+        - directional (bool, optional): Whether to plot the directional speed
+            (velocity), if environment is 1D or linear is False. Default is False.
+        - t_start (float, optional): Start time. Default is None.
+        - t_end (float, optional): End time. Default is None.
+        - cm (bool, optional): Whether to log in cm/s. Default is True.
+        - ignore_near_zero (bool, optional): Whether to ignore near zero speed values.
+            Default is False.
+        - thr (float, optional): Threshold for ignoring near zero speed values.
+            Default is 1e-4.
+        """
+
+        speed = self.get_speed(
+            t_start=t_start,
+            t_end=t_end,
+            linear=linear,
+            directional=directional,
+            cm=cm,
+            ignore_near_zero=ignore_near_zero,
+            thr=thr,
+        )
+
+        log_str = self.get_speed_label(
+            linear=linear, directional=directional, incl_unit=False
+        )
+
+        speed_mean = np.mean(speed, axis=0)
+        speed_std = np.std(speed, axis=0)
+
+        unit = "cm" if cm else "m"
+
+        if len(speed_mean) == 2:
+            log_str = (
+                f"{log_str} mean: {speed_mean[0]:.2f}, {speed_mean[1]:.2f} {unit}/s "
+                f"in x, y, respectively.\n{log_str} std: {speed_std[0]:.2f}, "
+                f"{speed_std[1]:.2f} {unit}/s in x, y, respectively."
+            )
+        else:
+            log_str = (
+                f"{log_str} mean: {speed_mean[0]:.2f} {unit}/s, "
+                f"std: {speed_std[0]:.2f} {unit}/s."
+            )
+
+        print(log_str)
+
     def get_plotting_times(
         self,
         t_start: float | None = None,
@@ -430,7 +591,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         Returns:
         - t (1D np.ndarray): Times to plot.
         - startid (int): Index of the start time point.
-        - endid (int): Index of the end time point.
+        - endid (int): Index of the end time point (exclusionary, add 1 for indexing).
         """
 
         t = np.asarray(self.history["t"])
@@ -650,7 +811,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
     def sample_position_within_tolerance(
         self,
         position: np.ndarray[tuple[int], np.dtype[np.float64]],
-        sample_within_tol_prop_to_speed_dt: float = 0.5,
+        sample_within_tol_prop_to_speed_dt: float = 1.0,
         max_attempts: int = 100,
     ) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
         """
@@ -661,8 +822,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         Args:
         - position (1D np.ndarray): The position to sample around.
         - sample_within_tol_prop_to_speed_dt (float): The proportion of the
-            tolerance to sample within. Default is None, in which case the agent's
-            target_reached_within_tol_prop_to_speed_dt is used.
+            tolerance to sample within. Default is 1.0.
 
         Returns:
         - new_position (1D np.ndarray): The sampled position.
@@ -694,6 +854,20 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             )
 
         return new_position
+
+    def get_completed_trajectories_df(self):
+        """
+        self.get_completed_trajectories_df()
+
+        Obtain the dataframe of all completed trajectories.
+
+        Returns:
+        - completed_df (pd.DataFrame): Dataframe of all completed trajectories.
+        """
+
+        completed_df = self.trajectory_df.loc[self.trajectory_df["stop_step"].notna()]
+
+        return completed_df
 
     def get_trajectory_lengths_to_date(self):
         """
@@ -772,7 +946,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
     def check_if_position_reached(
         self,
         position: np.ndarray[tuple[int], np.dtype[np.float64]] | None = None,
-        sample_within_tol_prop_to_speed_dt: float = 0.55,
+        tol_prop_to_speed_dt: float | None = None,
     ) -> bool:
         """
         self.check_if_position_reached()
@@ -782,8 +956,9 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         Args:
         - position (1D np.array): Position to check if reached.
-        - sample_within_tol_prop_to_speed_dt (float):
-            Tolerance proportion, wrt mean speed * dt.
+        - tol_prop_to_speed_dt (float):
+            Tolerance proportion, wrt mean speed * dt. If None,
+            self.target_reached_within_tol_prop_to_speed_dt is used. Default is None.
 
         Returns:
         - position_reached (bool): Whether the agent has reached the target position,
@@ -793,12 +968,15 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         position_reached = False
 
         if position is not None:
+            if tol_prop_to_speed_dt is None:
+                tol_prop_to_speed_dt = self.target_reached_within_tol_prop_to_speed_dt
+
             # calculate the distance between the current position and the reset position
             dist = np.linalg.norm(self.pos - position, ord=2)
 
             # check if the distance is less than the tolerance
             speed = np.linalg.norm(self.velocity, ord=2)
-            reached_dist = speed * self.dt * sample_within_tol_prop_to_speed_dt
+            reached_dist = speed * self.dt * tol_prop_to_speed_dt
             if dist < reached_dist:  # type: ignore[has-type]
                 position_reached = True
 
@@ -850,7 +1028,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 self.target_position, self.target_reached_within_tol_prop_to_speed_dt  # type: ignore[attr-defined]
             )
             if target_reached:
-                self.steps_before_checking_for_target = self.wait_between_targets  # type: ignore[attr-defined]
+                self.steps_before_checking_for_target = self.wait_between_targets + 1  # type: ignore[attr-defined]
 
         return target_reached
 
@@ -936,6 +1114,20 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         return reset_times
 
+    def get_reached_target_df(self):
+        """
+        self.get_reached_target_df()
+
+        Obtain the dataframe of all reached targets.
+
+        Returns:
+        - reached_df (pd.DataFrame): Dataframe of all reached targets.
+        """
+
+        reached_df = self.target_df.loc[self.target_df["reached_step"].notna()]
+
+        return reached_df
+
     def get_reached_position_steps(self, position_name: str = "reset") -> np.ndarray:
         """
         self.get_reached_position_steps()
@@ -948,22 +1140,45 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         """
 
         if position_name == "start":
-            reached_position_steps = self.trajectory_df["stop_step"].to_numpy() - 1
+            reached_position_steps = self.trajectory_df["start_step"].to_numpy()
         elif position_name == "reset":
-            reached_position_steps = self.trajectory_df["stop_step"].to_numpy()
+            completed_traj_df = self.get_completed_trajectories_df()
+            reached_position_steps = completed_traj_df["stop_step"].to_numpy()
         elif position_name == "target":
-            reached_position_steps = self.target_df["reached_step"].to_numpy()
+            reached_target_df = self.get_reached_target_df()
+            reached_position_steps = reached_target_df["reached_step"].to_numpy()
         else:
             raise NotImplementedError(
                 f"Position name must be 'start', 'reset', or 'target', but got "
                 f"{position_name}."
             )
 
-        if np.isnan(reached_position_steps[-1]):
-            reached_position_steps = reached_position_steps[:-1]
         reached_position_steps = reached_position_steps.astype(int)
 
         return reached_position_steps
+
+    def get_distances_from_target(self, norm=True):
+        """
+        self.get_distances_from_target()
+
+        Obtain the distances from the target position.
+
+        Args:
+        - norm (bool, optional): Whether to normalise the distances. Default is True.
+
+        Returns:
+        - distances (1D np.ndarray): Distances from the target position.
+        """
+
+        all_positions = np.asarray(self.history["pos"])
+        distances = np.linalg.norm(
+            self.target_position - all_positions, ord=2, axis=1  # type: ignore[attr-defined]
+        )
+
+        if norm:
+            distances = distances / distances.max()
+
+        return distances
 
     def reset(self):
         """
@@ -988,6 +1203,9 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             self.trajectory_length = self.trajectory_lengths[i]
 
         self.current_trajectory_length = 0
+
+        if self.wait_at_end > 0 and self._waiting_at_end == 0:
+            self._waiting_at_end = self.wait_at_end + 1
 
         self._add_new_trajectory_to_df()
 
@@ -1028,6 +1246,10 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             if self.check_if_trajectory_end_reached():
                 self.reset()
 
+        if self._waiting_at_end > 0:
+            self._waiting_at_end -= 1
+            new_pos = self.pos
+
         # check for a forced next position
         if new_pos is not None:
             kwargs["forced_next_position"] = new_pos
@@ -1043,6 +1265,219 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         self.current_trajectory_length += 1
         self.num_steps_total += 1
+
+    def get_speed_label(self, linear=True, directional=False, cm=True, incl_unit=True):
+        """
+        self.get_speed_label()
+
+        Obtain the label for the speed plot.
+
+        Args:
+        - linear (bool, optional): Whether to plot the linear speed, if environment is
+            2D. Default is True.
+        - directional (bool, optional): Whether to plot the directional speed
+            (velocity), if environment is 1D or linear is False. Default is False.
+        - cm (bool, optional): Whether to plot in cm/s. Default is True.
+        - incl_unit (bool, optional): Whether to include the unit in the label.
+            Default is True.
+
+        Returns:
+        - label (str): Label for the speed plot.
+        """
+
+        if self.Environment.D == 2 and linear:
+            label = "Linear speed"
+        elif directional:
+            label = "Velocity"
+        else:
+            label = "Speed"
+
+        if incl_unit:
+            unit = "cm" if cm else "cm"
+
+            label = f"{label} ({unit}/s)"
+
+        return label
+
+    def plot_speed(
+        self,
+        linear=True,
+        directional=False,
+        t_start=None,
+        t_end=None,
+        cm=True,
+        smooth_k=1,
+        color="black",
+        mark_mean=False,
+        mark_median=False,
+        sub_ax=None,
+        autosave=None,
+        **kwargs,
+    ):
+        """
+        self.plot_speed()
+
+        Plot the speed of the agent.
+
+        Args:
+        - linear (bool, optional): Whether to plot the linear speed, if environment is
+            2D. Default is True.
+        - directional (bool, optional): Whether to plot the directional speed
+            (velocity), if environment is 1D or linear is False. Default is False.
+        - t_start (float, optional): Start time. Default is None.
+        - t_end (float, optional): End time. Default is None.
+        - cm (bool, optional): Whether to plot in cm/s. Default is True.
+        - smooth_k (int, optional): Smoothing factor. Default is 1.
+        - color (str, optional): Line color. Default is "black".
+        - mark_mean (bool, optional): Whether to mark the mean speed. Default is False.
+        - mark_median (bool, optional): Whether to mark the median speed.
+            Default is False.
+        - sub_ax (plt.Axes, optional): Subplot axis to plot on. Default is None.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the
+            global autosave setting for ratinabox is used. Default is None.
+
+        Keyword args:
+        - **kwargs: Keyword arguments passed to plt.plot().
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot axis with the agent's speed plotted.
+        """
+
+        t, _, _ = self.get_plotting_times(t_start=t_start, t_end=t_end)
+
+        speed = self.get_speed(
+            linear=linear,
+            directional=directional,
+            t_start=t_start,
+            t_end=t_end,
+            cm=cm,
+            smooth_k=smooth_k,
+        )
+
+        title = self.get_speed_label(
+            linear=linear, directional=directional, incl_unit=False
+        )
+        unit = "cm" if cm else "m"
+
+        if sub_ax is None:
+            _, sub_ax = plt.subplots(figsize=(6, 2))
+
+        if speed.shape[1] == 2:
+            labels = ["x", "y"]
+            lws = [1.0, 0.6]
+            alpha = 0.6
+        else:
+            labels = [None, None]
+            lws = [None, None]
+            alpha = 0.8
+
+        kwargs["color"] = color
+        mark_lines = [mark_mean, mark_median]
+        line_labels = ["mean", "median"]
+        line_ls = ["dashed", "dotted"]
+        for i, axis_speed in enumerate(speed.T):
+            kwargs["lw"] = lws[i]
+            sub_ax.plot(
+                t,
+                axis_speed,
+                label=labels[i],
+                alpha=alpha,
+                **kwargs,
+            )
+
+            for mark_line, line_label, ls in zip(mark_lines, line_labels, line_ls):
+                if not mark_line:
+                    continue
+                fct = np.mean if line_label == "mean" else np.median
+                axis_stat = fct(axis_speed)
+                sub_ax.axhline(
+                    axis_stat,
+                    ls=ls,
+                    label=f"{line_label} ({axis_stat:.2f} {unit}/s)",
+                    color=color,
+                    alpha=alpha,
+                    zorder=-5,
+                )
+
+        if speed.shape[1] == 2 or mark_mean or mark_median:
+            sub_ax.legend()
+
+        sub_ax.set_title(f"{title} ({unit}/s)")
+        sub_ax.set_xlabel("Time / s")
+        plot_util.pad_axis(sub_ax, "y")
+
+        sub_ax.spines[["top", "right"]].set_visible(False)
+
+        savename = title.lower().replace(" ", "_")
+        plot_util.save_figure(sub_ax.figure, savename, save=autosave)
+
+        return sub_ax
+
+    def plot_occupancy(self, t_start=None, t_end=None, sub_ax=None, nbins=40, **kwargs):
+        """
+        self.plot_occupancy()
+
+        Plot the occupancy of the agent.
+
+        Args:
+        - t_start (float, optional): Start time. Default is None.
+        - t_end (float, optional): End time. Default is None.
+        - sub_ax (plt.Axes, optional): Subplot axis to plot on. Default is None.
+        - nbins (int, optional): Number of bins for the histogram. Default is 30.
+
+        Keyword args:
+        - **kwargs: Keyword arguments passed to plot_environment() if environment is 2D.
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot axis with the agent's occupancy plotted.
+        """
+
+        _, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
+        position = np.asarray(self.history["pos"])[startid : endid + 1]
+
+        if self.Environment.D == 1:
+            if sub_ax is None:
+                sub_ax = plt.subplots(figsize=(6, 1.5))[1]
+
+            plot_fcts.plot_1D_reset_environment(
+                self, title="", sub_ax=sub_ax, autosave=False
+            )
+
+            sub_ax.hist(position, bins=nbins, color="black", alpha=0.6, zorder=0)
+            sub_ax.set_ylabel("Occupancy (frames)")
+            plot_util.pad_axis(sub_ax, "y", pad_prop=0.05, end="low")
+
+        else:
+            if sub_ax is None:
+                sub_ax = plt.subplots(figsize=(4, 3))[1]
+
+            self.Environment.plot_environment(sub_ax=sub_ax, autosave=False, **kwargs)
+
+            extent = self.Environment.extent
+            scale = max(np.diff(extent[:2]), np.diff(extent[2:]))
+            occupancy = rutils.bin_data_for_histogramming(
+                data=position,
+                extent=self.Environment.extent,
+                dx=scale / nbins,
+                norm_by_bincount=False,
+                return_zero_bins=False,
+            )
+
+            im = sub_ax.imshow(
+                occupancy,
+                extent=extent,
+                cmap="viridis",
+                aspect="auto",
+                interpolation="none",
+                zorder=0,
+            )
+
+            cbar = sub_ax.figure.colorbar(im, ax=sub_ax)
+            cbar.set_label("Occupancy (frames)")
+
+        sub_ax.set_title("Position histogram")
+
+        return sub_ax
 
     def plot_trajectory(self, return_traj_fig=False, **kwargs) -> plt.Axes:
         """
@@ -1106,6 +1541,49 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         fig = sub_ax.figure
         plot_util.save_figure(fig, "trajectories_to_date", save=autosave)
+
+        return sub_ax
+
+    def plot_distance_to_target(
+        self, norm=True, flipped=True, sub_ax=None, autosave=None
+    ):
+        """
+        self.plot_distance_to_target()
+
+        Plot the distances an agent was from the current target position across the
+        agent's history.
+
+        Args:
+        - norm (bool, optional): Whether to normalise the distances. Default is True.
+        - flipped (bool, optional): Whether to flip the distances. Default is True.
+        - sub_ax (plt.Axes, optional): Subplot axis to plot on. Default is None.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the
+            global autosave setting for ratinabox is used. Default is None.
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot axis with the distances from the target plotted.
+        """
+
+        time_in_min = np.asarray(self.history["t"]) / 60
+
+        distances = self.get_distances_from_target(norm=norm)
+
+        if sub_ax is None:
+            _, sub_ax = plt.subplots(figsize=(6, 2))
+
+        if flipped:
+            distances = -distances
+
+        sub_ax.plot(time_in_min, distances, color="black", alpha=0.6, lw=1)
+
+        if flipped:
+            sub_ax.set_ylim(distances.min() * 1.2, sub_ax.get_ylim()[1])
+        else:
+            sub_ax.set_ylim(sub_ax.get_ylim()[0], distances.max() * 1.2)
+
+        sub_ax.set_title("Distance to target")
+        sub_ax.set_xlabel("Time / min")
+        sub_ax.spines[["left", "top", "right"]].set_visible(False)
 
         return sub_ax
 
@@ -1207,7 +1685,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             )
 
         sub_ax.set_xlabel("Time / min")
-        sub_ax.set_ylabel(f"Distance to {position_name} / m")
+        sub_ax.set_ylabel(f"Distance to {position_name.replace('_', ' ')} / m")
         sub_ax.spines[["right", "top"]].set_visible(False)
 
         fig = sub_ax.figure
@@ -1295,6 +1773,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         color: str = "k",
         s: int | float = 5,
         plot_targets: bool = True,
+        rasterize_traj: bool = False,
         xlim: float | None = None,
         autosave: bool | None = None,
     ) -> plt.Axes:
@@ -1319,6 +1798,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         - color (str, optional): Trajectory point color or colors. Default is 'k'.
         - s (float, optional): Size of scatterplot markers. Default is 5.
         - plot_targets (bool, optional): Whether to plot the target. Default is True.
+        - rasterize_traj (bool, optional): Whether to rasterize the trajectory scatter
+            points, reducing the size of exported vector files. Default is False.
         - xlim (float, optional): Upper x axis limit to set (in minutes).
             Default is None.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
@@ -1360,6 +1841,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 marker=mpl_markers.MarkerStyle("."),
                 color=color,
                 s=s,
+                rasterized=rasterize_traj,
             )
 
             for position_name in positions_to_plot:
@@ -1487,8 +1969,9 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         cmap_per: bool = False,
         scale_cmap_per: bool = False,
         s_2D: int | float = 15,
-        size_fact: float | None = None,
+        rasterize_traj: bool = False,
         autosave: bool | None = None,
+        **env_kwargs,
     ) -> plt.Axes:
         """
         self.plot_trajectories()
@@ -1535,10 +2018,14 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             Default is False.
         - s_2D (float, optional): Size of trajectory points, if environment is 2D.
             Default is 15.
-        - size_fact (float, optional): Size by which to multiply environment size,
-            if environment is 2D. Default is None.
+        - rasterize_traj (bool, optional): Whether to rasterize the trajectory scatter
+            points, reducing the size of exported vector files. Default is False.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
-        global autosave setting for ratinabox is used. Default is None.
+            global autosave setting for ratinabox is used. Default is None.
+
+        Keyword args:
+        - **env_kwargs: Additional keyword arguments passed to
+            self.Environment.plot_environment() if environmet is 2D.
 
         Returns:
         - sub_ax (plt.Axes): Subplot with trajectories plotted.
@@ -1576,10 +2063,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         traj_idx = np.concatenate(full_traj_idx).astype(int)[idx]
 
         if self.Environment.dimensionality == "2D":
-            if size_fact is not None:
-                figsize = self.Environment.get_environment_figsize(size_fact)
-                _, sub_ax = plt.subplots(figsize=figsize)
-            sub_ax = self.Environment.plot_environment(sub_ax=sub_ax)
+            sub_ax = self.Environment.plot_environment(sub_ax=sub_ax, **env_kwargs)
 
             if plot_target and self.target_position is not None:
                 sub_ax.scatter(
@@ -1609,6 +2093,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 zorder=2,
                 c=colors,
                 linewidth=0,
+                rasterized=rasterize_traj,
             )
 
             if plot_agent == True:
@@ -1658,6 +2143,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         plot_starts: bool = True,
         plot_ends: bool = True,
         autosave: bool | None = None,
+        **env_kwargs,
     ) -> plt.Axes:
         """
         self.plot_trajectory_edges()
@@ -1687,9 +2173,13 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             Default is True.
         - plot_ends (False, optional): Whether to plot trajectory ends. Default is True.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
-        global autosave setting for ratinabox is used. Default is None.
+            global autosave setting for ratinabox is used. Default is None.
 
-         Returns:
+        Keyword args:
+        - **env_kwargs: Additional keyword arguments passed to
+            self.Environment.plot_environment() if environmet is 2D.
+
+        Returns:
          - sub_ax (plt.Axes): Subplot with trajectory edges plotted.
         """
 
@@ -1718,6 +2208,13 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         if not (plot_starts or plot_ends):
             raise ValueError("At least 'plot_starts' or 'plot_ends' must be True.")
 
+        if self.Environment.dimensionality == "2D":
+            sub_ax = self.Environment.plot_environment(sub_ax=sub_ax, **env_kwargs)
+        elif self.Environment.dimensionality == "1D" and sub_ax is None:
+            _, sub_ax = plt.subplots(figsize=(3, 1.5))
+        else:
+            raise ValueError("Environment must be 1D or 2D.")
+
         for traj_idxs, kwargs in traj_plot_components:
             kwargs["color"] = cmap(np.linspace(0, 1, len(traj_idxs)))  # type: ignore[callable]
             if "s" in kwargs.keys():
@@ -1731,9 +2228,6 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 raise RuntimeError("Duration too short. No trajectory points to plot.")
 
             if self.Environment.dimensionality == "2D":
-                sub_ax = self.Environment.plot_environment(sub_ax=sub_ax)
-                if sub_ax is None:
-                    raise RuntimeError("sub_ax is None.")
                 if self.target_position is not None:
                     target_kwargs = plot_util.get_plot_marker_kwargs("target")
                     sub_ax.scatter(*self.target_position, zorder=5, **target_kwargs)
@@ -1751,8 +2245,6 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 sub_ax.scatter(*trajectory.T, s=s, alpha=alpha, zorder=2, **kwargs)
 
             elif self.Environment.dimensionality == "1D":
-                if sub_ax is None:
-                    _, sub_ax = plt.subplots(figsize=(3, 1.5))
                 sub_ax.scatter(time / 60, trajectory, alpha=alpha, s=5, **kwargs)
 
                 sub_ax.set_xlim(t[0] / 60, t[-1] / 60)
@@ -1770,9 +2262,6 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 if background_color is not None:
                     sub_ax.set_facecolor(background_color)
                     sub_ax.figure.patch.set_facecolor(background_color)  # type: ignore[attr-defined]
-
-        if sub_ax is None:
-            raise RuntimeError("sub_ax is None.")
 
         fig = sub_ax.figure
         plot_util.save_figure(fig, "trajectory_edges", save=autosave)
@@ -1855,7 +2344,24 @@ class TAgent(ResetableAgent):
         - (bool): Whether the agent is near the T-maze branch point.
         """
 
-        return self.pos[1] > (self.Environment.branch_y * 0.98)
+        extra = self.Environment.prop_env * self.Environment.scale_y * 0.1
+
+        return self.pos[1] > (self.Environment.branch_y - extra)
+
+    @property
+    def past_branch_point(self) -> bool:
+        """
+        self.past_branch_point
+
+        Whether the agent is past the T-maze branch point.
+
+        Returns:
+        - (bool): Whether the agent is past the T-maze branch point.
+        """
+
+        extra = self.Environment.prop_env * self.Environment.scale_y * 0.1
+
+        return self.pos[1] > (self.Environment.branch_y + extra)
 
     @property
     def at_branch_point(self) -> bool:
@@ -1867,6 +2373,8 @@ class TAgent(ResetableAgent):
         Returns:
         - (bool): Whether the agent has reached the T-maze branch point.
         """
+
+        extra = self.Environment.prop_env * self.Environment.scale_y * 0.2
 
         return self.pos[1] > self.Environment.branch_y
 
@@ -2018,7 +2526,8 @@ class TAgent(ResetableAgent):
 
         arms = ["left", "right"]
         if arm == "random":
-            arm_idx = int(np.random.rand() > self.left_arm_prop)  # type: ignore[attr-defined]
+            rand_val = np.random.rand()
+            arm_idx = int(rand_val > self.left_arm_prop)  # type: ignore[attr-defined]
             self.current_arm = arms[arm_idx]
         elif arm in arms:
             self.current_arm = arm
@@ -2082,7 +2591,7 @@ class TAgent(ResetableAgent):
 
         # check if the distance is less than the tolerance
         reset_position_reached = False
-        if distance < (np.absolute(self.speed_mean) * self.reset_reached_within_tol_prop_to_speed_dt):  # type: ignore[attr-defined]
+        if distance < (np.absolute(self.speed_mean) * self.dt * self.reset_reached_within_tol_prop_to_speed_dt):  # type: ignore[attr-defined]
             reset_position_reached = True
 
         return reset_position_reached
@@ -2125,7 +2634,6 @@ class TAgent(ResetableAgent):
     def update(  # type: ignore[override]
         self,
         dt: float | None = None,
-        speed_fact: int | float = 3,
         drift_to_random_strength_ratio: float = 0.7,
         **kwargs,
     ):
@@ -2133,13 +2641,12 @@ class TAgent(ResetableAgent):
         self.update()
 
         Update the agent's position. Checks whether target is reached. Checks whether
-        trajectory has ended, and if so, resets the agent. If agent is near the branch
+        trajectory has ended, and if so, resets the agent. If agent is past the branch
         point and the target is in a branch, the agent drifts towards the target.
         Otherwise, the agent drifts towards the branch point.
 
         Args:
         - dt (float, optional): Time step. Default is None.
-        - speed_fact (int or float, optional): Factor for speed. Default is 3.
         - drift_to_random_strength_ratio (float, optional): Ratio of drift to random
             strength. Default is 0.7.
 
@@ -2152,14 +2659,15 @@ class TAgent(ResetableAgent):
             self.reset()
 
         # calculate drift_velocity
-        if self.near_branch_point:
+        if self.past_branch_point:
             direction = self.get_direction_to_end()
         else:
-            direction = self.Environment.T_split - self.pos
-        drift_velocity = (
-            speed_fact
-            * self.speed_mean  # type: ignore[attr-defined]
-            * (direction / np.linalg.norm(direction, ord=2))
+            direction = self.Environment.T_split_top - self.pos
+
+        drift_velocity = gen_util.get_rayleigh_mean(
+            self.speed_mean
+        ) * (  # type: ignore[attr-defined]
+            direction / np.linalg.norm(direction, ord=2)
         )
 
         super().update(
@@ -2184,8 +2692,6 @@ class OpenFieldAgent(ResetableAgent):
         "no_target_factor": 1,  # factor for not setting any target for a trajectory
         "trajectory_length": 2000,  # int or iterable of ints
         "num_trajectories": 10,  # number of trajectory lengths to sample
-        "wait_between_targets": 10,  # number of steps to wait between target reaching
-        "target_reached_within_tol_prop_to_speed_dt": 0.55,  # proportion of mean speed * dt to use as target tolerance
         "num_random_walk_steps": 100,  # number of steps to random walk, if target is not in sight
         "always_log_teleportation": False,  # whether to log teleportation events when they occur
     }
@@ -2217,6 +2723,7 @@ class OpenFieldAgent(ResetableAgent):
         • self.plot_trajectories()
         • self.plot_trajectory_targets()
         • self.plot_trajectory_target_coords_over_time()
+        • self.plot_trajectory_edges()
         • self.animate_trajectories()
     """
 
@@ -2225,8 +2732,6 @@ class OpenFieldAgent(ResetableAgent):
         "no_target_factor": 1,  # factor for not setting any target for a trajectory
         "trajectory_length": 2000,  # int or iterable of ints
         "num_trajectories": 10,  # number of trajectory lengths to sample
-        "wait_between_targets": 10,  # number of steps to wait between target reaching
-        "target_reached_within_tol_prop_to_speed_dt": 0.55,  # proportion of mean speed * dt to use as target tolerance
         "num_random_walk_steps": 100,  # number of steps to random walk, if target is not in sight
         "always_log_teleportation": False,  # whether to log teleportation events when they occur
     }
@@ -2262,6 +2767,21 @@ class OpenFieldAgent(ResetableAgent):
             raise TypeError("Env must be an OpenField object.")
 
         super().__init__(Env, self.params)
+
+        self.allow_teleportation()
+
+    @property
+    def teleportation_allowed(self) -> bool:
+        """
+        self.teleportation_allowed
+
+        Whether teleportation is allowed.
+
+        Returns:
+        - (bool): Whether teleportation is allowed.
+        """
+
+        return self._teleportation_allowed
 
     @property
     def target_df_columns(self) -> list:
@@ -2500,6 +3020,18 @@ class OpenFieldAgent(ResetableAgent):
         self._add_new_target_to_df()
         self._set_random_walk()
 
+    def allow_teleportation(self, teleportation: bool = True):
+        """
+        self.allow_teleportation()
+
+        Set whether the agent can teleport.
+
+        Args:
+        - teleportation (bool): Whether the agent can teleport. Default is True.
+        """
+
+        self._teleportation_allowed = teleportation
+
     def set_all_positions(self, first_setting: bool = True, target: str | None = None):
         """
         self.set_all_positions()
@@ -2535,7 +3067,7 @@ class OpenFieldAgent(ResetableAgent):
     def sample_position_within_tolerance(
         self,
         position: np.ndarray[tuple[int], np.dtype[np.float64]],
-        sample_within_tol_prop_to_speed_dt: float | None = None,
+        sample_within_tol_prop_to_speed_dt: float = 1.0,
         max_attempts: int = 100,
     ) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
         """
@@ -2546,8 +3078,7 @@ class OpenFieldAgent(ResetableAgent):
         Args:
         - position (1D np.ndarray): The position to sample around.
         - sample_within_tol_prop_to_speed_dt (float, optional): The proportion of the
-            tolerance to sample within. Default is None, in which case the agent's
-            target_reached_within_tol_prop_to_speed_dt is used.
+            tolerance to sample within. Default is 1.0.
         - max_attempts (int, optional): Maximum number of attempts for sampling within
             the tolerance. Default is 100.
 
@@ -2558,14 +3089,9 @@ class OpenFieldAgent(ResetableAgent):
         if len(position) != 2:
             raise ValueError(f"position must have length 2, but found {len(position)}.")
 
-        if sample_within_tol_prop_to_speed_dt is None:
-            prop_to_speed_dt = self.target_reached_within_tol_prop_to_speed_dt  # type: ignore[attr-defined]
-        else:
-            prop_to_speed_dt = sample_within_tol_prop_to_speed_dt
-
         sampled_position = super().sample_position_within_tolerance(
             position,
-            sample_within_tol_prop_to_speed_dt=prop_to_speed_dt,
+            sample_within_tol_prop_to_speed_dt=sample_within_tol_prop_to_speed_dt,
             max_attempts=max_attempts,
         )
 
@@ -2716,7 +3242,7 @@ class OpenFieldAgent(ResetableAgent):
             teleport_pair_num, direction="in"
         )
 
-        tol_prop_to_speed_dt = self.target_reached_within_tol_prop_to_speed_dt  # type: ignore[attr-defined]
+        tol_prop_to_speed_dt = self.target_reached_within_tol_prop_to_speed_dt * 2  # type: ignore[attr-defined]
 
         teleport = False
 
@@ -2782,7 +3308,6 @@ class OpenFieldAgent(ResetableAgent):
     def get_drift_velocity(
         self,
         pos: np.ndarray[tuple[int], np.dtype[np.float64]] | None = None,
-        speed_fact: int | float = 3,
     ) -> np.ndarray[tuple[int], np.dtype[np.float64]] | None:
         """
         self.get_drift_velocity()
@@ -2808,10 +3333,10 @@ class OpenFieldAgent(ResetableAgent):
             drift_velocity = None
         else:
             direction = np.asarray(self.target_position) - pos
-            drift_velocity = (
-                speed_fact
-                * self.speed_mean  # type: ignore[attr-defined]
-                * (direction / np.linalg.norm(direction, ord=2))
+            drift_velocity = gen_util.get_rayleigh_mean(
+                self.speed_mean
+            ) * (  # type: ignore[attr-defined]
+                direction / np.linalg.norm(direction, ord=2)
             )
 
         return drift_velocity
@@ -2819,7 +3344,6 @@ class OpenFieldAgent(ResetableAgent):
     def anticipate_position_update(
         self,
         velocity: np.ndarray[tuple[int], np.dtype[np.float64]] | None = None,
-        speed_fact: int | float = 3,
         drift_to_random_strength_ratio: float = 0.7,
     ) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
         """
@@ -2830,8 +3354,6 @@ class OpenFieldAgent(ResetableAgent):
         Args:
         - velocity (1D np.ndarray, optional): The velocity to use for the position
             update. If None, the agent's current velocity is used. Default is None.
-        - speed_fact (int or float, optional): Factor to multiply the speed by for
-            computing the  drift velocity. Default is 3.
         - drift_to_random_strength_ratio (float, optional): The ratio of drift to
             random strength. Default is 0.7.
 
@@ -2842,7 +3364,7 @@ class OpenFieldAgent(ResetableAgent):
         if velocity is None:
             velocity = self.velocity
 
-        drift_velocity = self.get_drift_velocity(speed_fact=speed_fact)
+        drift_velocity = self.get_drift_velocity()
 
         update_vector = ext_util.get_velocity_update_vector(
             velocity,
@@ -2992,7 +3514,6 @@ class OpenFieldAgent(ResetableAgent):
     def get_teleport_coords_if_applicable(
         self,
         sample: bool = False,
-        speed_fact: int | float = 3,
         drift_to_random_strength_ratio: float = 0.7,
     ) -> np.ndarray[tuple[int], np.dtype[np.float64]] | None:
         """
@@ -3007,8 +3528,6 @@ class OpenFieldAgent(ResetableAgent):
         Args:
         - sample (bool, optional): Whether to sample teleport out position instead of
             matching teleport in position. Default is False.
-        - speed_fact (int or float, optional): The speed factor to use for the velocity
-            drift. Default is 3.
         - drift_to_random_strength_ratio (float, optional): The ratio of drift to
             random strength. Default is 0.7.
 
@@ -3038,7 +3557,6 @@ class OpenFieldAgent(ResetableAgent):
             # simulate update for records (as if the teleportation was a normal step)
             update = self.anticipate_position_update(
                 out_velocity,
-                speed_fact=speed_fact,
                 drift_to_random_strength_ratio=drift_to_random_strength_ratio,
             )
 
@@ -3130,7 +3648,7 @@ class OpenFieldAgent(ResetableAgent):
         else:
             step_nums = self.teleportation_df["step_num"].tolist()
             pair_nums = self.teleportation_df["teleport_pair_num"].tolist()
-            teleport_str = "    \n".join(
+            teleport_str = "\n    ".join(
                 [
                     f"through pair {pair_num} at step {step} ({self.history['t'][step]:.2f} sec.)"
                     for step, pair_num in zip(step_nums, pair_nums)
@@ -3172,7 +3690,6 @@ class OpenFieldAgent(ResetableAgent):
     def update(  # type: ignore[override]
         self,
         dt: float | None = None,
-        speed_fact: int | float = 3,
         drift_to_random_strength_ratio: float = 0.7,
         drift_velocity: (
             float | np.ndarray[tuple[int], np.dtype[np.float64]] | None
@@ -3188,7 +3705,6 @@ class OpenFieldAgent(ResetableAgent):
 
         Args:
         - dt (float): The time step to use.
-        - speed_fact (float): The speed factor.
         - drift_to_random_strength_ratio (float): The ratio of the drift strength to
             the random walk strength.
         - drift_velocity (float or 1D np.ndarray, optional): The drift velocity to use.
@@ -3208,16 +3724,16 @@ class OpenFieldAgent(ResetableAgent):
                 self._add_new_target_to_df()
             self._set_random_walk()
 
-        teleport_coords = self.get_teleport_coords_if_applicable(
-            speed_fact=speed_fact,
-            drift_to_random_strength_ratio=drift_to_random_strength_ratio,
-        )
+        if self.teleportation_allowed:
+            teleport_coords = self.get_teleport_coords_if_applicable(
+                drift_to_random_strength_ratio=drift_to_random_strength_ratio,
+            )
+        else:
+            teleport_coords = None
 
         # calculate drift_velocity
         if teleport_coords is None and drift_velocity is None:
-            drift_velocity = self.get_drift_velocity(
-                pos=self.pos, speed_fact=speed_fact
-            )
+            drift_velocity = self.get_drift_velocity(pos=self.pos)
 
         # checks what happens to random walk
         if self.current_num_of_random_walk_steps > 0:
@@ -3463,6 +3979,7 @@ class OpenFieldAgent(ResetableAgent):
         sub_ax: plt.Axes | None = None,
         alpha: float = 1.0,
         plot_env: bool = True,
+        size_fact: float = 2.5,
         no_legend: bool = False,
         colormap: str | None | mpl_colors.Colormap = None,
         autosave: bool | None = None,
@@ -3479,6 +3996,8 @@ class OpenFieldAgent(ResetableAgent):
         - alpha (float, optional): Alpha value of the targets.
         - plot_env (bool, optional): Whether to plot the environment, if sub_ax is not
             None. Default is True.
+        - size_fact (float, optional): Factor to multiply the environment size by.
+            Default is 2.5.
         - no_legend (bool, optional): Whether to remove the legend. Default is False.
         - colormap (str, optional): Colormap to use. Default is None.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
@@ -3488,8 +4007,13 @@ class OpenFieldAgent(ResetableAgent):
         - sub_ax (plt.Axes): Subplot with trajectory targets plotted.
         """
 
-        if sub_ax is None or plot_env:
-            sub_ax = self.Environment.plot_environment(sub_ax=sub_ax)
+        if sub_ax is None:
+            sub_ax = self.Environment.plot_environment(
+                sub_ax=sub_ax, size_fact=size_fact
+            )
+
+        elif plot_env:
+            self.Environment.plot_environment(sub_ax=sub_ax)
 
         if sub_ax is None:
             raise RuntimeError("sub_ax is None.")
@@ -3713,7 +4237,13 @@ class OpenFieldAgent(ResetableAgent):
     def animate_trajectories(
         self,
         plot_head_direction=True,
+        size_fact=2,
+        fps=8,
+        speed_up=3,
         additional_plot_func: Callable | None = None,
+        savename: str = "trajectory",
+        anim_save_types: list = ["mp4", "gif"],
+        autosave: bool | None = None,
         **kwargs,
     ) -> mpl_animation.FuncAnimation:
         """
@@ -3724,8 +4254,19 @@ class OpenFieldAgent(ResetableAgent):
         Args:
         - plot_head_direction (bool, optional): Whether to plot the last head direction.
             Default is True.
+        - fps (int, optional): Frames per second. Default is 8.
+        - speed_up (int, optional): Speedup factor for the animation. Default is 3.
+        - size_fact (float, optional): Factor to multiply the environment size by.
+            Default is 2.
         - additional_plot_func: A function that is called after each frame of the
             animation is plotted. It takes sub_ax, t and **kwargs and returns sub_ax.
+            Default is None.
+        - savename (str, optional): Name of the file to save the animation. Default is
+            "trajectory".
+        - anim_save_types (list, optional): List of file types to save the animation as.
+            Default is ["mp4", "gif"].
+        - autosave (bool, optional): Whether to autosave the animation. If None, the
+            global autosave setting for ratinabox is used. Default is None.
 
         Keyword args:
         - **kwargs: Keyword arguments passed to self.plot_trajectories().
@@ -3733,6 +4274,8 @@ class OpenFieldAgent(ResetableAgent):
         Returns:
             anim (matplotlib.animation.FuncAnimation): The animation object.
         """
+
+        start_time = time.perf_counter()
 
         def run_all_additional_plot_funcs(
             fig: mpl_figure.Figure,
@@ -3758,8 +4301,7 @@ class OpenFieldAgent(ResetableAgent):
             if additional_plot_func is not None:
                 sub_ax = additional_plot_func(sub_ax=sub_ax, t=t, **kwargs)
 
-            # self.add_target_to_plot(sub_ax, t=t)
-            plot_util.remove_prev_handle_labels(sub_ax)
+            plot_util.remove_duplicate_handle_labels(sub_ax)
 
             return fig, sub_ax
 
@@ -3769,7 +4311,20 @@ class OpenFieldAgent(ResetableAgent):
             plot_head_direction=plot_head_direction,
             return_traj_fig=True,
             return_env_fig=True,
+            size_fact=size_fact,
+            fps=fps,
+            speed_up=speed_up,
+            autosave=False,
             **kwargs,
         )
+
+        rutils.save_animation(
+            anim, savename, save=autosave, anim_save_types=anim_save_types
+        )
+
+        stop_time = time.perf_counter()
+        time_min = (stop_time - start_time) / 60
+
+        print(f"Animation took {time_min:.2f} min. to create.")
 
         return anim

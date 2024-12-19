@@ -14,7 +14,7 @@ from ratinabox.Neurons import FeedForwardLayer as riabFeedForwardLayer  # type: 
 from ratinabox.contribs import ValueNeuron as riabValueNeuron
 
 from predhpc import plot_fcts
-from predhpc.util import plot_util, ext_util
+from predhpc.util import gen_util, plot_util, ext_util
 
 
 warnings.filterwarnings(
@@ -132,6 +132,41 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         max_firingrate = np.max(firingrates)
 
         return min_firingrate, max_firingrate
+
+    def get_firingrate_CC_matrix(
+        self, num_periods: int = 8, plot: bool = False, sub_ax: plt.Axes | None = None
+    ):
+        """
+        self.get_firingrate_CC_matrix()
+
+        Obtain the firing rate cross-correlation matrix across periods.
+
+        Args:
+        - num_periods (int, optional): Number of periods to assess. Default is 8.
+        - plot (bool, optional): Whether to plot the firing rate cross-correlation
+            matrix. Default is False.
+        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
+            created. Default is None.
+
+        Returns:
+        - CC_matrix (2D np.ndarray): Firing rate cross-correlation matrix across periods.
+        if plot:
+        - sub_ax (plt.Axes): Subplot with firing rate cross-correlation matrix plotted.
+        """
+
+        outputs = ext_util.assess_firingrate_CC_across_periods(
+            self.history["firingrate"],
+            num_periods=num_periods,
+            plot=plot,
+            sub_ax=sub_ax,
+        )
+
+        if plot:
+            CC_matrix, sub_ax = outputs
+            return CC_matrix, sub_ax
+        else:
+            CC_matrix = outputs
+            return CC_matrix
 
     def get_oscillation_df(
         self,
@@ -340,6 +375,158 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
 
         return sub_ax
 
+    def get_binned_rates(
+        self,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        num_bins: int = 100,
+        part_run: float = 0.2,
+        merge: bool = True,
+        chosen_neurons: str | int | list | np.ndarray = "all",
+        vel_sign_smooth: int = 5,
+    ):
+        """
+        self.get_binned_rates()
+
+        Obtain the firing rates of the layer, binned by position.
+
+        Args:
+        - t_start (float, optional): Time at which to start plotting data.
+            Default is None.
+        - t_end (float, optional): Time at which to stop plotting data.
+            Default is None.
+        - num_bins (int, optional): Number of bins to use for binning the firing rates.
+            Default is 100.
+        - part_run (float, optional): Proportion of the run to use for binning the
+            firing rates. Default is 0.2.
+        - merge (bool, optional): Whether to merge the firing rates of the neurons.
+            Default is True.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
+            Default is "all".
+        - vel_sign_smooth (int, optional): Smoothing window for detecting velocity sign
+            change. Default is 5.
+
+        Returns:
+        - binned_rate_means (1D np.ndarray): Mean binned firing rates.
+        - occupancy (1D np.ndarray): Occupancy of the bins.
+        """
+
+        if self.Agent.Environment.dimensionality != "1D":
+            raise ValueError(
+                "Rate colormap plotting is only supported for 1D environments."
+            )
+
+        t, startid, endid = self.get_plotting_times(t_start, t_end)
+        t_start = t[0]
+        t_end = t[-1]
+
+        chosen_neurons = self.get_chosen_neurons(chosen_neurons)
+
+        rate = np.asarray(self.history["firingrate"])[
+            startid : endid + 1, chosen_neurons
+        ]
+        rel_pos = (
+            np.asarray(self.Agent.history["pos"])[startid : endid + 1, 0]
+            / self.Agent.Environment.scale
+        )
+        vel = np.asarray(self.Agent.history["vel"])[startid : endid + 1, 0]
+
+        binned_rate_means, occupancy = gen_util.get_binned_rates(
+            rate,
+            rel_pos,
+            vel=vel,
+            num_bins=num_bins,
+            part_run=part_run,
+            merge=merge,
+            vel_sign_smooth=vel_sign_smooth,  # higher value for detecting velocity sign change
+        )
+
+        return binned_rate_means, occupancy
+
+    def plot_binned_rates(
+        self,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        ax: plt.Axes | np.ndarray | None = None,
+        num_bins: int = 100,
+        part_run: float = 0.2,
+        merge: bool = True,
+        vel_sign_smooth: int = 5,
+        chosen_neurons: str | int | list | np.ndarray = "all",
+        plot_occ: bool = True,
+        vmin: float = 0,
+        vmax: float | None = None,
+        plot_colorbars: bool = True,
+        autosave: bool | None = None,
+    ) -> plt.Axes | np.ndarray:
+        """
+        self.plot_binned_rates()
+
+        Plot the firing rates of the layer, binned by position (for 1D environments only).
+
+        Args:
+        - t_start (float, optional): Time at which to start plotting data.
+            Default is None.
+        - t_end (float, optional): Time at which to stop plotting data.
+            Default is None.
+        - ax (np.ndarray or plt.Axes, optional): Subplot or array of subplots to plot
+            on (one per plotted ROI, if environment is 2D). Default is None.
+        - num_bins (int, optional): Number of bins to use for binning the firing rates.
+            Default is 100.
+        - part_run (float, optional): Proportion of the run to use for binning the
+            firing rates. Default is 0.2.
+        - merge (bool, optional): Whether to merge the firing rates of the neurons.
+            Default is True.
+        - vel_sign_smooth (int, optional): Smoothing window for detecting velocity sign
+            change. Default is 5.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
+            Default is "all".
+        - plot_occ (bool, optional): Whether to plot the occupancy. Default is True.
+        - vmin (float, optional): Minimum value for the colormap. Default is 0.
+        - vmax (float, optional): Maximum value for the colormap. Default is None.
+        - plot_colorbars (bool, optional): Whether to plot colorbars. Default is True.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the
+            global autosave setting for ratinabox is used. Default is None.
+
+        Returns:
+        - ax (np.ndarray or plt.Axes): Subplot or array of subplots
+           (one per plotted ROI, if environment is
+           2D).
+        """
+
+        chosen_neurons = self.get_chosen_neurons(chosen_neurons)
+
+        binned_rate_means, occupancy = self.get_binned_rates(
+            t_start=t_start,
+            t_end=t_end,
+            num_bins=num_bins,
+            part_run=part_run,
+            merge=merge,
+            chosen_neurons=chosen_neurons,
+            vel_sign_smooth=vel_sign_smooth,
+        )
+
+        if not plot_occ:
+            occupancy = None
+
+        ax = plot_util.plot_binned_rates(
+            binned_rate_means,
+            occupancy=occupancy,
+            ax=ax,
+            vmin=vmin,
+            vmax=vmax,
+            plot_colorbars=plot_colorbars,
+        )
+
+        for i in chosen_neurons:
+            np.asarray(ax).ravel()[i].set_title(f"Neuron {i}")
+
+        if autosave:
+            fig = np.asarray(ax).ravel()[0].figure
+            plot_util.save_figure(fig, f"{self.name}_binned_rates", save=autosave)
+
+        return ax
+
     def plot_rate_timeseries(
         self,
         t_start: float | None = None,
@@ -520,7 +707,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         _, startid, endid = self.get_plotting_times(t_start, t_end)
 
         sub_ax = plot_util.plot_rate_correlations(
-            firingrates=self.history["firingrate"][startid:endid], **kwargs
+            firingrates=self.history["firingrate"][startid : endid + 1], **kwargs
         )
 
         fig = sub_ax.figure
@@ -582,6 +769,7 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
 
     List of methods (in addition ratinabox.Neurons.PlaceCells methods):
         • self.plot_place_cell_locations()
+        • self.shuffle_place_cell_locations
     """
 
     default_params = riabPlaceCells.get_all_default_params()  # type: dict[str, Any]
@@ -618,6 +806,50 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
             self.place_cell_centre_type = "specified"
 
         super().__init__(Agent, params=params)
+
+        self._current_sorter = np.arange(self.n)
+        self.shuffle_sorters = list()
+        self.shuffle_times = list()
+
+    def shuffle_place_cell_locations(
+        self, randst=None, shuffle_sorter=None, record=True
+    ):
+        """
+        self.shuffle_place_cell_locations()
+
+        Shuffle the place cell locations. Always applied on original (not latest)
+        place cell order.
+
+        Args:
+        - randst (int, optional): Random seed. Default is None.
+        - shuffle_sorter (1D np.ndarray, optional): Shuffle sorter. Default is None.
+        - record (bool, optional): Whether to record the shuffle. Default is True.
+
+        Returns:
+        - shuffle_sorter (1D np.ndarray): Shuffle sorter used.
+        """
+
+        if shuffle_sorter is None:
+            randst = np.random.RandomState(randst)
+            shuffle_sorter = np.arange(self.n)
+            randst.shuffle(shuffle_sorter)
+
+        if len(shuffle_sorter) != self.n:
+            raise ValueError(
+                "Length of shuffle_sorter must be equal to the number of place cells."
+            )
+
+        use_sorter = np.argsort(self._current_sorter)[shuffle_sorter]
+
+        self.place_cell_centres[:] = self.place_cell_centres[use_sorter]
+
+        self._current_sorter = shuffle_sorter
+
+        if record:
+            self.shuffle_sorters.append(shuffle_sorter)
+            self.shuffle_times.append(self.Agent.t)
+
+        return shuffle_sorter
 
     def plot_place_cell_locations(self, sub_ax=None, autosave=None, **kwargs):
         """

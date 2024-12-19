@@ -7,8 +7,52 @@ import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 import pandas as pd
 
+import ratinabox
 from ratinabox import utils as rutils  # type: ignore[import]
 from predhpc.util import gen_util  # type: ignore[import]
+
+
+def extract_objects_from_Pyrs(Pyrs):
+    """
+    extract_objects_from_Pyrs(Pyrs)
+
+    Extract objects from a Pyrs object.
+
+    Args:
+    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
+        Pyr. neuron layer
+
+    Returns:
+    - Env (env.Environment): Environment
+    - Ag (agent.Agent): Agent
+    - PCs (riab_neurons.PlaceCells): Place cells
+    - Objs (object_neurons.ObjectCells or object_neurons.ObjectInstanceCells):
+        Object cells (None if not applicable).
+    """
+
+    Env = Pyrs.Agent.Environment
+
+    Ag = Pyrs.Agent
+
+    if hasattr(Pyrs, "SomaCompartment"):  # two compartment
+        Obj_key = list(Pyrs.DendriteCompartment.inputs.keys())[-1]
+        Objs = Pyrs.DendriteCompartment.inputs[Obj_key]["layer"]
+
+        PC_key = list(Pyrs.SomaCompartment.inputs.keys())[0]
+        PCs = Pyrs.SomaCompartment.inputs[PC_key]["layer"]
+    else:
+        Objs = None
+        PC_key = list(Pyrs.inputs.keys())[0]
+        PCs = Pyrs.inputs[PC_key]["layer"]
+
+    if Objs is not None:
+        if not hasattr(Objs, "input_object_types"):
+            raise RuntimeError(f"Objs incorrectly identified. Got {type(Objs)}.")
+
+    if not hasattr(PCs, "place_cell_centres"):
+        raise RuntimeError(f"PCs incorrectly identified. Got {type(PCs)}.")
+
+    return Env, Ag, PCs, Objs
 
 
 class ParamsManagerMixin:
@@ -482,7 +526,7 @@ def sample_from_T_areas(
     Returns:
     - area_positions (2D np.ndarray): Positions of the samples with shape (n, 2).
     - adjusted_bottom_upper_limit (float): Adjusted upper limit to use for the bottom
-        section. None if top is False.
+        section. None if top is False or method is "random".
     """
 
     if method == "random":
@@ -502,7 +546,7 @@ def sample_from_T_areas(
             delta_x = (extent_x[1] - extent_x[0]) / num_x_vals
 
         else:
-            num_x_vals = max(1, int(np.around((extent_x[1] - extent_x[0]) // delta)))
+            num_x_vals = max(1, int(np.around((extent_x[1] - extent_x[0]) / delta)))
             num_y_vals = int(n // num_x_vals)
             delta_x = delta
 
@@ -536,15 +580,15 @@ def sample_from_T_areas(
         if "jitter" in method:
             delta_x = x[0] - extent_x[0]
             area_positions[:, 0] += np.random.uniform(
-                -0.45 * delta_x, 0.45 * delta_x, n
+                -0.45 * delta_x, 0.45 * delta_x, n_uniformly_distributed
             )
             delta_y = y[0] - extent_y[0]
             area_positions[:, 1] += np.random.uniform(
-                -0.45 * delta_y, 0.45 * delta_y, n
+                -0.45 * delta_y, 0.45 * delta_y, n_uniformly_distributed
             )
         n_remaining = n - n_uniformly_distributed
         if n_remaining > 0:
-            positions_remaining = sample_from_T_areas(
+            positions_remaining, _ = sample_from_T_areas(
                 n=n_remaining, extent_x=extent_x, extent_y=extent_y, method="random"
             )
             area_positions = np.vstack((area_positions, positions_remaining))
@@ -678,3 +722,90 @@ def estimate_1D_place_cell_density(PCs):
             raise NotImplementedError(f"Env type {type(Env)} not supported.")
 
     return PC_density_1D
+
+
+def create_weights_dict(weights, steps, t, steps_triggered=None):
+    """
+    create_weights_dict(weights, steps, t)
+
+    Create a dictionary of weights, steps, and time.
+
+    Args:
+    - weights (list): Weights.
+    - steps (list): Steps.
+    - t (list): Full time array.
+    - steps_triggered (int, optional): Steps at which BTSP was triggered. None for
+        recorded steps that do not reflect BTSP updates. Default is None.
+
+    Returns:
+    - recorded_weights (dict): Dictionary with keys "weights", "steps", "time", and
+        "steps_triggered" in which input weights from place cells are recorded,
+        along with the step/time at which they were recorded and step at which they
+        the BTSP update behind the recorded weight update was triggered, if applicable.
+    """
+
+    if len(steps) != len(weights):
+        raise ValueError("Length of steps and weights must be the same.")
+
+    steps = np.asarray(steps)
+    if steps.max() >= len(t):
+        raise ValueError("Steps must be within the range of time.")
+
+    weights = np.asarray(weights)
+    if len(steps):
+        time = np.asarray(t)[steps]
+    else:
+        time = np.asarray([])
+
+    weights_dict = {"weights": weights, "steps": steps, "time": time}
+
+    if steps_triggered is not None:
+        weights_dict["steps_triggered"] = steps_triggered
+
+    return weights_dict
+
+
+def assess_firingrate_CC_across_periods(
+    firingrates, num_periods=8, plot=True, sub_ax=None
+):
+    """
+    assess_firingrate_CC_across_periods(firingrates)
+
+    Assess the correlation coefficient of firing rates across time periods.
+
+    Args:
+    - firingrates (2D np.ndarray): Firing rates, with shape (frames, neurons).
+    - num_periods (int, optional): Number of time periods to assess. Default is 8.
+    - plot (bool, optional): Whether to plot the correlation coefficient. Default is True.
+    - sub_ax (plt.Axes, optional): Axes to plot on. Default is None.
+
+    Returns:
+    - gen_CC (2D np.ndarray): General correlation coefficient across time periods.
+    if plot:
+    - sub_ax (plt.Axes): Subplot on which correlation coefficient matrix is plotted.
+    """
+
+    fr = np.asarray(firingrates)
+
+    # get a CC within each time period
+    num_fr, num_neurons = fr.shape
+    num_samples = num_fr // num_periods
+    num_per = num_fr // num_samples
+    reshaped_fr = fr[: int(num_samples * num_per)].reshape(
+        num_periods, num_samples, num_neurons
+    )
+
+    CCs = list()
+    for i in range(num_periods):
+        CCs.append(np.corrcoef(reshaped_fr[i].T))
+    CCs = np.asarray(CCs)
+
+    gen_CC = np.corrcoef(CCs.reshape(num_periods, -1))
+
+    if plot:
+        from predhpc.util import plot_util
+
+        sub_ax = plot_util.plot_CC_across_periods(gen_CC, sub_ax=sub_ax)
+        return gen_CC, sub_ax
+    else:
+        return gen_CC

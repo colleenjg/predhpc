@@ -342,7 +342,9 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer):
 
         _, startid, endid = self.get_plotting_times(t_start, t_end)
 
-        firingrates = np.asarray(self.history["firingrate"])[startid:endid].ravel()
+        firingrates = np.asarray(self.history["firingrate"])[
+            startid : endid + 1
+        ].ravel()
         sub_ax.hist(firingrates, bins=bins, color=self.color, alpha=0.6, density=True)
 
         sub_ax.axvline(0, color="k", lw=1, ls="dashed")
@@ -365,6 +367,7 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer):
         chosen_neurons: (
             str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
         ) = "all",
+        rasterize_shading: bool = False,
         sub_ax: plt.Axes | None = None,
         autosave: bool | None = None,
     ) -> tuple[plt.Axes, np.ndarray[tuple[int], np.dtype[np.float64]]]:
@@ -383,6 +386,8 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer):
         - title (str, optional): Title of the plot. Default is None.
         - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
             Default is "all".
+        - rasterize_shading (bool, optional): Whether to rasterize the shading,
+            reducing the size of exported vector files. Default is False.
         - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
             created. Default is None.
         - autosave (bool, optional): Whether to save the figure. Default is None.
@@ -441,7 +446,13 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer):
         sub_ax.plot(t, filtered + shifts, alpha=0.8, color=color)
         for i, shift in enumerate(shifts.T):
             sub_ax.fill_between(
-                t, shift, filtered[:, i] + shift, color=color, alpha=0.4, lw=0
+                t,
+                shift,
+                filtered[:, i] + shift,
+                color=color,
+                alpha=0.4,
+                lw=0,
+                rasterized=rasterize_shading,  # svg too big, othersize
             )
 
         sub_ax.spines[["top", "right"]].set_visible(False)
@@ -979,6 +990,7 @@ class LearnLayer(SmoothFeedForwardLayer):
         color: str | None = None,
         alpha: float = 0.7,
         t_start: float | None = None,
+        t_end: float | None = None,
         xlabel: str | None = None,
         autosave: bool | None = None,
     ) -> plt.Axes:
@@ -993,6 +1005,7 @@ class LearnLayer(SmoothFeedForwardLayer):
         - color (str, optional): Color of the plot. Default is None.
         - alpha (float, optional): Alpha of the plot. Default is 0.7.
         - t_start (float, optional): Start timepoint of the plot. Default is None.
+        - t_end (float, optional): End timepoint of the plot. Default is None.
         - xlabel (str, optional): x label of the plot. Default is None.
         - autosave (bool, optional): Whether to save the figure. Default is None.
 
@@ -1003,8 +1016,8 @@ class LearnLayer(SmoothFeedForwardLayer):
         if sub_ax is None:
             _, sub_ax = plt.subplots(figsize=(8, 3))
 
-        _, startid, _ = self.get_plotting_times(t_start=t_start)
-        firingrates = np.asarray(self.history["firingrate"])[startid:]
+        _, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
+        firingrates = np.asarray(self.history["firingrate"])[startid : endid + 1]
 
         if color is None:
             color = str(self.color)  # type: ignore[attr-defined]
@@ -1534,6 +1547,8 @@ class BTSPLayer(HebbianLayer):
         Args:
         - last (bool, optional): Whether to log only the last recorded BTSP event
             applied. Default is False.
+        - stats_only (bool, optional): If not last, whether to log only the statistics
+            of the BTSP events. Default is False.
         """
 
         if len(self.history["num_steps_to_apply_BTSP"]) == 0:
@@ -1543,7 +1558,7 @@ class BTSPLayer(HebbianLayer):
             num_steps = self.history["num_steps_to_apply_BTSP"][-1]
             seconds = num_steps * self.Agent.dt
             log_str = (
-                f"Last BTSP event was applied after {num_steps} "
+                f"Last BTSP event was applied after {num_steps} steps "
                 f"({seconds:.2f} sec.)."
             )
 
@@ -1552,66 +1567,164 @@ class BTSPLayer(HebbianLayer):
             seconds = num_steps * self.Agent.dt
             all_steps = ", ".join([str(num_step) for num_step in num_steps])
 
-            log_str = f"BTSP events applied after {num_steps.mean():.2f} steps"
+            log_str = (
+                f"BTSP events applied after {num_steps.mean():.2f} steps "
+                f"({seconds.mean():.2f} sec.)"
+            )
 
             if not stats_only:
-                log_str = (
-                    f"{log_str} ({seconds.mean():.2f} sec.) (num steps: {all_steps})."
-                )
+                log_str = f"{log_str} (num steps: {all_steps})."
 
         print(log_str)
 
-    def get_BTSP_step_dict(self):
+    def log_BTSP_applied_then_triggered_interval(
+        self, shortest=False, stats_only=False, t_start=None, t_end=None
+    ):
+        """
+        self.log_BTSP_applied_then_triggered_interval()
+
+        Log the number of steps between when BTSP is applied and next triggered in
+        the same neuron.
+
+        Args:
+        - shortest (bool, optional): Whether to log only the shortest interval
+            identified. Default is False.
+        - stats_only (bool, optional): If not shortest, whether to log only the
+            statistics of the intervals. Default is False.
+        - t_start (float, optional): Start time for including BTSP events.
+            Default is None.
+        - t_end (float, optional): End time for including BTSP events. Default is None.
+        """
+
+        trigger_steps = self.get_BTSP_step_dict(
+            apply_step=False, t_start=t_start, t_end=t_end
+        )
+        apply_steps = self.get_BTSP_step_dict(
+            apply_step=True, t_start=t_start, t_end=t_end
+        )
+        all_diffs = list()
+        for i, neuron_trigger_steps in trigger_steps.items():
+            if len(neuron_trigger_steps) < 2:
+                continue
+            neuron_apply_steps = apply_steps[i]
+            diff = (
+                np.asarray(neuron_trigger_steps)[1 : len(neuron_apply_steps) + 1]
+                - np.asarray(neuron_apply_steps)[:-1]
+            )
+            all_diffs.extend(list(diff))
+
+        if len(all_diffs) == 0:
+            log_str = "No neuron had at least two BTSP events triggered."
+
+        elif shortest:
+            num_steps = min(all_diffs)
+            seconds = num_steps * self.Agent.dt
+            log_str = (
+                f"Shortest interval between applying and subsequently triggering a "
+                f"BTSP event in the same neuron was {num_steps} steps "
+                f"({seconds:.2f} sec.)."
+            )
+
+        else:
+            num_steps = np.asarray(all_diffs)
+            seconds = num_steps * self.Agent.dt
+            all_steps = ", ".join([str(num_step) for num_step in num_steps])
+
+            log_str = (
+                "Average interval between applying and subsequently triggering a "
+                f"BTSP event in the same neuron was {num_steps.mean():.2f} steps "
+                f"({seconds.mean():.2f} sec.)"
+            )
+
+            if not stats_only:
+                log_str = f"{log_str} (num steps: {all_steps})."
+
+        print(log_str)
+
+    def get_BTSP_step_dict(self, apply_step=False, t_start=None, t_end=None):
         """
         self.get_BTSP_step_dict()
 
         Get a dictionary of BTSP events for each neuron.
 
+        Args:
+        - apply_step (bool, optional): Whether to return the step at which the BTSP
+            event was applied. Default is False.
+        - t_start (float, optional): Start time for including BTSP events.
+            Default is None.
+        - t_end (float, optional): End time for including BTSP events. Default is None.
+
         Returns:
         - BTSP_step_dict (dict): Dictionary of BTSP events for each neuron.
         """
 
+        _, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
+
         BTSP_step_dict = {neuron_num: list() for neuron_num in range(self.n)}
 
-        for step, targets in zip(
-            self.history["BTSP_events"], self.history["BTSP_targets"]
+        for i, (step, targets) in enumerate(
+            zip(self.history["BTSP_events"], self.history["BTSP_targets"])
         ):
+            if apply_step:
+                if len(self.history["num_steps_to_apply_BTSP"]) > i:
+                    step += self.history["num_steps_to_apply_BTSP"][i]
+                else:
+                    step = np.nan
+
+            if np.isfinite(step) and (step < startid or step > endid):
+                continue
+
             for target in targets:
                 BTSP_step_dict[target].append(step)
 
         return BTSP_step_dict
 
-    def get_BTSP_steps(self, applied_only=False):
+    def get_BTSP_steps(
+        self, applied_only=False, apply_step=False, t_start=None, t_end=None
+    ):
         """
         self.get_BTSP_steps()
 
-        Get the steps at which BTSP events occurred.
+        Get the steps at which BTSP updates were triggered.
 
         Args:
         - applied_only (bool, optional): Whether to return only applied BTSP events.
             Default is False.
+        - apply_step (bool, optional): Whether to return the step at which the BTSP
+            event was applied. Default is False.
+        - t_start (float, optional): Start time for including BTSP events.
+            Default is None.
+        - t_end (float, optional): End time for including BTSP events. Default is None.
 
         Returns:
-        - steps (1D np.ndarray): Steps at which BTSP events occurred.
+        - all_steps (1D np.ndarray): Steps at which BTSP events occurred.
         """
 
-        steps = list()
-        for step, targets in zip(
-            self.history["BTSP_events"], self.history["BTSP_targets"]
-        ):
-            steps.extend([step] * len(targets))
+        BTSP_step_dict = self.get_BTSP_step_dict(
+            apply_step=apply_step, t_start=t_start, t_end=t_end
+        )
+        if applied_only and not apply_step:
+            BTSP_apply_step_dict = self.get_BTSP_step_dict(
+                apply_step=True, t_start=t_start, t_end=t_end
+            )
 
-        steps = np.asarray(steps)
+        all_steps = list()
+        for target, steps in BTSP_step_dict.items():
+            for i, step in enumerate(steps):
+                if np.isnan(step) or step in all_steps:
+                    continue
+                if applied_only and not apply_step:
+                    if i >= len(BTSP_apply_step_dict[target]):
+                        continue
+                    elif np.isnan(BTSP_apply_step_dict[target][i]):
+                        continue
+                all_steps.append(step)
 
-        if applied_only:
-            num_buffer_steps = np.asarray(self.BTSP_buffer["num_steps"]).astype(int)
-            unapplied = self.num_steps_total - num_buffer_steps[num_buffer_steps != 0]
-            applied_bool = ~np.isin(steps, unapplied)
-            steps = steps[applied_bool]
+        all_steps = np.sort(all_steps)
 
-        return steps
+        return all_steps
 
-    def get_BTSP_counts(self, applied_only=False):
+    def get_BTSP_counts(self, applied_only=False, t_start=None, t_end=None):
         """
         self.get_BTSP_counts()
 
@@ -1620,39 +1733,52 @@ class BTSPLayer(HebbianLayer):
         Args:
         - applied_only (bool, optional): Whether to count only applied BTSP events.
             Default is False.
+        - t_start (float, optional): Start time for including BTSP events.
+            Default is None.
+        - t_end (float, optional): End time for including BTSP events. Default is None.
 
         Returns:
         - counts (1D np.ndarray): Number of BTSP events for each neuron.
         """
 
+        BTSP_step_dict = self.get_BTSP_step_dict(
+            apply_step=False, t_start=t_start, t_end=t_end
+        )
         if applied_only:
-            targets, counts = np.unique(
-                np.concatenate(self.history["BTSP_targets"]), return_counts=True
+            BTSP_apply_step_dict = self.get_BTSP_step_dict(
+                apply_step=True, t_start=t_start, t_end=t_end
             )
 
-        else:
-            steps = self.get_BTSP_steps()
-            targets = np.concatenate(self.history["BTSP_targets"])
-            if len(steps) != len(targets):
-                raise RuntimeError("Number of BTSP steps and targets do not match.")
-
-            applied_steps = self.get_BTSP_steps(applied_only=True)
-            targets = targets[np.isin(steps, applied_steps)]
-            targets, counts = np.unique(targets, return_counts=True)
-
-        counts = np.append(counts, np.zeros(self.n - len(targets)))
+        counts = np.zeros(self.n)
+        for target, steps in BTSP_step_dict.items():
+            for i, step in enumerate(steps):
+                if np.isnan(step):
+                    continue
+                if applied_only:
+                    if i >= len(BTSP_apply_step_dict[target]):
+                        continue
+                    elif np.isnan(BTSP_apply_step_dict[target][i]):
+                        continue
+                counts[target] += 1
 
         return counts
 
-    def get_BTSP_ramp_peak_dict(self):
+    def get_BTSP_ramp_peak_dict(self, t_start=None, t_end=None):
         """
         self.get_BTSP_ramp_peak_dict()
 
         Get the peak values of the BTSP ramp.
 
+        Args:
+        - t_start (float, optional): Start time for including BTSP events.
+            Default is None.
+        - t_end (float, optional): End time for including BTSP events. Default is None.
+
         Returns:
         - ramp_peak_dict (dict): Dictionary with peak values and steps for each neuron.
         """
+
+        _, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
 
         BTSP_ramp = np.asarray(self.history["BTSP_ramp"])
 
@@ -1667,8 +1793,10 @@ class BTSPLayer(HebbianLayer):
             else:
                 peak_vals = np.asarray(list())
 
-            ramp_peak_dict["peaks"][n] = peak_vals
-            ramp_peak_dict["steps"][n] = peaks
+            include_mask = (peaks >= startid) * (peaks <= endid)
+
+            ramp_peak_dict["peaks"][n] = peak_vals[include_mask]
+            ramp_peak_dict["steps"][n] = peaks[include_mask]
 
         return ramp_peak_dict
 
@@ -1835,6 +1963,82 @@ class BTSPLayer(HebbianLayer):
 
         return BTSP_targets
 
+    def get_speed_around_BTSP(
+        self, pre=4, post=2, linear=True, directional=False, cm=True
+    ):
+        """
+        self.get_speed_around_BTSP()
+
+        Obtain the speed around BTSP events.
+
+        Args:
+        - pre (int, optional): Number of steps before BTSP event. Default is 4.
+        - post (int, optional): Number of steps after BTSP event. Default is 2.
+        - linear (bool, optional): Whether to use linear speed. Default is True.
+        - directional (bool, optional): Whether to use directional speed. Default is
+            False.
+        - cm (bool, optional): Whether to return speed in cm/s instead of m/s.
+            Default is True.
+
+        Returns:
+        - time (1D np.ndarray): Time around BTSP events.
+        - speed_arr (3D np.ndarray): Speed around BTSP events, with shape BTSP steps,
+            time steps, speed dimensions.
+        """
+
+        steps = np.unique(self.get_BTSP_steps())
+
+        rel_indices = plot_util.get_time_indices(pre=pre, post=post, dt=self.Agent.dt)
+        time = np.linspace(-pre, post, len(rel_indices))
+
+        speed = self.Agent.get_speed(linear=linear, directional=directional, cm=cm)
+
+        speed_arr = np.full((len(steps), len(rel_indices), speed.shape[1]), np.nan)
+        for i, step in enumerate(steps):
+            indices = step + rel_indices
+            mask = (indices >= 0) * (indices < len(speed))
+            arr_indices = np.arange(len(indices))[mask]
+            speed_arr[i, arr_indices] = speed[indices[mask]]
+
+        return time, speed_arr
+
+    def get_position_around_BTSP(self, pre=6, post=3, cm=True):
+        """
+        self.get_position_around_BTSP()
+
+        Obtain the position around BTSP events.
+
+        Args:
+        - pre (int, optional): Number of steps before BTSP event. Default is 6.
+        - post (int, optional): Number of steps after BTSP event. Default is 3.
+        - cm (bool, optional): Whether to return position in cm instead of m. Default
+            is True.
+
+        Returns:
+        - time (1D np.ndarray): Time around BTSP events.
+        - position_arr (3D np.ndarray): Position around BTSP events, with shape
+            BTSP steps, time steps, position dimensions.
+        """
+
+        steps = np.unique(self.get_BTSP_steps())
+        position = np.asarray(self.Agent.history["pos"])
+        if cm:
+            position *= 100
+
+        rel_indices = plot_util.get_time_indices(pre=pre, post=post, dt=self.Agent.dt)
+        time = np.linspace(-pre, post, len(rel_indices))
+
+        position_arr = np.full(
+            (len(steps), len(rel_indices), position.shape[1]), np.nan
+        )
+        for i, step in enumerate(steps):
+            indices = step + rel_indices
+            mask = (indices >= 0) * (indices < len(position))
+            arr_indices = np.arange(len(indices))[mask]
+            position_arr[i, arr_indices] = position[indices[mask]]
+
+        return time, position_arr
+
     def update_from_BTSP_targets(
         self,
         BTSP_targets: list | np.ndarray[tuple[int], np.dtype[np.int64]] = list(),
@@ -1982,10 +2186,7 @@ class BTSPLayer(HebbianLayer):
         return
 
     def get_BTSP_response_dict(
-        self,
-        pre=1,
-        post=2,
-        chosen_neurons="all",
+        self, pre=1, post=2, chosen_neurons="all", t_start=None, t_end=None
     ):
         """
         self.get_BTSP_response_dict()
@@ -1993,17 +2194,19 @@ class BTSPLayer(HebbianLayer):
         Get the BTSP responses of the layer.
 
         Args:
-        - pre (float, optional): Time before BTSP event to plot. Default is 1.
-        - post (float, optional): Time after BTSP event to plot. Default is 2.
-        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
+        - pre (float, optional): Time before BTSP events to include. Default is 1.
+        - post (float, optional): Time after BTSP events to include. Default is 2.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to include.
             Default is "all".
+        - t_start (float, optional): Start time for inclusion. Default is None.
+        - t_end (float, optional): End time for inclusion. Default is None.
 
         Returns:
         - time (1D np.ndarray): Time vector for the BTSP responses.
         - BTSP_response_dict (dict): Dictionary of BTSP responses for each neuron.
         """
 
-        BTSP_step_dict = self.get_BTSP_step_dict()
+        BTSP_step_dict = self.get_BTSP_step_dict(t_start=t_start, t_end=t_end)
         firingrates = np.asarray(self.history["firingrate"])
 
         relative_indices = plot_util.get_time_indices(
@@ -2015,17 +2218,17 @@ class BTSPLayer(HebbianLayer):
         chosen_neurons = self.get_chosen_neurons(chosen_neurons)
 
         BTSP_response_dict = dict()
-        for neuron_num in chosen_neurons:
-            time_indices = BTSP_step_dict[neuron_num]
-            if len(time_indices) == 0:
-                BTSP_response_dict[neuron_num] = None
+        for neuron_idx in chosen_neurons:
+            steps = BTSP_step_dict[neuron_idx]
+            if len(steps) == 0:
+                BTSP_response_dict[neuron_idx] = None
 
-            responses = np.full((len(time_indices), len(relative_indices)), np.nan)
-            for j, time_idx in enumerate(time_indices):
-                indices = relative_indices + time_idx
+            responses = np.full((len(steps), len(relative_indices)), np.nan)
+            for j, step in enumerate(steps):
+                indices = relative_indices + step
                 mask = (indices >= 0) * (indices < num_steps_total)
-                responses[j, mask] = firingrates[indices[mask], neuron_num]
-            BTSP_response_dict[neuron_num] = responses
+                responses[j, mask] = firingrates[indices[mask], neuron_idx]
+            BTSP_response_dict[neuron_idx] = responses
 
         return time, BTSP_response_dict
 
@@ -2130,7 +2333,9 @@ class BTSPLayer(HebbianLayer):
 
         return sub_ax
 
-    def plot_BTSP_frequency(self, sub_ax=None, width=0.2, autosave=None):
+    def plot_BTSP_frequency(
+        self, sub_ax=None, width=0.2, t_start=None, t_end=None, autosave=None
+    ):
         """
         self.plot_BTSP_frequency()
 
@@ -2139,14 +2344,18 @@ class BTSPLayer(HebbianLayer):
         Args:
         - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
         - width (float, optional): Width of the bars. Default is 0.3.
+        - t_start (float, optional): Start time of the plot. Default is None.
+        - t_end (float, optional): End time of the plot. Default is None.
         - autosave (bool, optional): Whether to autosave the figure. Default is None.
 
         Returns:
         - sub_ax (plt.Axes): Subplot with BTSP frequency plotted.
         """
 
-        counts = self.get_BTSP_counts()
-        applied_counts = self.get_BTSP_counts(applied_only=True)
+        counts = self.get_BTSP_counts(t_start=t_start, t_end=t_end)
+        applied_counts = self.get_BTSP_counts(
+            applied_only=True, t_start=t_start, t_end=t_end
+        )
 
         if sub_ax is None:
             _, sub_ax = plt.subplots(figsize=(5, 2))
@@ -2187,7 +2396,13 @@ class BTSPLayer(HebbianLayer):
         return sub_ax
 
     def plot_BTSP_step_histogram(
-        self, sub_ax=None, nbins=40, interval=False, autosave=None
+        self,
+        sub_ax=None,
+        nbins=40,
+        interval=False,
+        t_start=None,
+        t_end=None,
+        autosave=None,
     ):
         """
         self.plot_BTSP_step_histogram()
@@ -2198,15 +2413,20 @@ class BTSPLayer(HebbianLayer):
         - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
         - nbins (int, optional): Number of bins for the histogram. Default is 40.
         - interval (bool, optional): Whether to plot the step intervals instead of step
-            numbers .
+            numbers.
+        - t_start (float, optional): Start time for including BTSP events. Default is
+            None.
+        - t_end (float, optional): End time for including BTSP events. Default is None.
         - autosave (bool, optional): Whether to autosave the figure. Default is None.
 
         Returns:
         - sub_ax (plt.Axes): Subplot with BTSP frequency plotted.
         """
 
-        steps = self.get_BTSP_steps()
-        applied_steps = self.get_BTSP_steps(applied_only=True)
+        steps = self.get_BTSP_steps(t_start=t_start, t_end=t_end)
+        applied_steps = self.get_BTSP_steps(
+            applied_only=True, t_start=t_start, t_end=t_end
+        )
         unapplied_steps = steps[~np.isin(steps, applied_steps)]
 
         if interval:
@@ -2230,7 +2450,7 @@ class BTSPLayer(HebbianLayer):
             if not len(plot_steps):
                 continue
             sub_ax.hist(
-                plot_steps, bins=bins, density=True, color=self.color, alpha=alpha
+                plot_steps, bins=bins, density=False, color=self.color, alpha=alpha
             )
 
         mean_step = np.mean(steps)
@@ -2248,7 +2468,7 @@ class BTSPLayer(HebbianLayer):
         )
 
         sub_ax.spines[["right"]].set_visible(False)
-        sub_ax.set_ylabel("BTSP events (density)")
+        sub_ax.set_ylabel("BTSP events")
         sub_ax.set_xlabel(xlabel)
         plot_util.pad_axis(sub_ax, axis="y", end="high")
 
@@ -2264,7 +2484,9 @@ class BTSPLayer(HebbianLayer):
 
         return sub_ax
 
-    def plot_BTSP_ramp_peak_histogram(self, sub_ax=None, nbins=40, autosave=None):
+    def plot_BTSP_ramp_peak_histogram(
+        self, sub_ax=None, nbins=40, t_start=None, t_end=None, autosave=None
+    ):
         """
         self.plot_BTSP_ramp_peak_histogram()
 
@@ -2273,13 +2495,15 @@ class BTSPLayer(HebbianLayer):
         Args:
         - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
         - nbins (int, optional): Maximum number of bins for the histogram. Default is 40.
+        - t_start (float, optional): Start time for including BTSP events. Default is None.
+        - t_end (float, optional): End time for including BTSP events. Default is None.
         - autosave (bool, optional): Whether to autosave the figure. Default is None.
 
         Returns:
         - sub_ax (plt.Axes): Subplot with BTSP ramp peaks plotted.
         """
 
-        peak_dict = self.get_BTSP_ramp_peak_dict()
+        peak_dict = self.get_BTSP_ramp_peak_dict(t_start=t_start, t_end=t_end)
         peaks = np.concatenate(list(peak_dict["peaks"].values()))
 
         if sub_ax is None:
@@ -2300,7 +2524,7 @@ class BTSPLayer(HebbianLayer):
                 sub_ax.hist(
                     peaks_to_plot,
                     bins=bins,
-                    density=True,
+                    density=False,
                     color=self.color,
                     label=label,
                     alpha=alpha,
@@ -2310,7 +2534,7 @@ class BTSPLayer(HebbianLayer):
         sub_ax.axvline(mean_peak, color="k", ls="dashed", label=f"mean={mean_peak:.2f}")
 
         sub_ax.spines[["right", "top"]].set_visible(False)
-        sub_ax.set_ylabel("Number of peaks (density)")
+        sub_ax.set_ylabel("Number of peaks")
         sub_ax.set_xlabel("BTSP ramp peaks")
         sub_ax.legend()
         plot_util.pad_axis(sub_ax, axis="y", end="high")
@@ -2320,7 +2544,9 @@ class BTSPLayer(HebbianLayer):
 
         return sub_ax
 
-    def plot_BTSP_stats_summary(self, axes=None):
+    def plot_BTSP_stats_summary(
+        self, axes=None, t_start=None, t_end=None, autosave=None
+    ):
         """
         self.plot_BTSP_stats_summary()
 
@@ -2340,20 +2566,225 @@ class BTSPLayer(HebbianLayer):
         elif axes.shape != (3, 2):
             raise ValueError("If passed, axes must have shape (3, 2).")
 
+        kwargs = {"t_start": t_start, "t_end": t_end, "autosave": False}
+
         fig = axes.ravel()[0].figure
         fig.suptitle("BTSP statistics", y=1.05)
 
-        self.plot_BTSP_responses(split=False, fill=False, ax=axes[0, 0])
+        self.plot_BTSP_responses(split=False, fill=False, ax=axes[0, 0], **kwargs)
         self.Agent.Environment.plot_environment(sub_ax=axes[0, 1])
-        self.plot_BTSP_locations(sub_ax=axes[0, 1])
+        self.plot_BTSP_locations(sub_ax=axes[0, 1], **kwargs)
 
-        self.plot_BTSP_frequency(sub_ax=axes[1, 0])
-        self.plot_BTSP_ramp_peak_histogram(sub_ax=axes[1, 1])
+        self.plot_BTSP_frequency(sub_ax=axes[1, 0], **kwargs)
+        self.plot_BTSP_ramp_peak_histogram(sub_ax=axes[1, 1], **kwargs)
 
         for i, interval in enumerate([False, True]):
-            self.plot_BTSP_step_histogram(sub_ax=axes[2, i], interval=interval)
+            self.plot_BTSP_step_histogram(
+                sub_ax=axes[2, i], interval=interval, **kwargs
+            )
+
+        plot_util.save_figure(fig, f"{self.name}_BTSP_stats_summary", save=autosave)  # type: ignore[attr-defined]
 
         return axes
+
+    def plot_around_BTSP(
+        self,
+        pre=4,
+        post=2,
+        linear=True,
+        directional=False,
+        datatype="speed",
+        cm=True,
+        color=None,
+        cumsum=False,
+        sub_ax=None,
+        autosave=None,
+    ):
+        """
+        self.plot_around_BTSP()
+
+        Plot the speed or position around BTSP events.
+
+        Args:
+        - pre (int, optional): Number of steps before BTSP event. Default is 4.
+        - post (int, optional): Number of steps after BTSP event. Default is 2.
+        - linear (bool, optional): Whether to plot the linear speed. Default is True.
+        - directional (bool, optional): Whether to plot the directional speed.
+            Default is False.
+        - cm (bool, optional): Whether to plot the speed in cm/s. Default is True.
+        - datatype (str, optional): Type of data to plot ("speed" or "position").
+            Default is "speed".
+        - color (str, optional): Color of the plot. If None, the layer color is used.
+            Default is None.
+        - cumsum (bool, optional): Whether to plot the cumulative sum of the speed.
+            Default is False.
+        - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
+        - autosave (bool, optional): Whether to autosave the figure. Default is None.
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with speed around BTSP events plotted.
+        """
+
+        if datatype == "speed":
+            time, data_arr = self.get_speed_around_BTSP(
+                pre=pre, post=post, linear=linear, directional=directional, cm=cm
+            )
+            data_label = self.Agent.get_speed_label(
+                linear=linear, directional=directional, incl_unit=False
+            )
+            unit_str = "cm/s" if cm else "m/s"
+
+        elif datatype == "position":
+            time, data_arr = self.get_position_around_BTSP(pre=pre, post=post, cm=cm)
+            data_label = "Position"
+            unit_str = "m" if cm else "cm"
+
+        time_incr = np.mean(np.diff(time))  # to rescale the cumulative sum over seconds
+
+        if sub_ax is None:
+            _, sub_ax = plt.subplots(figsize=(6, 1.5))
+
+        if len(data_arr) == 1:
+            alphas = [0.9]
+        elif len(data_arr) == 2:
+            alphas = [0.5, 0.9]
+        elif len(data_arr) > 2:
+            alphas = np.linspace(0.3, 0.9, data_arr.shape[0])
+
+        if data_arr.shape[1] == 2:
+            labels = ["x", "y"]
+            lws = [1.0, 0.6]
+        else:
+            labels = [None, None]
+            lws = [None, None]
+
+        color = color or self.color
+        lws = [None] if data_arr.shape[-1] == 1 else []
+        for i, data in enumerate(data_arr):
+            for j, dim_data in enumerate(data.T):
+                mask = ~np.isnan(dim_data)
+                dim_data = dim_data[mask]
+                if cumsum:
+                    dim_data = np.cumsum(dim_data, axis=0)
+                    BTSP_pt = np.argmin(np.absolute(time[mask]))
+                    dim_data -= dim_data[BTSP_pt]
+                    dim_data *= time_incr
+
+                label = labels[j] if i == 0 else None
+                sub_ax.plot(
+                    time[mask],
+                    dim_data,
+                    color=color,
+                    alpha=alphas[i],
+                    lw=lws[j],
+                    label=label,
+                )
+
+        if data_arr.shape[1] == 2:
+            sub_ax.legend()
+
+        save_label = f"{data_label.lower().replace(' ', '_')}_around_BTSP"
+        if cumsum:
+            sub_ax.axhline(0, color="k", ls="dashed")
+            data_label = f"Cumul. {data_label[0].lower()}{data_label[1:]}"
+            save_label = f"cumul_{datatype}"
+
+        sub_ax.set_ylabel(f"{data_label} ({unit_str})")
+        sub_ax.set_xlabel("Time (s)")
+        sub_ax.set_title(f"{data_label} around BTSP events", y=1.1)
+
+        sub_ax.axvline(0, color="k", ls="dashed")
+        sub_ax.spines[["right", "top"]].set_visible(False)
+        plot_util.pad_axis(sub_ax, axis="y", end="both")
+
+        plot_util.save_figure(sub_ax.figure, f"{self.name}_{save_label}", save=autosave)  # type: ignore[attr-defined]
+
+        return sub_ax
+
+    def plot_position_around_BTSP(
+        self,
+        pre=4,
+        post=2,
+        color=None,
+        cumsum=False,
+        sub_ax=None,
+    ):
+        """
+        self.plot_position_around_BTSP()
+
+        Plot the position around BTSP events.
+
+        Args:
+        - pre (int, optional): Number of steps before BTSP event. Default is 4.
+        - post (int, optional): Number of steps after BTSP event. Default is 2.
+        - color (str, optional): Color of the plot. If None, the layer color is used.
+            Default is None.
+        - cumsum (bool, optional): Whether to plot the cumulative sum of the speed.
+            Default is False.
+        - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with speed around BTSP events plotted.
+        """
+
+        time, position_arr = self.get_position_around_BTSP(pre=pre, post=post)
+        BTSP_pt = np.argmin(np.absolute(time))
+
+        if sub_ax is None:
+            _, sub_ax = plt.subplots(figsize=(6, 2))
+
+        if len(position_arr) == 1:
+            alphas = [0.9]
+        elif len(position_arr) == 2:
+            alphas = [0.5, 0.9]
+        elif len(position_arr) > 2:
+            alphas = np.linspace(0.3, 0.9, position_arr.shape[0])
+
+        if position_arr.shape[1] == 2:
+            labels = ["x", "y"]
+            lws = [1.0, 0.6]
+        else:
+            labels = [None, None]
+            lws = [None, None]
+
+        color = color or self.color
+        lws = [None] if position_arr.shape[-1] == 1 else []
+        for i, position in enumerate(position_arr):
+            if cumsum:
+                speed = np.cumsum(speed, axis=0)
+                speed -= speed[BTSP_pt]
+
+            for j, dim_speed in enumerate(speed.T):
+                label = labels[j] if i == 0 else None
+                sub_ax.plot(
+                    time,
+                    dim_speed,
+                    color=color,
+                    alpha=alphas[i],
+                    lw=lws[j],
+                    label=label,
+                )
+
+        if speed_arr.shape[1] == 2:
+            sub_ax.legend()
+
+        label = self.Agent.get_speed_label(
+            linear=linear, directional=directional, incl_unit=False
+        )
+        if cumsum:
+            ylabel = f"Cumul. {label[0].lower()}{label[1:]}"
+        unit = "cm" if cm else "m"
+
+        sub_ax.set_ylabel(f"{ylabel} ({unit}/s)")
+        sub_ax.set_xlabel("Time (s)")
+        sub_ax.set_title(f"{ylabel} around BTSP events", y=1.1)
+
+        sub_ax.axvline(0, color="k", ls="dashed")
+        sub_ax.spines[["right", "top"]].set_visible(False)
+
+        plot_util.save_figure(sub_ax.figure, f"{self.name}_speed_around_BTSP", save=autosave)  # type: ignore[attr-defined]
+
+        return sub_ax
 
     def plot_BTSP_responses(
         self,
@@ -2363,6 +2794,8 @@ class BTSPLayer(HebbianLayer):
         ax=None,
         split=True,
         fill=True,
+        t_start=None,
+        t_end=None,
         chosen_neurons="all",
         autosave=None,
     ):
@@ -2389,7 +2822,11 @@ class BTSPLayer(HebbianLayer):
         """
 
         time, BTSP_response_dict = self.get_BTSP_response_dict(
-            pre=pre, post=post, chosen_neurons=chosen_neurons
+            pre=pre,
+            post=post,
+            chosen_neurons=chosen_neurons,
+            t_start=t_start,
+            t_end=t_end,
         )
         chosen_neurons = self.get_chosen_neurons(chosen_neurons)
 
@@ -2432,22 +2869,22 @@ class BTSPLayer(HebbianLayer):
 
         all_responses = list()
         num_neurons_with_BTSP = 0
-        for i, neuron_num in enumerate(BTSP_response_dict.keys()):
+        for i, neuron_idx in enumerate(BTSP_response_dict.keys()):
             sub_ax = ax.ravel()[i] if split else ax
 
             if split or i == 0:
                 sub_ax.axvline(0, color="k", ls="dashed")
                 sub_ax.spines[["right", "top"]].set_visible(False)
 
-            if BTSP_response_dict[neuron_num] is None:
-                sub_ax.plot([], [], label=f"#{neuron_num} ({num_events})")
+            if BTSP_response_dict[neuron_idx] is None:
+                sub_ax.plot([], [], label=f"#{neuron_idx} ({num_events})")
                 sub_ax.legend(**legend_kwargs)
                 continue
 
             num_neurons_with_BTSP += 1
-            all_responses.append(BTSP_response_dict[neuron_num])
+            all_responses.append(BTSP_response_dict[neuron_idx])
             if fill:
-                for response in BTSP_response_dict[neuron_num]:
+                for response in BTSP_response_dict[neuron_idx]:
                     sub_ax.fill_between(
                         time,
                         np.zeros_like(response),
@@ -2459,7 +2896,7 @@ class BTSPLayer(HebbianLayer):
 
             sub_ax.plot(
                 time,
-                BTSP_response_dict[neuron_num].T,
+                BTSP_response_dict[neuron_idx].T,
                 color=self.color,
                 alpha=base_alpha * 2,
                 lw=base_lw,
@@ -2470,7 +2907,7 @@ class BTSPLayer(HebbianLayer):
                 warnings.filterwarnings(
                     "ignore", category=RuntimeWarning, message="Mean of empty slice"
                 )
-                mean_response = np.nanmean(BTSP_response_dict[neuron_num], axis=0)
+                mean_response = np.nanmean(BTSP_response_dict[neuron_idx], axis=0)
 
             sub_ax.plot(
                 time,
@@ -2481,8 +2918,8 @@ class BTSPLayer(HebbianLayer):
             )
 
             if split:
-                num_events = len(BTSP_response_dict[neuron_num])
-                sub_ax.plot([], [], label=f"#{neuron_num} ({num_events})")
+                num_events = len(BTSP_response_dict[neuron_idx])
+                sub_ax.plot([], [], label=f"#{neuron_idx} ({num_events})")
                 sub_ax.legend(**legend_kwargs)
 
         if split and len(chosen_neurons) < len(ax.ravel()):
@@ -2524,6 +2961,7 @@ class BTSPLayer(HebbianLayer):
         ) = "all",
         sub_ax: plt.Axes | None = None,
         color: str | None = None,
+        autosave: bool | None = None,
     ):
         """
         self.plot_BTSP_locations()
@@ -2538,6 +2976,7 @@ class BTSPLayer(HebbianLayer):
         - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
             created with environment plotted. Default is None.
         - color (str, optional): Color of the BTSP markers. Default is None.
+        - autosave (bool, optional): Whether to autosave the figure. Default is None.
 
         Returns:
         - sub_ax (plt.Axes): Subplot with BTSP locations plotted.
@@ -2551,12 +2990,9 @@ class BTSPLayer(HebbianLayer):
 
         t, startid, _ = self.get_plotting_times(t_start=t_start, t_end=t_end)
 
-        BTSP_events = np.asarray(self.history["BTSP_events"]) - startid
-        BTSP_targets = self.history["BTSP_targets"]
+        BTSP_step_dict = self.get_BTSP_step_dict(t_end=t_end)
 
-        min_not_yet = (
-            self.num_steps_total - self.BTSP_buffer["num_steps"].max() - startid
-        )
+        min_not_yet = self.num_steps_total - self.BTSP_buffer["num_steps"].max()
 
         if sub_ax is None:
             sub_ax = self.Agent.Environment.plot_environment()
@@ -2564,13 +3000,11 @@ class BTSPLayer(HebbianLayer):
         if self.Agent.Environment.dimensionality == "1D":
             ymax = sub_ax.get_ylim()[1]
 
-        for event, targets in zip(BTSP_events, BTSP_targets):
-            for target in targets:
-                if event >= len(t):
-                    continue
-                elif event < 0:
+        for target, steps in BTSP_step_dict.items():
+            for step in steps:
+                if step < startid:
                     alpha = 0.6  # happened before
-                elif event >= min_not_yet:
+                elif step >= min_not_yet:
                     alpha = 0.3  # not yet applied
                 else:
                     alpha = 1.0
@@ -2580,7 +3014,7 @@ class BTSPLayer(HebbianLayer):
 
                 i = chosen_neurons.index(target)
 
-                pos = self.Agent.history["pos"][event + startid]
+                pos = self.Agent.history["pos"][step]
                 if self.Agent.Environment.dimensionality == "1D":
                     line_sep = (ymax - 1) / num_neurons
                     y_pos = 1 + line_sep * i + line_sep * 0.7
@@ -2594,9 +3028,19 @@ class BTSPLayer(HebbianLayer):
                     s=10,
                 )
 
+        plot_util.save_figure(sub_ax.figure, f"{self.name}_BTSP_locations", save=autosave)  # type: ignore[attr-defined]
+
         return sub_ax
 
-    def plot_BTSP_ramp(self, axes=None, plot_events=True, autosave=None):
+    def plot_BTSP_ramp(
+        self,
+        axes=None,
+        plot_events=True,
+        neuron_idx=0,
+        t_start=None,
+        t_end=None,
+        autosave=None,
+    ):
         """
         self.plot_BTSP_ramp()
 
@@ -2607,6 +3051,9 @@ class BTSPLayer(HebbianLayer):
             with shape (2, 1) or (2, ). Default is None.
         - plot_events (bool, optional): Whether to plot BTSP event markers.
             Default is True.
+        - neuron_idx (int, optional): Index of the neuron to plot. Default is 0.
+        - t_start (float, optional): Start time of the plot. Default is None.
+        - t_end (float, optional): End time of the plot. Default is None.
         - autosave (bool, optional): Whether to autosave the figure. If None, the global
         autosave setting for ratinabox is used. Default is None.
 
@@ -2620,13 +3067,14 @@ class BTSPLayer(HebbianLayer):
         elif axes.shape != (2, 1) and axes.shape != (2,):
             raise ValueError("axes must have shape (2, 1) or (2, ).")
 
-        if self.n > 1:
-            raise NotImplementedError(
-                "Plotting BTSP ramp only implemented for 1 neuron."
-            )
+        if neuron_idx >= self.n:
+            raise ValueError(f"Neuron index {neuron_idx} not in range.")
 
-        t = np.asarray(self.history["t"])
-        BTSP_ramp = np.asarray(self.history["BTSP_ramp"])[:, 0]  # 1st neuron only
+        t, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
+
+        BTSP_ramp = np.asarray(self.history["BTSP_ramp"])[
+            startid : endid + 1, neuron_idx
+        ]  # 1st neuron only
 
         ax1D = np.asarray(axes).ravel()
         ax1D[0].plot(t, BTSP_ramp, lw=1.2, color=self.color)
@@ -2683,12 +3131,16 @@ class BTSPLayer(HebbianLayer):
                 i += num_steps_for_plateau
 
         if plot_events:
-            BTSP_events = np.asarray(self.history["BTSP_events"])
-            if len(BTSP_events):
+
+            BTSP_steps = self.get_BTSP_step_dict(t_start=t_start, t_end=t_end)[
+                neuron_idx
+            ]
+
+            if len(BTSP_steps):
                 y = 1
                 ax1D[0].scatter(
-                    t[np.asarray(BTSP_events)],
-                    np.full(len(BTSP_events), y),
+                    t[np.asarray(BTSP_steps)],
+                    np.full(len(BTSP_steps), y),
                     color=(self.color or "k"),
                     alpha=0.8,
                     marker=mpl_markers.MarkerStyle("x"),
@@ -2743,9 +3195,6 @@ class BTSPLayer(HebbianLayer):
         if len(t) == 0:
             return
 
-        BTSP_events = np.asarray(self.history["BTSP_events"]) - startid
-        BTSP_targets = self.history["BTSP_targets"]
-
         ax1D = np.asarray(ax).ravel()
         if timeseries or self.Agent.Environment.dimensionality == "1D":
             if len(ax1D) != 1:
@@ -2755,17 +3204,14 @@ class BTSPLayer(HebbianLayer):
             sub_ax = ax1D[0]
             ymax = sub_ax.get_ylim()[1]
 
-        min_not_yet = (
-            self.num_steps_total - self.BTSP_buffer["num_steps"].max() - startid
-        )
+        min_not_yet = self.num_steps_total - self.BTSP_buffer["num_steps"].max()
 
-        for event, targets in zip(BTSP_events, BTSP_targets):
-            for target in targets:
-                if event >= len(t):
-                    continue
-                elif event < 0:
+        BTSP_step_dict = self.get_BTSP_step_dict(t_end=t_end)
+        for target, steps in BTSP_step_dict.items():
+            for step in steps:
+                if step < startid:
                     alpha = 0.6  # happened before
-                elif event >= min_not_yet:
+                elif step >= min_not_yet:
                     alpha = 0.3  # not yet applied
                 else:
                     alpha = 1.0
@@ -2776,14 +3222,14 @@ class BTSPLayer(HebbianLayer):
                 i = chosen_neurons.index(target)
 
                 if timeseries:
-                    if event < 0:
+                    if step < startid:
                         continue
-                    x_pos = t[event] / 60
+                    x_pos = t[step - startid] / 60
                     line_sep = (ymax - 1) / num_neurons
                     y_pos = 1 + line_sep * i + line_sep * 0.7
                     pos = [x_pos, y_pos]
                 else:
-                    pos = self.Agent.history["pos"][event + startid]
+                    pos = self.Agent.history["pos"][step]
                     if self.Agent.Environment.dimensionality == "1D":
                         line_sep = (ymax - 1) / num_neurons
                         y_pos = 1 + line_sep * i + line_sep * 0.7

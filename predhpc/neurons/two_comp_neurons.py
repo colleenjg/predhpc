@@ -400,8 +400,8 @@ class TwoCompLayer(object):
             Default is None.
         - t_end (float, optional): Stop time for obtaining firingrate min and max.
             Default is None.
-        - compartment (str, optional): Which compartment to plot, if environment is
-            2D ("soma", "dend", "both", "inhibit", "all"). Default is "all".
+        - compartment (str, optional): Which compartment to obtain max for
+            ("soma", "dend", "both", "inhibit", "all"). Default is "all".
 
         Returns:
         - min_firingrate (float): Minimum firing rate.
@@ -911,6 +911,105 @@ class TwoCompLayer(object):
 
         return axes
 
+    def plot_binned_rates(
+        self,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        axes: np.ndarray | None = None,
+        plot_lateral: bool = False,
+        chosen_neurons: str | int | list | np.ndarray = "all",
+        num_bins: int = 100,
+        part_run: float = 0.2,
+        merge: bool = True,
+        plot_occ: bool = True,
+        vmin: float = 0,
+        vmax: float | None = None,
+        plot_colorbars: bool = True,
+        autosave: bool | None = None,
+    ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
+        """
+        self.plot_binned_rates()
+
+        Plot the firing rates of the layer, binned by position
+        (for 1D environments only).
+
+        Args:
+        - t_start (float, optional): Start time of the plot. Default is None.
+        - t_end (float, optional): End time. Default is None.
+        - axes (2D np.ndarray): 2D array of subplots
+        - plot_lateral (bool, optional): Whether to plot the lateral inhibition layer,
+            if it exists. Default is False.
+        - chosen_neurons (str, int, list or np.ndarray, optional): Neurons to plot.
+            Default is "all".
+        - num_bins (int, optional): Number of bins to use for binning the firing rates.
+            Default is 100.
+        - part_run (float, optional): Proportion of the run to use for binning the
+            firing rates. Default is 0.2.
+        - merge (bool, optional): Whether to merge the firing rates of the neurons.
+            Default is True.
+        - plot_occ (bool, optional): Whether to plot the occupancy. Default is True.
+        - vmin (float, optional): Minimum value for the colormap. Default is 0.
+        - vmax (float, optional): Maximum value for the colormap. Default is None.
+        - plot_colorbars (bool, optional): Whether to plot colorbars. Default is True.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the
+            global autosave setting for ratinabox is used. Default is None.
+
+        Returns:
+        - axes (2D np.ndarray): 2D array of subplots.
+        """
+
+        compartments = self.get_compartments("all", incl_lateral=plot_lateral)
+        chosen_neurons = self.SomaCompartment.get_chosen_neurons(chosen_neurons)
+
+        num_rows = len(compartments)
+        if axes is None:
+            axes = plot_util.get_binned_rate_axes(
+                num_neurons=len(chosen_neurons),
+                num_rows=num_rows,
+                plot_occ=plot_occ,
+                plot_colorbars=plot_colorbars,
+            )
+        else:
+            num_cols = len(chosen_neurons) + plot_occ
+            ax_shape = np.asarray(axes).shape
+            if ax_shape != (num_rows, num_cols):
+                raise ValueError(
+                    f"axes must have shape ({num_rows}, {num_cols}), not {ax_shape}."
+                )
+        titles = ["Soma", "Dendrite"]
+        if self.inhibit_dend:  # type: ignore[attr-defined]
+            titles.append("Dend. inhib.")
+        if plot_lateral and self.mutual_inhibition_weight is not None:
+            titles.append("Lateral inhib.")
+
+        for c, comp in enumerate(compartments):
+            comp.plot_binned_rates(
+                t_start=t_start,
+                t_end=t_end,
+                ax=np.asarray(axes)[c],
+                chosen_neurons=chosen_neurons,
+                num_bins=num_bins,
+                part_run=part_run,
+                merge=merge,
+                plot_occ=plot_occ,
+                vmin=vmin,
+                vmax=vmax,
+                autosave=False,
+            )
+
+            for i in chosen_neurons:
+                np.asarray(axes)[c][i].set_title(f"{titles[c]} (#{i})")
+
+        for ax1D in np.asarray(axes)[:-1]:
+            for sub_ax in ax1D:
+                sub_ax.set_xlabel("")
+
+        fig = np.asarray(axes).ravel()[0].figure
+
+        plot_util.save_figure(fig, f"{self.name}_binned_rates", save=autosave)  # type: ignore[attr-defined]
+
+        return axes
+
     def plot_rate_timeseries(
         self,
         t_start: float | None = None,
@@ -922,6 +1021,7 @@ class TwoCompLayer(object):
         lateral_color: str | None = None,
         separate_axes: bool = False,
         plot_lateral: bool = False,
+        single_x_axis: bool = True,
         norm_by: str | None = None,
         autosave: bool | None = None,
         **kwargs,
@@ -947,6 +1047,9 @@ class TwoCompLayer(object):
             separate subplot. Default is False.
         - plot_lateral (bool, optional): Whether to plot the lateral inhibition layer,
             if it exists. Default is False.
+        - single_x_axis (bool, optional): Whether to plot x axis spine and ticks only
+            for the last subplot, instead of all of them. Default is True.
+        - norm_by (str, optional): Normalisation method for rate maps. Default is None.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
         global autosave setting for ratinabox is used. Default is None.
 
@@ -1007,6 +1110,10 @@ class TwoCompLayer(object):
             )
 
         for c, comp in enumerate(compartments):
+            if norm_by == "max_per":
+                use_norm_by = comp.get_min_max_firingrates()[1]
+            else:
+                use_norm_by = norm_by
             color = colors[c] or comp.color
             use_sub_ax = ax1D[c] if separate_axes else sub_ax
             sub_ax_out = comp.plot_rate_timeseries(
@@ -1014,7 +1121,7 @@ class TwoCompLayer(object):
                 t_end=t_end,
                 sub_ax=use_sub_ax,
                 color=color,
-                norm_by=norm_by,
+                norm_by=use_norm_by,
                 autosave=False,
                 **kwargs,
             )
@@ -1022,9 +1129,14 @@ class TwoCompLayer(object):
                 sub_ax = sub_ax or sub_ax_out
 
         if separate_axes:
+            if single_x_axis:
+                for s, sub_ax in enumerate(ax1D[:-1]):
+                    sub_ax.xaxis.set_visible(False)
+                    sub_ax.spines["bottom"].set_visible(False)
+
             for s, sub_ax in enumerate(ax1D):
                 sub_ax.set_title(separate_titles[s])
-                plot_fcts.mark_target_and_reset_points(self.Agent, self, sub_ax=sub_ax)
+                plot_fcts.mark_target_and_reset_points(self, sub_ax=sub_ax)
                 if s != len(ax1D) - 1:
                     sub_ax.set_xlabel("")
             fig = np.asarray(ax).ravel()[0].figure

@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 
-import copy
 from typing import Any, Sequence
 import warnings
 
 from matplotlib import pyplot as plt  # type: ignore[import]
-from matplotlib import markers as mpl_markers
 import numpy as np
 from tqdm import tqdm  # type: ignore[import]
 
@@ -16,133 +14,498 @@ from predhpc.neurons import (
     two_comp_neurons,
     object_neurons,
 )
-from predhpc.util import gen_util, plot_util, params_util
+from predhpc.util import ext_util, gen_util, plot_util, params_util
 
 
-### 2D FUNCTIONS ###
-
-
-def extract_objects_from_Pyrs(Pyrs):
+class Learner:
     """
-    extract_objects_from_Pyrs(Pyrs)
+    Learner
 
-    Extract objects from a Pyrs object.
-
-    Args:
-    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
-        Pyr. neuron layer
-
-    Returns:
-    - Env (env.Environment): Environment
-    - Ag (agent.Agent): Agent
-    - PCs (riab_neurons.PlaceCells): Place cells
-    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
-        Pyr. neuron layer
-    - Objs (object_neurons.ObjectCells or object_neurons.ObjectInstanceCells):
-        Object cells
+    Class for running a learning experiment with BTSP learning.
     """
 
-    Env = Pyrs.Agent.Environment
+    def __init__(
+        self,
+        Pyrs,
+        reverse_linear=False,
+        start_BTSP=None,
+        stop_BTSP=None,
+        BTSP_on=None,
+        record_weights_at_BTSP=True,
+        use_Hebbian=False,
+        weight_recording_freq=100,
+        num_target_reaches=None,
+        num_trajectories=None,
+    ):
+        """
+        Learner()
 
-    Ag = Pyrs.Agent
+        Initialize a Learner object.
 
-    if isinstance(Pyrs, two_comp_neurons.TwoCompLayer):
-        Obj_key = list(Pyrs.DendriteCompartment.inputs.keys())[-1]
-        Objs = Pyrs.DendriteCompartment.inputs[Obj_key]["layer"]
+        Args:
+        - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
+            Pyr. neuron layer.
+        - reverse_linear (bool, optional): If using a linear track, whether to reverse
+            Agent diretion at each end. Default is False.
+        - start_BTSP (int, optional): Step at which BTSP should start. Default is None.
+        - stop_BTSP (int, optional): Step at which BTSP should stop. Default is None.
+        - BTSP_on (int, optional): Trajectory number at which BTSP is enabled or
+            triggered. 1 for first trajectory. Default is None.
+        - record_weights_at_BTSP (bool, optional): Whether to record weights at BTSP
+            events. Default is True.
+        - use_Hebbian (bool, optional): Whether to use Hebbian learning. Default is
+            False.
+        - weight_recording_freq (int, optional): Frequency at which to record weights
+            if Hebbian learning is active. Default is 100.
+        - num_target_reaches (int, optional): Target number of rewards to reach.
+            Default is None.
+        - num_trajectories (int, optional): Number of trajectories to complete.
+            Default is None.
+        """
 
-        PC_key = list(Pyrs.SomaCompartment.inputs.keys())[0]
-        PCs = Pyrs.SomaCompartment.inputs[PC_key]["layer"]
-    else:
-        Objs = None
-        PC_key = list(Pyrs.inputs.keys())[0]
-        PCs = Pyrs.inputs[PC_key]["layer"]
+        self.Pyrs = Pyrs
 
-    return Env, Ag, PCs, Pyrs, Objs
+        self.record_weights_at_BTSP = record_weights_at_BTSP
+        self.start_BTSP = start_BTSP
+        self.stop_BTSP = stop_BTSP
 
+        self.use_Hebbian = use_Hebbian
+        self.weight_recording_freq = weight_recording_freq
 
-def plot_2D_initial_conditions(Pyrs, num_samples=10, autosave: bool | None = None):
-    """
-    plot_2D_initial_conditions(Pyrs)
+        self.num_target_reaches = num_target_reaches
+        self.num_trajectories = num_trajectories
 
-    Plot initial conditions for a 2D environment experiment.
+        self.set_init_attributes(BTSP_on=BTSP_on, reverse_linear=reverse_linear)
 
-    Args:
-    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
-        Pyr. neuron layer
-    - num_samples (int, optional): Number of samples to plot. Default is 10.
-    - autosave (bool, optional): Whether to autosave the figure. If None, the global
-        autosave setting for ratinabox is used. Default is None.
+    def get_agent_step(self):
+        """
+        self.get_agent_step()
 
-    Returns:
-    - fields_axes (2D np.ndarray): Array of subplots with place fields plotted, with
-        shape (num_layers, num_samples).
-    - aggreg_ax1D (1D np.ndarray): Array of subplots with environment and aggregated
-        fields plotted, with shape (3,).
-    """
+        Get the current step of the agent.
 
-    Env, _, PCs, Pyrs, Objs = extract_objects_from_Pyrs(Pyrs)
+        Returns:
+        - agent_step (int): Current step of the agent.
+        """
 
-    # Plot fields
-    if Objs is None:
-        num_cols = min(PCs.n, num_samples)
-        neurons = [PCs]
-    else:
-        num_cols = min(max(PCs.n, Objs.n), num_samples)
-        neurons = [Objs, PCs]
+        agent_step = len(self.Agent.history["t"])
 
-    fields_fig, fields_axes = plt.subplots(
-        len(neurons), num_cols, figsize=(num_cols * 2, len(neurons) * 2), squeeze=False
-    )
-    title_i = max(0, num_cols // 2 - 1)
-    for i, NeuronLayer in enumerate(neurons):
-        if num_cols >= NeuronLayer.n:
-            chosen_neurons = np.arange(NeuronLayer.n)
-        else:
-            chosen_neurons = np.sort(np.random.choice(NeuronLayer.n, num_cols))
-        ax1D = fields_axes[i, : len(chosen_neurons)]
-        NeuronLayer.plot_rate_map(
-            chosen_neurons=chosen_neurons, ax=ax1D, no_legend=True, autosave=False
+        return agent_step
+
+    def set_init_attributes(self, BTSP_on=None, reverse_linear=False):
+        """
+        self.set_init_attributes()
+
+        Set initial attributes for the Learner object.
+
+        Args:
+        - BTSP_on (int, optional): Trajectory number at which BTSP is enabled or
+            triggered. 1 for first trajectory. Default is None.
+        - reverse_linear (bool, optional): If using a linear track, whether to reverse
+            Agent diretion at each end. Default is False.
+        """
+
+        self.Env, self.Agent, self.PCs, self.Objs = ext_util.extract_objects_from_Pyrs(
+            self.Pyrs
         )
-        name = NeuronLayer.name.replace("_", " ")
-        ax1D[title_i].set_title(f"{name} rate maps", fontsize="x-large")  # type: ignore[attr-defined]
 
-    # Plot aggregated fields
-    aggreg_fields, aggreg_ax1D = plt.subplots(1, 3, figsize=(9, 3))
+        # Agent info
+        self.step = -1
+        self.agent_start_step = self.get_agent_step()
+        self.num_prev_traj_compl = len(self.Agent.get_completed_trajectories_df())
+        self.num_prev_target_reaches = len(self.Agent.get_reached_target_df())
+        self.traj_restarted = False
+        self.early_stop_in_n = -1
 
-    for sub_ax in aggreg_ax1D[:2]:
-        Env.plot_environment(sub_ax=sub_ax, no_legend=True, autosave=False)
-    aggreg_ax1D[0].set_title("Environment")
+        # Pyrs info
+        self.two_compartment = isinstance(self.Pyrs, two_comp_neurons.TwoCompLayer)
+        self.one_comp_internal = isinstance(self.Pyrs, learning_neurons.NMDALayer)
 
-    plot_fcts.plot_overlayed_rate_maps(
-        PCs, method="max", colorbar=False, sub_ax=aggreg_ax1D[1], autosave=False
-    )
-    aggreg_ax1D[1].set_title("Overlayed place fields")
+        # BTSP settings
+        if self.two_compartment:
+            self.Pyrs_for_weights = self.Pyrs.SomaCompartment
+            self.BTSP_on = BTSP_on or 1
+            self.BTSP_stopped = False
+            self.Pyrs.set_BTSP_learn(soma=False, dend=False)
+            self.Pyrs.set_learn(soma=self.use_Hebbian, dend=False, inhibit=False)
+        else:
+            self.Pyrs_for_weights = self.Pyrs
+            if self.one_comp_internal:
+                self.BTSP_on = BTSP_on or 1
+            else:
+                self.BTSP_on = BTSP_on or 3
+            self.Pyrs.set_BTSP_learn()
+            self.Pyrs.set_learn(self.use_Hebbian)
 
-    PCs.plot_place_cell_locations(sub_ax=aggreg_ax1D[2], autosave=False)
-    aggreg_ax1D[2].set_title("Place cell centers")
+        # tracking BTSP
+        self.BTSP_started = False
+        self.BTSP_stopped = False
+        self.num_BTSP_prev = len(self.Pyrs_for_weights.history["BTSP_events"])
+        self.steps_BTSP_triggered = list()
 
-    if autosave:
-        plot_util.save_figure(fields_fig, "openfield_init_fields", save=autosave)
-        plot_util.save_figure(aggreg_fields, "openfield_init_aggreg", save=autosave)
+        # weight recording
+        self.weights = [(self.Pyrs_for_weights.inputs["PCs"]["w"].copy())]
+        self.weight_steps = [self.agent_start_step]
+        self.steps_triggered = [None]
 
-    return fields_axes, aggreg_ax1D
+        # reversal
+        self.reverse_linear = reverse_linear
+        if self.Env.D == 1:
+            self.positions = [self.Agent.start_position, self.Agent.reset_position]
+            self.check_pt = 1
+        elif reverse_linear:
+            raise ValueError("reverse_linear can only be used with a 1D environment.")
+
+    def check_start_BTSP(self):
+        """
+        self.check_start_BTSP()
+
+        Check whether BTSP should be started.
+        """
+
+        if not (self.two_compartment or self.one_comp_internal):
+            return
+
+        if self.start_BTSP is not None:
+            return
+        if len(self.Agent.trajectory_df) < self.BTSP_on + self.num_prev_traj_compl:
+            return
+
+        if self.two_compartment:
+            self.Pyrs.set_BTSP_learn(soma=True, dend=False)
+        else:
+            self.Pyrs.set_BTSP_learn()
+
+        self.start_BTSP = self.step
+
+    def check_stop_BTSP(self, no_logs=False):
+        """
+        self.check_stop_BTSP()
+
+        Check whether BTSP should be stopped.
+        """
+
+        if self.BTSP_stopped:
+            return
+        if self.stop_BTSP is None:
+            return
+        if self.step < self.stop_BTSP:
+            return
+
+        if self.two_compartment:
+            self.Pyrs.set_BTSP_learn(soma=False, dend=False)
+        else:
+            self.Pyrs.set_BTSP_learn()
+
+        self.BTSP_stopped = True
+
+        if not no_logs:
+            print(f"BTSP blocked from step {self.step + self.agent_start_step}.")
+
+    def get_BTSP_targets(self):
+        """
+        self.get_BTSP_targets()
+
+        Get targets for BTSP learning.
+        """
+
+        BTSP_targets = list()
+
+        if self.two_compartment or self.one_comp_internal:
+            return BTSP_targets
+
+        if len(self.Agent.trajectory_df) != self.BTSP_on + self.num_prev_traj_compl:
+            return BTSP_targets
+
+        if self.BTSP_stopped:
+            return BTSP_targets
+
+        if self.start_BTSP is None:
+            self.start_BTSP = self.step
+
+        if self.traj_restarted and self.Pyrs.n > 1:  # BTSP near start position
+            BTSP_targets = [self.Pyrs.n - 1]
+
+        # check whether a target BTSP signal should be applied
+        if self.Agent.reached_target:
+            BTSP_targets = [0]
+
+        return BTSP_targets
+
+    def update_for_BTSP(self, no_logs=False):
+        """
+        self.update_for_BTSP()
+
+        Update for BTSP learning.
+
+        Returns:
+        - BTSP_targets (list or None): List of target indices for BTSP learning or None.
+        """
+        # check for BTSP on previous update
+        num_BTSP = len(self.Pyrs_for_weights.history["BTSP_events"])
+        if num_BTSP > len(self.steps_BTSP_triggered) + self.num_BTSP_prev:
+            self.steps_BTSP_triggered.append(self.get_agent_step() - 1)
+
+        # check for BTSP on current update
+        if self.two_compartment or self.one_comp_internal:
+            self.check_start_BTSP()
+            self.check_stop_BTSP(no_logs=no_logs)
+            BTSP_targets = None
+        else:
+            BTSP_targets = self.get_BTSP_targets()
+
+        return BTSP_targets
+
+    def record_weights(self):
+        """
+        self.record_weights()
+
+        Record weights if applicable.
+        """
+
+        if self.record_weights_at_BTSP and self.Pyrs_for_weights.BTSP_applied.any():
+            step_triggered = (
+                self.step - self.Pyrs_for_weights.history["num_steps_to_apply_BTSP"][-1]
+            ) + self.agent_start_step
+
+        elif self.use_Hebbian and not self.step % self.weight_recording_freq:
+            step_triggered = None
+
+        else:
+            return
+
+        step = self.agent_start_step + self.step
+        if step not in self.weight_steps:
+            self.weights.append(self.Pyrs_for_weights.inputs["PCs"]["w"].copy())
+            self.weight_steps.append(step)
+            self.steps_triggered.append(step_triggered)
+
+    def check_reverse(self, final=False):
+        """
+        self.check_reverse()
+
+        Check whether the Agent should reverse direction.
+
+        Args:
+        - final (bool, optional): Whether the check is for the final step. Default is
+            False.
+        """
+
+        if not self.reverse_linear:
+            return
+
+        if self.Env.D != 1:
+            raise ValueError("Reversing only applies to 1D environment.")
+
+        if final and self.check_pt == 0:
+            reverse = True
+        else:
+            reverse = self.Agent.check_if_position_reached(
+                self.positions[self.check_pt]
+            )
+
+        if reverse:
+            self.Agent.reverse(reset=True)
+            self.check_pt = 1 - self.check_pt
+
+    def check_for_early_stop(self):
+        """
+        self.check_for_early_stop()
+
+        Check whether the learning should be stopped early.
+
+        Returns:
+        - (bool): Whether the learning should be stopped early.
+        """
+
+        if self.early_stop_in_n < 0:
+            if self.num_target_reaches is not None:
+                num_target_reaches = (
+                    len(self.Agent.get_reached_target_df())
+                    - self.num_prev_target_reaches
+                )
+                if num_target_reaches >= self.num_target_reaches:
+                    self.early_stop_in_n = 20
+            elif self.num_trajectories is not None:
+                total_traj_compl = len(self.Agent.get_completed_trajectories_df())
+                if total_traj_compl - self.num_prev_traj_compl >= self.num_trajectories:
+                    self.early_stop_in_n = 20
+        else:
+            if self.early_stop_in_n == 0:
+                return True
+            else:
+                self.early_stop_in_n -= 1
+
+        return False
+
+    def check_BTSP_enabled(self):
+        """
+        self.check_BTSP_enabled()
+
+        Check whether BTSP was enabled during learning.
+
+        Returns:
+        - BTSP_enabled (bool): Whether BTSP was enabled.
+        """
+
+        BTSP_enabled = True
+        if self.start_BTSP is None:
+            BTSP_enabled = False
+        elif self.stop_BTSP is None:
+            BTSP_enabled = True
+        elif self.start_BTSP >= self.stop_BTSP:
+            BTSP_enabled = False
+
+        return BTSP_enabled
+
+    def log(self):
+        """
+        self.log()
+
+        Log information about the learning process.
+        """
+
+        act_target_reaches = (
+            len(self.Agent.get_reached_target_df()) - self.num_prev_target_reaches
+        )
+        if (
+            self.num_target_reaches is None
+            or act_target_reaches >= self.num_target_reaches
+        ):
+            print(f"Reached target {act_target_reaches} times.")
+        else:
+            print(
+                f"Only reached target {act_target_reaches} times "
+                f"(target: {self.num_target_reaches})."
+            )
+
+        self.Agent.log_trajectory_stats_to_date()
+        self.Agent.log_trajectory_stats_to_date(log_as_time=False)
+
+        steps_BTSP_triggered = np.asarray(self.steps_BTSP_triggered)
+        if self.check_BTSP_enabled():
+            if len(steps_BTSP_triggered) == 0:
+                BTSP_stat_str = ""
+            elif len(steps_BTSP_triggered) == 1:
+                BTSP_stat_str = f": occurred at step {steps_BTSP_triggered[0]}"
+            else:
+                BTSP_stat_str = (
+                    f": occurred between steps {steps_BTSP_triggered.min()} "
+                    f"and {steps_BTSP_triggered.max()}, inclusively"
+                )
+            stop_BTSP = self.stop_BTSP or self.step
+            print(
+                f"{len(steps_BTSP_triggered)} BTSP events triggered (allowed from steps "
+                f"{self.start_BTSP + self.agent_start_step} to "
+                f"{stop_BTSP + self.agent_start_step}){BTSP_stat_str}."
+            )
+        else:
+            print("BTSP not allowed.")
+
+    def update(self, updater=dict(), no_logs=False):
+        """
+        self.update()
+
+        Update the learning process.
+
+        Args:
+        - updater (object or dict, optional): Object or dictionary for updating
+            agent position. Default is dict().
+        - no_logs (bool, optional): Whether to disable logging. Default is False.
+
+        Returns:
+        - stop (bool): Whether the learning should be stopped.
+        """
+
+        self.step += 1
+
+        if isinstance(updater, dict):
+            update_kwargs = updater
+        else:
+            update_kwargs = updater.get_update_kwargs()
+
+        self.Agent.update(**update_kwargs)
+        if self.Objs is not None:
+            self.Objs.update()
+        self.PCs.update()
+
+        BTSP_targets = self.update_for_BTSP(no_logs=no_logs)
+
+        if self.two_compartment or self.one_comp_internal:
+            self.Pyrs.update()
+        else:
+            self.Pyrs.update(BTSP_targets=BTSP_targets)
+
+        self.record_weights()
+
+        stop = self.check_for_early_stop()
+
+        self.traj_restarted = self.Agent.reached_end
+        if not stop:
+            self.check_reverse()
+
+        return stop
+
+    def wrap_up(self, no_logs=False):
+        """
+        self.wrap_up()
+
+        Wrap up the learning process.
+
+        Args:
+        - no_logs (bool, optional): Whether to disable logging. Default is False.
+        """
+
+        if not no_logs:
+            self.log()
+
+        if not self.check_BTSP_enabled() and len(self.steps_BTSP_triggered) > 0:
+            raise RuntimeError(
+                "BTSP events triggered even though BTSP was never enabled."
+            )
+
+        return
+
+    def get_recorded_weights(self):
+        """
+        self.get_recorded_weights()
+
+        Returns recorded weights.
+
+        Returns:
+        - recorded_weights (dict): Dictionary with keys "weights", "steps", "time", and
+            "steps_triggered" in which input weights from place cells are recorded,
+            along with the step/time at which they were recorded and step at which they
+            the BTSP update behind the recorded weight update was triggered, if
+            applicable. None if self.record_weights_at_BTSP and self.use_Hebbian are
+            False.
+        """
+
+        recorded_weights = None
+        if self.record_weights_at_BTSP or self.use_Hebbian:
+            recorded_weights = ext_util.create_weights_dict(
+                self.weights,
+                self.weight_steps,
+                t=self.Agent.history["t"],
+                steps_triggered=self.steps_triggered,
+            )
+
+        return recorded_weights
 
 
-def init_2D_env_objects(
+def init_env_objects(
     env_params: dict[str, Any] | None = None,
     agent_params: dict[str, Any] | None = None,
     PC_params: dict[str, Any] | None = None,
     Pyr_params: dict[str, Any] | None = None,
     Obj_params: dict[str, Any] | None = None,
     environment="openfield",
-    two_compartment: bool = True,
     autosave: bool | None = None,
     plot: bool = True,
 ):
     """
-    init_2D_env_objects()
+    init_env_objects()
 
-    Initialize objects for a 2D environment experiment, and obtain Pyrs.
+    Initialize objects for an environment, and obtain Pyrs.
 
     Args:
     - env_params (dict, optional): Parameters for the environment. Default is None.
@@ -151,8 +514,6 @@ def init_2D_env_objects(
         None.
     - Pyr_params (dict, optional): Parameters for the Pyr. neurons. Default is None.
     - Obj_params (dict, optional): Parameters for the object neurons. Default is None.
-    - two_compartment (bool, optional): Whether to use two-compartment model.
-        Default is True.
     - autosave (bool, optional): Whether to autosave the figure. If None, the global
         autosave setting for ratinabox is used. Default is None.
     - plot (bool, optional): Whether to plot the environment and neurons. Default is
@@ -160,12 +521,23 @@ def init_2D_env_objects(
 
     Returns:
     - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
-        Pyr. neuron layer
+        Pyr. neuron layer.
+    if plot and 2D environment:
+    - fields_axes (2D np.ndarray): Array of subplots with place fields plotted, with
+        shape (num_layers, num_samples).
+    - aggreg_ax1D (1D np.ndarray): Array of subplots with environment and aggregated
+        fields plotted, with shape (3,).
+    if plot and 1D environment:
+    - spatial_axes (2D np.ndarray): Array of subplots with 1D environment plotted, with
+        shape (8, 1).
     """
     env_params = env_params or params_util.get_env_params(environment=environment)
     agent_params = agent_params or params_util.get_agent_params(environment=environment)
 
-    if environment == "tmaze":
+    if environment == "linear":
+        Env = env.Environment(params=env_params)
+        Ag = agent.ResetableAgent(Env, params=agent_params)
+    elif environment == "tmaze":
         Env = env.TEnv(params=env_params)
         Ag = agent.TAgent(Env, params=agent_params)
     elif environment == "openfield":
@@ -177,12 +549,24 @@ def init_2D_env_objects(
     PC_params = PC_params or params_util.get_PC_params(environment=environment)
     PCs = riab_neurons.PlaceCells(Ag, params=PC_params)
 
+    # infer whether two-compartment model will be used or not
+    if Pyr_params is None or any(key.startswith("soma_") for key in Pyr_params.keys()):
+        two_compartment = True
+    else:
+        two_compartment = False
+
     if two_compartment:
         Obj_params = Obj_params or params_util.get_Obj_params(environment=environment)
-        if environment == "tmaze":
-            Objs = object_neurons.ObjectCells(Ag, params=Obj_params)
+        if environment in ["linear", "tmaze"]:
+            Obj_type = object_neurons.ObjectCells
         else:
-            Objs = object_neurons.ObjectInstanceCells(Ag, params=Obj_params)
+            fixed = any([key.startswith("num_") for key in Obj_params.keys()])
+            Obj_type = (
+                object_neurons.FixedObjectCells
+                if fixed
+                else object_neurons.ObjectInstanceCells
+            )
+        Objs = Obj_type(Ag, params=Obj_params)
     else:
         if Obj_params is not None:
             warnings.warn("Obj_params will be ignored if two_compartment is False.")
@@ -224,13 +608,168 @@ def init_2D_env_objects(
         Pyrs.DendriteCompartment.add_input(Objs, w=Obj_to_Pyr_w)
         Pyrs.set_BTSP_learn(soma=True, dend=False)
     else:
-        Pyrs = learning_neurons.BTSPLayer(Ag, params=Pyr_params)
+        if "NMDA_activation_threshold" in Pyr_params.keys():
+            Pyrs = learning_neurons.NMDALayer(Ag, params=Pyr_params)
+        else:
+            Pyrs = learning_neurons.BTSPLayer(Ag, params=Pyr_params)
         Pyrs.set_BTSP_learn()
 
     if plot:
-        plot_2D_initial_conditions(Pyrs, autosave=autosave)
+        if environment in ["tmaze", "openfield"]:
+            fields_axes, aggreg_ax1D = plot_fcts.plot_2D_initial_conditions(
+                Pyrs, autosave=autosave
+            )
+            return Pyrs, fields_axes, aggreg_ax1D
+        else:
+            spatial_axes = plot_fcts.plot_1D_initial_conditions(Pyrs)
+            return Pyrs, spatial_axes
 
-    return Pyrs
+    else:
+        return Pyrs
+
+
+def finish_learn_trajectory(learner, updater=dict(), no_logs=False):
+    """
+    finish_learn_trajectory(learner)
+
+    Finish the current trajectory for a learner.
+
+    Args:
+    - learner (Learner): Learner object.
+    - updater (object or dict, optional): Object or dictionary for updating
+        agent position. Default is dict().
+    - no_logs (bool, optional): Whether to disable logging. Default is False.
+    """
+
+    if learner.Agent.reached_end:
+        return
+
+    if not no_logs:
+        print("Finishing last trajectory.")
+
+    def generator():
+        while True:
+            yield
+
+    break_next = False
+    for _ in tqdm(generator(), disable=no_logs):
+        learner.update(updater=updater, no_logs=no_logs)
+        if break_next:
+            break
+        if learner.Agent.reached_end:
+            break_next = True
+
+
+def run_learner(
+    learner,
+    updater=dict(),
+    max_num_steps=10000,
+    finish_trajectory=False,
+    no_logs=False,
+):
+    """
+    run_learner()
+
+    Run a learning experiment with a learner.
+
+    Args:
+    - learner (Learner): Learner object.
+    - updater (object or dict, optional): Object or dictionary for updating
+        agent position. Default is dict().
+    - max_num_steps (int, optional): Maximum number of steps to run. Default is 10000.
+    - finish_trajectory (bool, optional): Whether to finish the last trajectory.
+        Default is False.
+    - no_logs (bool, optional): Whether to disable logging. Default is False.
+    """
+
+    for _ in tqdm(range(max_num_steps), disable=no_logs):
+        stop = learner.update(updater=updater, no_logs=no_logs)
+
+        if stop:
+            break
+
+    if finish_trajectory:
+        finish_learn_trajectory(learner)
+
+    learner.wrap_up(no_logs=no_logs)
+
+    return
+
+
+def learn(
+    Pyrs,
+    num_target_reaches=None,
+    num_trajectories=None,
+    max_num_steps=10000,
+    finish_trajectory=False,
+    record_weights_at_BTSP=True,
+    weight_recording_freq=100,
+    use_Hebbian=False,
+    BTSP_on=None,
+    num_end_without_BTSP=0,
+    reverse_linear=False,
+    updater=dict(),
+    no_logs=False,
+):
+    """
+    learn(Pyrs)
+
+    Run a learning experiment with BTSP learning.
+
+    Args:
+    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
+        Pyr. neuron layer
+    - num_target_reaches (int, optional): Target number of rewards to reach.
+        Default is None.
+    - num_trajectories (int, optional): Number of trajectories to complete. Default is 1.
+        Default is None.
+    - max_num_steps (int, optional): Maximum number of steps to run. Default is 10000.
+    - finish_trajectory (bool, optional): Whether to finish the last trajectory.
+        Default is False.
+    - record_weights_at_BTSP (bool, optional): Whether to record weights at BTSP events.
+        Default is True.
+    - weight_recording_freq (int, optional): Frequency at which to record weights if
+        Hebbian learning is active. Default is 100.
+    - use_Hebbian (bool, optional): Whether to use Hebbian learning. Default is False.
+    - BTSP_on (int, optional): Trajectory number at which BTSP is enabled or
+        triggered. 1 for first trajectory. Default is None.
+    - num_end_without_BTSP (int, optional): Number of final steps to run without BTSP
+        learning. Default is 0.
+    - reverse_linear (bool, optional): If using a linear track, whether to reverse
+        Agent diretion at each end. Default is False.
+    - updater (object or dict, optional): Object or dictionary for updating
+        agent position. Default is dict().
+    - no_logs (bool, optional): Whether to disable logging. Default is False.
+
+    Returns:
+    - learner (Learner): Learner object.
+    """
+
+    stop_BTSP = None
+    if num_end_without_BTSP:
+        stop_BTSP = max(0, max_num_steps - num_end_without_BTSP)
+
+    learner = Learner(
+        Pyrs,
+        reverse_linear=reverse_linear,
+        stop_BTSP=stop_BTSP,
+        BTSP_on=BTSP_on,
+        record_weights_at_BTSP=record_weights_at_BTSP,
+        use_Hebbian=use_Hebbian,
+        weight_recording_freq=weight_recording_freq,
+        num_target_reaches=num_target_reaches,
+        num_trajectories=num_trajectories,
+    )
+
+    run_learner(
+        learner,
+        updater=updater,
+        max_num_steps=max_num_steps,
+        finish_trajectory=finish_trajectory,
+        no_logs=no_logs,
+    )
+
+    return learner
 
 
 ### 2D (OPENFIELD) FUNCTIONS ###
@@ -239,122 +778,90 @@ def init_2D_env_objects(
 def learn_openfield_BTSP(
     Pyrs: learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | None = None,
     max_num_steps: int = 10000,
+    finish_trajectory: bool = False,
     record_weights_at_BTSP: bool = True,
+    weight_recording_freq: int = 100,
     use_Hebbian: bool = False,
     num_end_without_BTSP: int = 0,
-    two_compartment: bool = True,
+    updater: dict[str, Any] | None = None,
+    no_logs: bool = False,
     autosave: bool | None = None,
     **init_kwargs,
-) -> tuple[
-    env.Environment,
-    agent.ResetableAgent,
-    object_neurons.ObjectCells | None,
-    riab_neurons.PlaceCells,
-    learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer,
-]:
+):
     """
     learn_openfield_BTSP()
 
     Run an openfield learning experiment with BTSP learning.
 
     Args:
-    - max_steps (int, optional): Maximum number of steps to run. Default is 10000.
+    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
+        Pyr. neuron layer.
+    - max_num_steps (int, optional): Maximum number of steps to run. Default is 10000.
+    - finish_trajectory (bool, optional): Whether to finish the last trajectory.
+        Default is False.
     - record_weights_at_BTSP (bool, optional): Whether to record weights at BTSP events.
         Default is True.
+    - weight_recording_freq (int, optional): Frequency at which to record weights if
+        Hebbian learning is active. Default is 100.
     - use_Hebbian (bool, optional): Whether to use Hebbian learning. Default is False.
     - num_end_without_BTSP (int, optional): Number of final steps to run without BTSP
         learning. Default is 0.
-    - two_compartment (bool, optional): Whether to use two-compartment model. Default
         is True.
+    - updater (object or dict, optional): Object or dictionary for updating
+        agent position. Default is None.
+    - no_logs (bool, optional): Whether to disable logging. Default is False.
     - autosave (bool, optional): Whether to autosave. Default is None.
 
     Keyword Args:
-    - **init_kwargs: Keyword arguments for init_2D_env_objects().
+    - **init_kwargs: Keyword arguments for init_env_objects().
 
     Returns:
-    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
-        Pyr. neuron layer
-    - weights_at_BTSP (dict): Dictionary with keys "weights" and "steps" in which
-        input weights from place cells and steps are recorded. None if
-        record_weights_at_BTSP is False.
+    - learner (Learner): Learner object.
     """
 
     if Pyrs is None:
-        Pyrs = init_2D_env_objects(
-            two_compartment=two_compartment,
+        Pyrs = init_env_objects(
             environment="openfield",
             autosave=autosave,
             plot=False,
             **init_kwargs,
         )
+    elif not isinstance(Pyrs.Agent.Environment, env.OpenField):
+        raise ValueError("Pyrs must be an openfield environment.")
 
-    _, Ag, PCs, Pyrs, Objs = extract_objects_from_Pyrs(Pyrs)
+    if updater is None:
+        updater = {
+            "speed_fact": 3,
+            "drift_to_random_strength_ratio": 1,
+        }
 
-    if two_compartment:
-        Pyrs.set_BTSP_learn(soma=True, dend=False)
-        Pyrs_for_weights = Pyrs.SomaCompartment
-        Pyrs.set_learn(soma=use_Hebbian, dend=False, inhibit=False)
-    else:
-        Pyrs.set_BTSP_learn()
-        Pyrs_for_weights = Pyrs
-        Pyrs.set_learn(use_Hebbian)
-
-    # run learning
-    start_step = len(Pyrs_for_weights.history["t"])
-    stop_BTSP = max(0, start_step + max_num_steps - num_end_without_BTSP)
-
-    BTSP_stopped = False
-    start_num_BTSP = len(Pyrs_for_weights.history["BTSP_events"])
-
-    BTSP_steps, weights, steps = list(), list(), list()
-    for i in tqdm(range(max_num_steps)):
-        Ag.update(speed_fact=3, drift_to_random_strength_ratio=1)
-        Objs.update()
-        PCs.update()
-        Pyrs.update()
-        if record_weights_at_BTSP:
-            num_BTSP = len(Pyrs_for_weights.history["BTSP_events"])
-            if num_BTSP > len(BTSP_steps) + start_num_BTSP:
-                BTSP_steps.append(len(Pyrs_for_weights.history["t"]))
-
-        if not BTSP_stopped and i + start_step >= stop_BTSP:
-            if two_compartment:
-                Pyrs.set_BTSP_learn(soma=False, dend=False)
-            else:
-                Pyrs.set_BTSP_learn()
-            print(f"BTSP blocked from step {i + start_step}.")
-            BTSP_stopped = True
-
-        if Pyrs_for_weights.BTSP_applied.any():
-            weights.append(copy.deepcopy(Pyrs_for_weights.inputs["PCs"]["w"]))
-            steps.append(len(Pyrs_for_weights.history["t"]))
-
-    BTSP_steps = np.asarray(BTSP_steps)
-    print(
-        f"{len(BTSP_steps)} BTSP events recorded (allowed from steps "
-        f"{start_step} to {stop_BTSP}): occurred between steps "
-        f"{BTSP_steps.min()} and {BTSP_steps.max()}."
+    learner = learn(
+        Pyrs,
+        BTSP_on=0,
+        max_num_steps=max_num_steps,
+        finish_trajectory=finish_trajectory,
+        record_weights_at_BTSP=record_weights_at_BTSP,
+        weight_recording_freq=weight_recording_freq,
+        use_Hebbian=use_Hebbian,
+        num_end_without_BTSP=num_end_without_BTSP,
+        updater=updater,
+        no_logs=no_logs,
     )
 
-    weights_at_BTSP = None
-    if record_weights_at_BTSP:
-        weights_at_BTSP = {"weights": np.asarray(weights), "steps": steps}
-
-    return Pyrs, weights_at_BTSP
+    return learner
 
 
 ### 2D (T-MAZE) FUNCTIONS ###
 
 
 def plot_T_maze(
-    Ag: agent.TAgent,
-    PCs: riab_neurons.PlaceCells,
     Pyrs_or_Objs: learning_neurons.BTSPLayer | object_neurons.ObjectCells,
+    PCs: riab_neurons.PlaceCells | None = None,
     method: str = "groundtruth",
     autosave: bool | None = None,
 ):
     """
-    plot_T_maze(Ag, PCs, Pyrs_or_Objs)
+    plot_T_maze(Pyrs_or_Objs)
 
     Plot the T-maze environment:
         (1) Agent trajectories,
@@ -362,10 +869,10 @@ def plot_T_maze(
         (3) Pyr. or Obj. overlayed rate maps.
 
     Args:
-    - Ag (agent.Agent): Agent.
-    - PCs (riab_neurons.PlaceCells): Place cells.
     - Pyrs_or_Objs (learning_neurons.BTSPLayer or object_neurons.ObjectCells):
         Pyrs layer.
+    - PCs (riab_neurons.PlaceCells): Place cells. If not provided, will be extracted
+        from Pyrs_or_Objs if it is a BTSPLayer. Default is None.
     - method (str, optional): Method to use for plotting the Pyr. rate map. Default
         is "groundtruth".
     - autosave (bool, optional): Whether to autosave the figure. If None, the global
@@ -375,6 +882,14 @@ def plot_T_maze(
     - axes (2D np.ndarray): Array of subplots with T maze information plotted, with
         shape (3, 1). See description for details.
     """
+
+    if isinstance(Pyrs_or_Objs, learning_neurons.BTSPLayer):
+        _, Ag, extracted_PCs, _ = ext_util.extract_objects_from_Pyrs(Pyrs_or_Objs)
+        PCs = PCs or extracted_PCs
+    else:
+        Ag = Pyrs_or_Objs.Agent
+        if PCs is None:
+            raise ValueError("PCs must be provided if Pyrs_or_Objs is not a BTSPLayer.")
 
     fig, axes = plt.subplots(ncols=3, figsize=(9, 3), squeeze=False)
     ax1D = np.asarray(axes).ravel()
@@ -426,21 +941,19 @@ def plot_T_maze(
 
 def learn_T_maze_BTSP(
     Pyrs: learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | None = None,
-    num_rewards: int = 200,
+    num_target_reaches: int = 200,
     max_num_steps: int = 10000,
+    finish_trajectory: bool = True,
+    record_weights_at_BTSP: bool = True,
     weight_recording_freq: int = 100,
     use_Hebbian: bool = False,
-    BTSP_after_num_target_reaches: int = 2,
-    two_compartment: bool = True,
+    BTSP_on: int | None = None,
+    updater: dict[str, Any] | None = None,
+    no_logs: bool = False,
+    plot: bool = True,
     autosave: bool | None = None,
     **init_kwargs,
-) -> tuple[
-    env.Environment,
-    agent.ResetableAgent,
-    object_neurons.ObjectCells | None,
-    riab_neurons.PlaceCells,
-    learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer,
-]:
+):
     """
     learn_T_maze_BTSP()
 
@@ -452,334 +965,145 @@ def learn_T_maze_BTSP(
     - PC_params (dict, optional): Parameters for the place cells. Default is
         None.
     - Pyr_params (dict, optional): Parameters for the Pyr. neurons. Default is None.
-    - num_rewards (int, optional): Target number of rewards to reach. Default is 200.
-    - max_steps (int, optional): Maximum number of steps to run. Default is 10000.
-    - weight_recording_freq (int, optional): Frequency at which to record weights.
-        Default is 100.
+    - num_target_reaches (int, optional): Target number of rewards to reach.
+        Default is 200.
+    - max_num_steps (int, optional): Maximum number of steps to run. Default is 10000.
+    - finish_trajectory (bool, optional): Whether to finish the last trajectory.
+        Default is True.
+    - record_weights_at_BTSP (bool, optional): Whether to record weights at BTSP events.
+        Default is True.
+    - weight_recording_freq (int, optional): Frequency at which to record weights if
+        Hebbian learning is active. Default is 100.
     - use_Hebbian (bool, optional): Whether to use Hebbian learning. Default is False.
-    - BTSP_after_num_target_reaches (int, optional): Number of times to reach target
-        before enabling BTSP learning. Default is 2.
+    - BTSP_on (int, optional): Trajectory number at which BTSP is enabled or
+        triggered. 1 for first trajectory. Default is None.
+    - updater (object or dict, optional): Object or dictionary for updating
+        agent position. Default is None.
+    - no_logs (bool, optional): Whether to disable logging. Default is False.
+    - plot (bool, optional): Whether to plot the environment and neurons. Default is
+        True.
     - autosave (bool, optional): Whether to autosave. Default is None.
 
     Keyword Args:
-    - **init_kwargs: Keyword arguments for init_2D_env_objects().
+    - **init_kwargs: Keyword arguments for init_env_objects().
 
     Returns:
-    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
-        Pyr. neuron layer
+    - learner (Learner): Learner object.
+    if plot:
+    - spatial_axes (2D np.ndarray): Array of subplots with T maze information plotted,
+        with shape (3, 1). See run_manager.plot_T_maze() for details.
+    - rate_maps_axes (2D np.ndarray): Array of subplots with rate maps across learning
+        plotted, with shape (3, 1).
+        See learning_neurons.BTSPLayer.plot_rate_maps_across_learning() for details.
+    - BTSP_ax1D (1D np.ndarray): Subplots with BTSP events and proximity to target
+        plotted. See plot_fcts.plot_time_series_with_BTSP_events() for details.
     """
 
     if Pyrs is None:
-        Pyrs = init_2D_env_objects(
-            two_compartment=two_compartment,
+        Pyrs = init_env_objects(
             environment="tmaze",
             autosave=autosave,
             plot=False,
             **init_kwargs,
         )
+    elif not isinstance(Pyrs.Agent.Environment, env.TEnv):
+        raise ValueError("Pyrs must be a T-maze environment.")
 
-    _, Ag, PCs, Pyrs, Objs = extract_objects_from_Pyrs(Pyrs)
+    if updater is None:
+        updater = {
+            "speed_fact": 3,
+            "drift_to_random_strength_ratio": 1,
+        }
 
-    if two_compartment:
-        Pyrs.set_BTSP_learn(soma=True, dend=False)
-        Pyrs_for_weights = Pyrs.SomaCompartment
-        Pyrs.set_learn(soma=use_Hebbian, dend=False, inhibit=False)
-    else:
-        Pyrs.set_BTSP_learn()
-        Pyrs_for_weights = Pyrs
-        Pyrs.set_learn(use_Hebbian)
+    learner = learn(
+        Pyrs,
+        num_target_reaches=num_target_reaches,
+        max_num_steps=max_num_steps,
+        finish_trajectory=finish_trajectory,
+        record_weights_at_BTSP=record_weights_at_BTSP,
+        weight_recording_freq=weight_recording_freq,
+        use_Hebbian=use_Hebbian,
+        BTSP_on=BTSP_on,
+        updater=updater,
+        no_logs=no_logs,
+    )
 
-    # run learning
-    restarted = False
-    Pyr_weights = [Pyrs_for_weights.inputs[PCs.name]["w"].copy()]  # type: ignore[attr-defined]
-    break_in_n = -1
-    for i in tqdm(range(max_num_steps)):
-        Ag.update(speed_fact=3, drift_to_random_strength_ratio=1)
-
-        if Objs is not None:
-            Objs.update()
-
-        PCs.update()
-
-        # check whether a restart BTSP signal should go out
-        if not two_compartment:
-            BTSP_targets = []
-            if restarted and Pyrs.n > 1:  # type: ignore[attr-defined]
-                BTSP_targets = [Pyrs.n - 1]  # type: ignore[attr-defined]
-
-            # check whether a target BTSP signal should go out
-            if (
-                Ag.reached_target
-                and len(Ag.target_df) == BTSP_after_num_target_reaches + 1
-            ):
-                BTSP_targets = [0]
-
-        # check for restart
-        restarted = Ag.reached_end
-
-        # run update
-        if two_compartment:
-            Pyrs.update()
+    if plot:
+        if learner.Objs is None:
+            spatial_axes = plot_T_maze(learner.Pyrs, autosave=autosave, method="groundtruth")  # type: ignore[arg-type]
         else:
-            Pyrs.update(BTSP_targets=BTSP_targets)
-        if not i % weight_recording_freq:
-            Pyr_weights.append(Pyrs_for_weights.inputs[PCs.name]["w"].copy())  # type: ignore[attr-defined]
+            spatial_axes = plot_T_maze(learner.Objs, learner.PCs, autosave=autosave, method="history")  # type: ignore[arg-type]
 
-        if break_in_n < 0:
-            if len(Ag.target_df) > num_rewards:
-                break_in_n = 20
-        else:
-            if break_in_n == 0:
-                break
-            break_in_n -= 1
+        rate_maps_axes = learner.Pyrs.plot_rate_maps_across_learning()  # type: ignore[attr-defined]
 
-    if len(Ag.target_df) <= num_rewards:
-        print(
-            f"Only reached the reward {len(Ag.target_df) - 1} "
-            f"times (target: {num_rewards})."
-        )
+        BTSP_ax1D = plot_fcts.plot_time_series_with_BTSP_events(learner.Pyrs)  # type: ignore[arg-type]
 
-    Ag.log_trajectory_stats_to_date()
-    Ag.log_trajectory_stats_to_date(log_as_time=False)
+        return learner, spatial_axes, rate_maps_axes, BTSP_ax1D
 
-    if two_compartment:
-        plot_T_maze(Ag, PCs, Objs, autosave=autosave, method="history")  # type: ignore[arg-type]
     else:
-        plot_T_maze(Ag, PCs, Pyrs, autosave=autosave, method="groundtruth")  # type: ignore[arg-type]
-
-    Pyrs.plot_rate_maps_across_learning()  # type: ignore[attr-defined]
-
-    plot_fcts.plot_time_series_with_BTSP_events(Pyrs)  # type: ignore[arg-type]
-
-    return Pyrs
+        return learner
 
 
 ### 1D (LINEAR TRACK) FUNCTIONS ###
 
 
-def plot_1D_spatial_info(
-    Ag: agent.ResetableAgent,
-    PCs: riab_neurons.PlaceCells,
-    Pyrs: learning_neurons.BTSPLayer,
-    Pyr_weights: list[np.ndarray[tuple[int, int], np.dtype[np.float64]]] | None = None,
-    Pyrs_norm_by: str | float | None = None,
-    autosave: bool | None = None,
-) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
-    """
-    plot_1D_spatial_info(Ag, PCs, Pyrs)
-
-    Plot spatial info for a 1D environment experiment:
-        (1) Environment,
-        (2) Place cell locations,
-        (3) Pyr. overlayed rate map,
-        (4, optional) Pyr. input weights (if provided),
-        (5-7) Pyr. rate map across learning
-        (8) Environment (again).
-
-    Args:
-    - Ag (agent.ResetableAgent): Agent.
-    - PCs (riab_neurons.PlaceCells): Place cells.
-    - Pyrs (learning_neurons.BTSPLayer): Pyr. neurons.
-    - Pyr_weights (list): List of Pyr. weights with shape (num_epochs, num_cells, num_PCs).
-        Default is None.
-    - Pyrs_norm_by (str, optional): Normalization method for rate maps. If None,
-        default is used. Default is None.
-    - autosave (bool, optional): Whether to autosave the figure. If None, the global
-        autosave setting for ratinabox is used. Default is None.
-
-    Returns:
-    - Axes (2D np.ndarray): Array of subplots with 1D environment experiment info
-        plotted, with shape (7 or 8, 1). See description for details.
-    """
-
-    # 7 or 8 plots
-    height_ratios = [1, 1.2, 1.5, 1, 1, 1, 1]
-    if Pyr_weights is not None:
-        height_ratios.insert(3, 2)  # add height ratio for weights
-    gridspec_kw = {"height_ratios": height_ratios}
-    figsize = plot_util.get_figsize(sum(height_ratios), squat_height=True)
-    fig, axes = plt.subplots(
-        nrows=len(height_ratios),
-        figsize=figsize,
-        sharex=True,
-        gridspec_kw=gridspec_kw,
-        squeeze=False,
-    )
-    ax1D = np.asarray(axes).ravel()
-
-    # Plot environment
-    plot_fcts.plot_1D_reset_environment(Ag, sub_ax=ax1D[0], autosave=False)
-
-    # Plot place cell locations
-    PCs.plot_place_cell_locations(sub_ax=ax1D[1], autosave=False, plot_objects=False)
-    plot_fcts.plot_overlayed_rate_maps(
-        PCs, sub_ax=ax1D[1], method="max", autosave=False
-    )
-    ymin, ymax = ax1D[1].get_ylim()
-    ymin = min(ymin, 0)
-    ax1D[1].set_ylim((ymin - 0.05 * (ymax - ymin)), ymax)
-    ax1D[1].set_title("Place cell locations")
-
-    # Plot place cell rate map
-    PCs.plot_rate_map(chosen_neurons="all", ax=ax1D[2], autosave=False)
-    ax1D[2].set_title("Place cell rate map")
-
-    # Plot Pyr. weights
-    i = 3
-    if Pyr_weights is not None:
-        plot_fcts.plot_1D_input_place_cell_weights(
-            np.asarray(Pyr_weights),
-            PCs,
-            sub_ax=ax1D[i],
-            autosave=False,
-        )
-        i += 1
-
-    # Plot Pyr. rate maps across learning
-    plot_fcts.plot_1D_rate_map_across_learning(
-        Ag, Pyrs, axes=ax1D[i : i + 3], norm_by=Pyrs_norm_by, autosave=False  # type: ignore[arg-type]
-    )
-
-    # Plot environment
-    plot_fcts.plot_1D_reset_environment(Ag, sub_ax=ax1D[i + 3], autosave=False)
-
-    for a, sub_ax in enumerate(ax1D[:-1]):
-        sub_ax.set_xlabel("")
-        if a > 1:
-            sub_ax.spines["bottom"].set_visible(False)
-            sub_ax.xaxis.set_visible(False)
-
-    plot_util.save_figure(fig, "1D_env_info", save=autosave)
-
-    return axes
-
-
-def plot_1D_time_info(
-    Ag: agent.ResetableAgent,
-    PCs: riab_neurons.PlaceCells,
-    Pyrs: learning_neurons.BTSPLayer,
-    Pyrs_norm_by: str | float | None = None,
-    autosave: bool | None = None,
-) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
-    """
-    plot_1D_time_info(Ag, PCs, Pyrs)
-
-    Plot time info for a 1D experiment:
-        (1) Trajectories,
-        (2) Place cell rate timeseries,
-        (3) Pyr. rate timeseries
-
-    Args:
-    - Ag (agent.ResetableAgent): Agent.
-    - PCs (riab_neurons.PlaceCells): Place cells.
-    - Pyrs (learning_neurons.BTSPLayer): Pyr. neurons.
-    - Pyrs_norm_by (str, optional): Normalization method for rate maps. If None,
-        default is used. Default is None.
-    - autosave (bool, optional): Whether to autosave the figure. If None, the global
-        autosave setting for ratinabox is used. Default is None.
-
-    Returns:
-    - Axes (2D np.ndarray): Array of subplots with 1D time info plotted,
-        with shape (3, 1). See description for details.
-    """
-
-    # 3 plots
-    height_ratios = [1.5, 1, 1.1**Pyrs.n]
-    gridspec_kw = {"height_ratios": height_ratios}
-    figsize = plot_util.get_figsize(sum(height_ratios), squat_height=True)
-    fig, axes = plt.subplots(
-        nrows=len(height_ratios),
-        figsize=figsize,
-        sharex=True,
-        gridspec_kw=gridspec_kw,
-        squeeze=False,
-    )
-    ax1D = np.asarray(axes).ravel()
-
-    # Plot trajectories
-    Ag.plot_trajectories_across_time(
-        framerate=1 / Ag.dt, sub_ax=ax1D[0], autosave=False
-    )
-    ax1D[0].set_title("Trajectories")
-
-    # Plot place cell rate timeseries
-    PCs.plot_rate_timeseries(
-        chosen_neurons="all", spikes=False, sub_ax=ax1D[1], autosave=False
-    )
-    ax1D[1].set_title("Place cell rate timeseries")
-
-    # Plot Pyr. rate timeseries
-    kwargs = dict()
-    if Pyrs_norm_by is not None:
-        kwargs["norm_by"] = Pyrs_norm_by
-    Pyrs.plot_rate_timeseries(
-        chosen_neurons="all",
-        spikes=True,
-        sub_ax=ax1D[2],
-        shift=-10,
-        overlap=1,
-        autosave=False,
-        **kwargs,
-    )
-    ax1D[2].set_title("Pyr. rate timeseries")
-
-    plot_fcts.mark_target_and_reset_points(Ag, Pyrs, sub_ax=ax1D[2])
-
-    for sub_ax in ax1D[:-1]:
-        sub_ax.set_xlabel("")
-
-    plot_util.save_figure(fig, "time_info", save=autosave)
-
-    return axes
-
-
 def learn_1D_BTSP(
-    env_params: dict[str, Any] | None = None,
-    agent_params: dict[str, Any] | None = None,
-    PC_params: dict[str, Any] | None = None,
-    Pyr_params: dict[str, Any] | None = None,
-    num_rewards: int = 10,
+    Pyrs: learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | None = None,
+    num_target_reaches: int = 10,
+    num_trajectories: int | None = None,
     max_num_steps: int = 5000,
+    finish_trajectory: bool = True,
+    record_weights_at_BTSP: bool = True,
     weight_recording_freq: int = 100,
     use_Hebbian: bool = False,
-    BTSP_after_num_target_reaches: int = 5,
-    two_compartment: bool = False,
+    BTSP_on: int | None = None,
+    reverse: bool = False,
+    updater: dict[str, Any] = dict(),
+    no_logs: bool = False,
+    plot: bool = True,
     autosave: bool | None = None,
-) -> tuple[
-    env.Environment,
-    agent.ResetableAgent,
-    riab_neurons.PlaceCells,
-    learning_neurons.BTSPLayer,
-]:
+    **init_kwargs,
+):
     """
     learn_1D_BTSP()
 
     Run a 1D learning experiment with BTSP learning. Plot spatial and time information.
 
     Args:
-    - env_params (dict, optional): Parameters for the environment. Default is None.
-    - agent_params (dict, optional): Parameters for the agent. Default is None.
-    - PC_params (dict, optional): Parameters for the place cells.
-        Default is None.
-    - Pyr_params (dict, optional): Parameters for the Pyr. neurons. Default is None.
-    - num_rewards (int, optional): Target number of rewards to reach.
+    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer, optional):
+        Pyr. neurons. If None, will be initialized. Default is None.
+    - num_target_reaches (int, optional): Target number of rewards to reach.
         Default is 200.
+    - num_trajectories (int, optional): Number of trajectories to complete.
+        Default is 1.
     - max_num_steps (int, optional): Maximum number of steps to run.
         Default is 5000.
+    - finish_trajectory (bool, optional): Whether to finish the last trajectory.
+        Default is True.
+    - record_weights_at_BTSP (bool, optional): Whether to record weights at BTSP events.
+        Default is True.
     - weight_recording_freq (int, optional): Frequency at which to record weights.
         Default is 100.
     - use_Hebbian (bool, optional): Whether to use Hebbian learning.
         Default is False.
-    - BTSP_after_num_target_reaches (int, optional): Number of target reaches at which to
-        apply BTSP event. Default is 5.
-    - two_compartment (bool, optional): Whether to use two-compartment model.
+    - BTSP_on (int, optional): Trajectory number at which BTSP is enabled or
+        triggered. 1 for first trajectory. Default is None.
+    - reverse (bool, optional): Whether to reverse Agent diretion at each end.
         Default is False.
+    - updater (object or dict, optional): Object or dictionary for updating
+        agent position. Default is dict().
+    - no_logs (bool, optional): Whether to disable logging. Default is False.
+    - plot (bool, optional): Whether to plot the environment and neurons. Default is
+        True.
     - autosave (bool, optional): Whether to autosave the figure. If None, the global
         autosave setting for ratinabox is used. Default is None.
 
+    Keyword Args:
+    - **init_kwargs: Keyword arguments for init_env_objects().
+
     Returns:
-    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
-        Pyr. neuron layer
+    - learner (Learner): Learner object.
+    if plot:
     - spatial_axes (2D np.ndarray): Array of subplots with 1D environment experiment
         info plotted, with shape (8, 1). See run_manager.plot_1D_spatial_info() for
         details.
@@ -787,124 +1111,47 @@ def learn_1D_BTSP(
         shape (3, 1). See run_manager.plot_1D_time_info() for details.
     """
 
-    env_params = env_params or params_util.get_env_params(environment="linear")
-    Env = env.Environment(params=env_params)
-
-    agent_params = agent_params or params_util.get_agent_params(environment="linear")
-    Ag = agent.ResetableAgent(Env, params=agent_params)
-
-    PC_params = PC_params or params_util.get_PC_params(environment="linear")
-    PCs = riab_neurons.PlaceCells(Ag, params=PC_params)
-
-    if Pyr_params is None:
-        Pyr_params = params_util.get_Pyr_params(
+    if Pyrs is None:
+        Pyrs = init_env_objects(
             environment="linear",
-            BTSP=True,
-            NMDA=two_compartment,
-            two_compartment=two_compartment,
+            autosave=autosave,
+            plot=False,
+            **init_kwargs,
+        )
+    elif Pyrs.Agent.Environment.D != 1:
+        raise ValueError("Pyrs must be a 1D environment.")
+
+    learner = learn(
+        Pyrs,
+        num_target_reaches=num_target_reaches,
+        num_trajectories=num_trajectories,
+        max_num_steps=max_num_steps,
+        finish_trajectory=finish_trajectory,
+        record_weights_at_BTSP=record_weights_at_BTSP,
+        weight_recording_freq=weight_recording_freq,
+        use_Hebbian=use_Hebbian,
+        BTSP_on=BTSP_on,
+        reverse_linear=reverse,
+        updater=updater,
+        no_logs=no_logs,
+    )
+
+    if plot:
+        recorded_weights = learner.get_recorded_weights()
+        weights = recorded_weights["weights"] if recorded_weights is not None else None
+        spatial_axes = plot_fcts.plot_1D_spatial_info(
+            learner.Pyrs, weights, autosave=autosave
         )
 
-    Pyr_params["input_layers"] = [PCs]
-    if two_compartment:
-        Pyrs = two_comp_neurons.TwoCompLayer(Ag, params=Pyr_params)
+        time_axes = plot_fcts.plot_1D_time_info(learner.Pyrs, autosave=autosave)
+
+        return learner, spatial_axes, time_axes
+
     else:
-        Pyrs = learning_neurons.BTSPLayer(Ag, params=Pyr_params)
-    Pyrs.set_learn(use_Hebbian)
-    Pyrs.set_BTSP_learn()
-
-    # run learning
-    restarted = False
-    PCs_name = PCs.name  # type: ignore[attr-defined]
-    Pyrs_n = Pyrs.n  # type: ignore[attr-defined]
-    Pyr_weights = [Pyrs.inputs[PCs_name]["w"].copy()]
-    break_in_n = -1
-    for i in tqdm(range(max_num_steps)):
-        Ag.update()
-        PCs.update()
-
-        # check whether a restart BTSP signal should go out
-        if not two_compartment:
-            BTSP_targets = list()
-            if len(Ag.target_df) == BTSP_after_num_target_reaches + 1:
-                if restarted and Pyrs_n > 1:
-                    BTSP_targets = [Pyrs_n - 1]
-
-                # check whether a target BTSP signal should go out
-                if Ag.reached_target:
-                    BTSP_targets = [0]
-
-        # check for restart
-        restarted = Ag.reached_end
-
-        # run update
-        if two_compartment:
-            Pyrs.update()
-        else:
-            Pyrs.update(BTSP_targets=BTSP_targets)
-        if not i % weight_recording_freq:
-            Pyr_weights.append(Pyrs.inputs[PCs_name]["w"].copy())
-
-        if break_in_n < 0:
-            if len(Ag.target_df) > num_rewards:
-                break_in_n = 20
-        else:
-            if break_in_n == 0:
-                break
-            break_in_n -= 1
-
-    if len(Ag.target_df) <= num_rewards:
-        print(
-            f"Only reached the reward {len(Ag.target_df) - 1} times "
-            f"(target: {num_rewards})."
-        )
-
-    Ag.log_trajectory_stats_to_date()
-    Ag.log_trajectory_stats_to_date(log_as_time=False)
-
-    spatial_axes = plot_1D_spatial_info(Ag, PCs, Pyrs, Pyr_weights, autosave=autosave)
-
-    time_axes = plot_1D_time_info(Ag, PCs, Pyrs, autosave=autosave)
-
-    return Pyrs, spatial_axes, time_axes
-
-
-def plot_interleaved_openfield_rate_maps(Pyrs, Objs, num_cols=10):
-    """
-    plot_interleaved_openfield_rate_maps(Pyrs, Objs)
-
-    Plot interleaved open field rate maps for Pyr. neuron somata and the object neurons
-    thattarget their dendrites.
-
-    Rate maps are computed theoretically based on place cell inputs.
-
-    Args:
-    - Pyrs (learning_neurons.BTSPLayer): Pyr. neurons.
-    - Objs (object_neurons.ObjectCells): Object neurons.
-    """
-
-    if Pyrs.n != Objs.n:
-        raise ValueError("Pyrs and Objs should have the same number of neurons.")
-
-    num_cols = min(10, Objs.n)
-    num_rows = int(np.ceil(Objs.n / num_cols)) * 2
-
-    _, axes = plt.subplots(
-        num_rows, num_cols, figsize=(1.5 * num_cols, 1.5 * num_rows), squeeze=False
-    )
-
-    Objs.plot_rate_map(ax=axes[::2].ravel()[: Objs.n], no_legend=True)
-    plot_fcts.plot_2D_input_place_cell_weights(
-        Pyrs.SomaCompartment,
-        ax=axes[1::2].ravel()[: Objs.n],
-        alpha=0.5,
-        plot_BTSP_events=True,
-        no_legend=True,
-    )
-
-    return axes
+        return learner
 
 
 if __name__ == "__main__":
-    Pyrs, spatial_axes, time_axes = learn_1D_BTSP()
+    learner, spatial_axes, time_axes = learn_1D_BTSP()
 
     breakpoint()

@@ -12,11 +12,11 @@ import seaborn as sns  # type: ignore[import]
 from ratinabox import utils as rutils  # type: ignore[import]
 from ratinabox import MOUNTAIN_PLOT_WIDTH_MM, MOUNTAIN_PLOT_SHIFT_MM
 
-from predhpc.util import gen_util, plot_util
+from predhpc.util import ext_util, gen_util, plot_util
 
 if TYPE_CHECKING:
     from predhpc.agent import ResetableAgent
-    from predhpc.neurons import riab_neurons, learning_neurons
+    from predhpc.neurons import riab_neurons, learning_neurons, two_comp_neurons
 
 
 def add_time_axis(
@@ -224,18 +224,16 @@ def plot_trajectory_lengths(
 
 
 def mark_target_and_reset_points(
-    Ag: "ResetableAgent",
     Pyrs: "riab_neurons.Neurons",
     sub_ax: plt.Axes,
     restore_xlims: bool = True,
 ):
     """
-    mark_target_and_reset_points(Ag, Pyrs, sub_ax)
+    mark_target_and_reset_points(Pyrs, sub_ax)
 
     Add target and reset points to a timeseries plot.
 
     Args:
-    - Ag (Agent): Agent for which to add target and reset points.
     - Pyrs (riab_neurons.Neurons): Pyr. layer to plot.
     - sub_ax (plt.Axes): Subplot to add target and reset points to.
     - restore_xlims (bool, optional): Whether to restore x limits. Default is True.
@@ -249,9 +247,9 @@ def mark_target_and_reset_points(
         ("target", "dotted"),
     ]:
         if end_point == "reset":
-            positions = Ag.trajectory_df["stop_step"].to_numpy()
+            positions = Pyrs.Agent.trajectory_df["stop_step"].to_numpy()
         elif end_point == "target":
-            positions = Ag.target_df["reached_step"].to_numpy()
+            positions = Pyrs.Agent.target_df["reached_step"].to_numpy()
         else:
             raise ValueError(f"Unknown end point: {end_point}")
         positions = positions[np.isfinite(positions)].astype(int)
@@ -796,11 +794,14 @@ def plot_property_at_BTSP_and_closest_to_target_steps(
     all_steps = np.sort(np.concatenate([steps for steps in steps_dict.values()]))
 
     if scale_size:
-        factors = (all_steps - all_steps.min()) / (
-            all_steps.max() - all_steps.min()
-        ) + 0.5
+        if len(all_steps) < 2 or (all_steps.max() == all_steps.min()):
+            factors = np.array([1])
+        else:
+            factors = (all_steps - all_steps.min()) / (
+                all_steps.max() - all_steps.min()
+            ) + 0.5
 
-    if x_data is None:
+    if x_data is None and len(all_steps):
         x_data = np.arange(all_steps.max() + 1)
 
     if sub_ax is None:
@@ -839,7 +840,7 @@ def plot_property_at_BTSP_and_closest_to_target_steps(
     sub_ax.set_xlabel(x_data_type)
     sub_ax.set_ylabel(y_data_type)
 
-    if legend:
+    if legend and len(all_steps):
         sub_ax.legend(fontsize=5, loc="upper right")
 
     return sub_ax
@@ -847,8 +848,8 @@ def plot_property_at_BTSP_and_closest_to_target_steps(
 
 def plot_time_series_with_BTSP_events(
     Pyrs: "learning_neurons.BTSPLayer",
-    sub_ax: plt.Axes | None = None,
-) -> plt.Axes:
+    ax1D: np.ndarray | None = None,
+) -> np.ndarray:
     """
     plot_time_series_with_BTSP_events(Pyrs)
 
@@ -856,18 +857,35 @@ def plot_time_series_with_BTSP_events(
 
     Args:
     - Pyrs (learning_neurons.BTSPLayer): Pyrs layer.
-    - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
-        created. Default is None.
+    - ax1D (np.ndarray, optional): 1D array of subplots. Default is None.
 
     Returns:
-    - sub_ax (plt.Axes): Subplot with time series and BTSP events plotted.
+    - ax1D (np.ndarray, optional): 1D array of subplots with time series and BTSP
+        events plotted.
     """
 
-    if sub_ax is None:
-        _, sub_ax = plt.subplots(figsize=(6, 1.2**Pyrs.n))
+    Objs = ext_util.extract_objects_from_Pyrs(Pyrs)[-1]
+    num_rows = 2 if Objs is None else 3
 
-    Pyrs.plot_rate_timeseries(chosen_neurons="all", spikes=True, sub_ax=sub_ax)
-    lo, hi = sub_ax.get_ylim()
+    if ax1D is None:
+        height = 1.3**Pyrs.n + (num_rows - 1) / 2
+        _, ax1D = plt.subplots(num_rows, figsize=(6, height), sharex=True)
+
+    title_str = "Pyr."
+    i = 0
+    if Objs is not None:
+        Objs.plot_rate_timeseries(sub_ax=ax1D[0])
+        ax1D[0].axis("off")
+        title_str = "Object and Pyr."
+        i = 1
+
+    ax1D[0].set_title(
+        f"{title_str} time series with BTSP events (with proximity to target)", y=1.1
+    )
+
+    Pyrs.plot_rate_timeseries(chosen_neurons="all", spikes=True, sub_ax=ax1D[i])
+    ax1D[i].set_xlabel("")
+    lo, hi = ax1D[i].get_ylim()
 
     target_reached_step = Pyrs.Agent.target_df["reached_step"].to_numpy()  # type: ignore[attr-defined]
     if np.isnan(target_reached_step[-1]):
@@ -876,7 +894,7 @@ def plot_time_series_with_BTSP_events(
 
     for t in target_reached_step:
         y_hei = lo + (hi - lo) * 0.82
-        sub_ax.scatter(
+        ax1D[i].scatter(
             Pyrs.Agent.history["t"][t] / 60,
             y_hei,
             marker=mpl_markers.MarkerStyle("o"),
@@ -886,18 +904,150 @@ def plot_time_series_with_BTSP_events(
         )
 
     # add distance from target below
-    all_positions = np.asarray(Pyrs.Agent.history["pos"])
-    time_in_min = np.asarray(Pyrs.Agent.history["t"]) / 60
-    distances = np.linalg.norm(
-        Pyrs.Agent.target_position - all_positions, ord=2, axis=1  # type: ignore[attr-defined]
+    Pyrs.Agent.plot_distance_to_target(
+        norm=True, flipped=True, sub_ax=ax1D[-1], autosave=False
     )
-    norm_dist = distances / distances.max()
-    sub_ax.plot(time_in_min, -norm_dist, color="black", alpha=0.6, lw=1)
-    sub_ax.set_ylim(-norm_dist.max() * 1.2, sub_ax.get_ylim()[1])
+    ax1D[-1].set_title("")
+    ax1D[-1].set_yticks([])
 
-    sub_ax.set_title(
-        "Pyr. time series with BTSP events (with proximity to target)", y=1.1
-    )
+    return ax1D
+
+
+def plot_timeseries(
+    NeuronLayer: "riab_neurons.Neurons",
+    t_start: float | None = None,
+    t_end: float | None = None,
+    chosen_neurons: (
+        str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
+    ) = "all",
+    spikes: bool = False,
+    imshow: bool = False,
+    sub_ax: plt.Axes | None = None,
+    xlim: tuple[float, float] | None = None,
+    color: str | None = None,
+    background_color: str | None = None,
+    trace_name: str = "firingrate",
+    autosave=None,
+    **kwargs,
+):
+    """
+    plot_timeseries(NeuronLayer)
+
+    Plot the rate timeseries of a layer of neurons.
+
+    Args:
+    - NeuronLayer (riab_neurons.Neurons): The layer of neurons to plot.
+    - t_start (float, optional): The start time of the plot. Default is None.
+    - t_end (float, optional): The end time of the plot. Default is None.
+    - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
+        Default is "all".
+    - spikes (bool, optional): Whether to plot spikes or firing rate. Default is False.
+    - imshow (bool, optional): Whether to plot the timeseries as an image.
+        Default is False.
+    - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
+        created. Default is None.
+    - xlim (tuple[float, float], optional): The x limits of the plot. Default is None.
+    - color (str, optional): The color of the plot. Default is None.
+    - background_color (str, optional): The background color of the plot.
+        Default is None.
+    - trace_name (str, optional): The name of the trace to plot.
+        Default is "firingrate".
+    - autosave (bool, optional): Whether to autosave the figure. If None, the global
+        autosave setting for ratinabox is used. Default is None.
+
+    Returns:
+    - sub_ax (plt.Axes): Subplot with timeseries of the layer plotted.
+    """
+
+    t = np.asarray(NeuronLayer.history["t"])
+    startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
+
+    rate_timeseries = np.asarray(NeuronLayer.history[trace_name][startid : endid + 1])
+
+    # neurons to plot
+    if not isinstance(chosen_neurons, np.ndarray):
+        chosen_neurons = np.asarray(NeuronLayer.return_list_of_neurons(chosen_neurons))  # type: ignore[arg-type]
+    rate_timeseries = rate_timeseries[:, chosen_neurons]
+
+    was_ax = (
+        sub_ax is None
+    )  # remember whether a subplot was provided as xlims depend on this
+    fig = None if sub_ax is None else sub_ax.figure
+
+    if color is None:
+        color = NeuronLayer.color  # type: ignore[attr-defined]
+    if imshow == False:
+        firingrates = rate_timeseries.T
+        _, sub_ax = rutils.mountain_plot(
+            X=t / 60,
+            NbyX=firingrates,
+            color=color,  # type: ignore[assignment]
+            xlabel="Time / min",
+            ylabel="Neurons",
+            xlim=None,
+            fig=fig,
+            ax=sub_ax,
+            **kwargs,
+        )
+
+        if sub_ax is None:
+            raise RuntimeError("sub_ax is None.")
+
+        if spikes == True:
+            spike_data = np.asarray(NeuronLayer.history["spikes"][startid : endid + 1])[
+                :, chosen_neurons
+            ]
+            for i in range(len(chosen_neurons)):
+                time_when_spiked = t[spike_data[:, i]] / 60
+                h = (i + 1 - 0.1) * np.ones_like(time_when_spiked)
+                sub_ax.scatter(
+                    time_when_spiked,
+                    h,
+                    color=(NeuronLayer.color or "C1"),  # type: ignore[attr-defined]
+                    alpha=0.5,
+                    s=5,
+                    linewidth=0,
+                )
+
+        xmin = t[0] / 60 if was_ax else min(t[0] / 60, sub_ax.get_xlim()[0])  # type: ignore[operator]
+        xmax = t[-1] / 60 if was_ax else max(t[-1] / 60, sub_ax.get_xlim()[1])  # type: ignore[operator]
+        sub_ax.set_xlim(xmin, xmax)
+        sub_ax.set_xticks([xmin, xmax])
+        sub_ax.set_xticklabels([round(xmin, 2), round(xmax, 2)])
+        if xlim is not None:
+            sub_ax.set_xlim(right=xlim / 60)  # type: ignore[operator]
+            sub_ax.set_xticks([round(t_start / 60, 2), round(xlim / 60, 2)])  # type: ignore[operator]
+            sub_ax.set_xticklabels([round(t_start / 60, 2), round(xlim / 60, 2)])  # type: ignore[operator]
+
+        if background_color is not None:
+            sub_ax.set_facecolor(background_color)
+            sub_ax.figure.patch.set_facecolor(background_color)  # type: ignore[attr-defined]
+
+    elif imshow == True:
+        if sub_ax is None:
+            _, sub_ax = plt.subplots(
+                figsize=(
+                    MOUNTAIN_PLOT_WIDTH_MM / 25,
+                    0.5 * MOUNTAIN_PLOT_WIDTH_MM / 25,
+                )
+            )
+
+        data = rate_timeseries.T
+        sub_ax.imshow(
+            data[::-1],
+            aspect="auto",
+            # aspect=0.5 * data.shape[1] / data.shape[0],
+            extent=(t_start, t_end, 0, 1),  # type: ignore[assignment]
+        )
+        sub_ax.spines[["right", "top", "left"]].set_visible(False)
+        sub_ax.set_xlabel("Time / min")
+        sub_ax.set_xticks([t_start, t_end])
+        sub_ax.set_xticklabels([round(t_start / 60, 2), round(t_end / 60, 2)])  # type: ignore[operator]
+        sub_ax.set_yticks([])
+        sub_ax.set_ylabel("Neurons")
+
+    fig = sub_ax.figure
+    plot_util.save_figure(fig, f"{NeuronLayer.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
 
     return sub_ax
 
@@ -961,7 +1111,6 @@ def plot_1D_reset_environment(
 
 
 def plot_1D_rate_map_across_learning(
-    Ag: "ResetableAgent",
     Pyrs: "riab_neurons.Neurons",
     axes: np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]] | None = None,
     plot_proportion: float = 0.3,
@@ -970,13 +1119,12 @@ def plot_1D_rate_map_across_learning(
     autosave: bool | None = None,
 ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
     """
-    plot_1D_rate_map_across_learning(Ag, Pyrs)
+    plot_1D_rate_map_across_learning(Pyrs)
 
     Plot the rate map of a layer across learning from stimulated activity in the
     first, mid and final steps.
 
     Args:
-    - Ag (Agent): Agent for which to plot the rate map.
     - Pyrs (riab_neurons.Neurons): Pyr. layer to plot.
     - axes (1 or 2D np.ndarray, optional): Array of subplots to plot on (3 total).
         Default is None.
@@ -1012,6 +1160,8 @@ def plot_1D_rate_map_across_learning(
         kwargs["norm_by"] = norm_by
 
     suptitle = f"Pyramidal rate maps across learning: "
+
+    Ag = Pyrs.Agent
 
     dt = float(Ag.dt)
     for s, start in enumerate(map_start_pts):
@@ -1062,6 +1212,7 @@ def plot_1D_input_place_cell_weights(
     place_weights: np.ndarray[tuple[int, int, int], np.dtype[np.float64]],
     PCs: "riab_neurons.PlaceCells",
     cmap: str = "crest",
+    time_axis: bool = False,
     sub_ax: plt.Axes | None = None,
     autosave: bool | None = None,
 ) -> plt.Axes:
@@ -1106,13 +1257,25 @@ def plot_1D_input_place_cell_weights(
         colors = mpl_cmap(cmap_vals)  # type: ignore[callable]
         alpha = 0.8 ** (len(colors) / 6)
 
+    x = PCs.place_cell_centres[:, 0]
+    target_pos = PCs.Agent.target_position
+    if time_axis:
+        xlabel = "Average time (s)"
+        speed_mean = PCs.Agent.speed_mean  # m/s
+        x = x / speed_mean
+        if target_pos is not None:
+            x = x - target_pos / speed_mean
+            target_pos = 0
+    else:
+        xlabel = "Input place cell center / m"
+
     spacing = (place_weights.max() - place_weights.min()) * 1.1
     for n in range(num_cells):
         offset = None
         for i, color in enumerate(colors):
             offset = spacing * n
             sub_ax.plot(
-                PCs.place_cell_centres[:, 0],
+                x,
                 place_weights[i, n] + offset,
                 color=color,
                 alpha=alpha,
@@ -1123,9 +1286,9 @@ def plot_1D_input_place_cell_weights(
             lw = 2 * 0.8**num_cells
             sub_ax.axhline(offset, color="k", alpha=0.3, lw=lw, ls="dotted", zorder=-12)
 
-    if PCs.Agent.target_position is not None:
+    if target_pos is not None:
         sub_ax.axvline(
-            PCs.Agent.target_position,
+            target_pos,
             alpha=0.7,
             zorder=-1,
             lw=1,
@@ -1141,7 +1304,7 @@ def plot_1D_input_place_cell_weights(
             sub_ax.legend(ncol=2, frameon=False)
         title = "Input weights across learning"
 
-    sub_ax.set_xlabel("Input place cell center / m")
+    sub_ax.set_xlabel(xlabel)
     sub_ax.set_ylabel("Weights")
     sub_ax.spines[["top", "right"]].set_visible(False)
 
@@ -1158,28 +1321,30 @@ def plot_1D_input_place_cell_weights(
     return sub_ax
 
 
-def plot_previous_1D_input_place_cell_weights(
+def plot_recorded_1D_input_place_cell_weights(
     weights,
-    weights_t,
     input_centres,
+    weights_t=None,
     color="k",
+    marker="o",
     t_start=None,
     t_end=None,
     sub_ax=None,
 ):
     """
-    plot_previous_1D_input_place_cell_weights(weights_t, weights, input_centres)
+    plot_recorded_1D_input_place_cell_weights(weights_t, weights, input_centres)
 
     Plots the input weights from place cells to a Pyr. soma, across time, for a
     linear track environment.
 
     Args:
-    - weights (2D np.ndarray): Input weights from place cells to target neuron, for
+    - weights (2D np.ndarray): Input weights from place cells to a target neuron, for
         each timepoint, with shape (timepoints, num_inputs).
-    - weights_t (list): List of timepoints for the input weights. Must have the same
-        length as weights.
     - input_centres (2D np.ndarray): Centres of the input place cell locations.
+    - weights_t (list): List of timepoints for the input weights. Must have the same
+        length as weights if provided. Default is None.
     - color (str, optional): Color. Default is "k".
+    - marker (str, optional): Marker style. Default is "o".
     - t_start (float, optional): Start timepoint for which to plot weights.
         Default is None.
     - t_end (float, optional): End timepoint for which to plot weights. Default is None.
@@ -1189,7 +1354,10 @@ def plot_previous_1D_input_place_cell_weights(
     - sub_ax (plt.Axes): Subplot on which weights are plotted.
     """
 
-    if len(weights_t) != len(weights):
+    if len(weights.shape) != 2:
+        raise ValueError("weights must be a 2D array.")
+
+    if weights_t is not None and len(weights_t) != len(weights):
         raise ValueError(
             f"Length of 'weights' ({len(weights)}) and 'weights_t' ({len(weights_t)}) "
             "must be the same."
@@ -1198,13 +1366,13 @@ def plot_previous_1D_input_place_cell_weights(
     if sub_ax is None:
         _, sub_ax = plt.subplots(figsize=[6, 1])
 
-    if t_start is None:
+    if t_start is None or weights_t is None:
         start_idx = 0
     else:
-        start_idx = np.where(np.asarray(weights_t) > t_start)[0][0]
+        start_idx = max(0, np.where(np.asarray(weights_t) > t_start)[0][0] - 1)
 
-    if t_end is None:
-        end_idx = len(weights_t)
+    if t_end is None or weights_t is None:
+        end_idx = len(weights)
     else:
         end_idx = np.where(np.asarray(weights_t) < t_end)[0][-1] + 1
     alphas = np.linspace(0.3, 0.9, len(weights[start_idx:end_idx]))
@@ -1212,9 +1380,10 @@ def plot_previous_1D_input_place_cell_weights(
     place_weight_kwargs = {
         "color": color,
         "lw": 1.2,
-        "marker": "o",
+        "marker": marker,
         "ms": 2,
     }
+
     num_plotted = 0
     prev_weights = None
     for a, alpha in enumerate(alphas):
@@ -1241,11 +1410,510 @@ def plot_previous_1D_input_place_cell_weights(
             **place_weight_kwargs,
         )
 
-    sub_ax.set_xlabel("Position on track")
-    sub_ax.spines[["top", "right"]].set_visible(False)
+    sub_ax.set_xlabel("Place field centres")
     sub_ax.set_ylabel(f"Input weights")
+    sub_ax.set_ylim(0, sub_ax.get_ylim()[1] * 1.1)
+    sub_ax.spines[["top", "right"]].set_visible(False)
 
     return sub_ax
+
+
+def plot_1D_BTSP_stats(
+    Pyrs, recorded_weights, target_position=None, other_positions=list()
+):
+    """
+    plot_1D_BTSP_stats(Pyrs, recorded_weights)
+
+    Plot the BTSP stats of a Pyramidal neuron layer.
+
+    Args:
+    - Pyrs (learning_neurons.BTSPLayer): Pyramidal neurons.
+    - recorded_weights (dict): Recorded weights from place cells to Pyrs.
+    - target_position (float, optional): Target position. Default is None.
+
+    Returns:
+    - ax1D (np.ndarray): Array of subplots with BTSP stats plotted.
+    """
+
+    _, ax1D = plt.subplots(4, 1, figsize=(7, 7))
+
+    if hasattr(Pyrs, "plot_BTSP_ramp"):
+        Pyrs.plot_BTSP_ramp(axes=ax1D[:3])
+    else:
+        Pyrs.SomaCompartment.plot_BTSP_ramp(axes=ax1D[:3])
+        ax1D[1].plot(
+            Pyrs.DendriteCompartment.history["t"],
+            Pyrs.DendriteCompartment.history["firingrate"],
+            lw=1.2,
+            alpha=0.7,
+            zorder=-10,
+            label="dend",
+            color=Pyrs.DendriteCompartment.color,
+        )
+        ax1D[1].plot(
+            Pyrs.DendriteInhibition.history["t"],
+            Pyrs.DendriteInhibition.history["firingrate"],
+            lw=1.2,
+            alpha=0.5,
+            zorder=-10,
+            label="inhib.",
+            color=Pyrs.DendriteInhibition.color,
+        )
+
+    _, _, PCs, _ = ext_util.extract_objects_from_Pyrs(Pyrs)
+    plot_recorded_1D_input_place_cell_weights(
+        recorded_weights["weights"][:, 0],
+        PCs.place_cell_centres,
+        color=PCs.color,
+        marker="none",
+        sub_ax=ax1D[3],
+    )
+
+    if target_position is not None:
+        ax1D[3].axvline(target_position, ls="dashed", color="k")
+    for position in other_positions:
+        ax1D[3].axvline(position, ls="dashed", color="k", alpha=0.6)
+
+    return ax1D
+
+
+def plot_pre_post_responses(Pyrs, Objs, ref_time=0, pre=60, post=None, axes=None):
+    """
+    plot_pre_post_responses(Pyrs, Objs)
+
+    Plot the Pyramidal and Object neuron layer firing rates before and after a
+    reference time.
+
+    Args:
+    - Pyrs (riab_neurons.Neurons): Pyramidal neurons.
+    - Objs (riab_neurons.Neurons): Object neurons.
+    - ref_time (float, optional): Reference time in seconds. Default is 0.
+    - pre (float, optional): Time before the reference time in seconds. Default is 60.
+    - post (float, optional): Time after the reference time in seconds. If None,
+        pre is used. Default is None.
+    - axes (2D np.ndarray, optional): Array of subplots to plot on. Default is None.
+
+    Returns:
+    - axes (2D np.ndarray): Array of subplots with Pyr. and Obj. rates plotted.
+    """
+
+    if axes is None:
+        _, axes = plt.subplots(4, 2, sharex="col", sharey=True, figsize=(8, 4))
+    elif axes.shape != (4, 2):
+        raise ValueError("If provided, axes must have shape (4, 2).")
+
+    post = post or pre
+    col_times = [(ref_time - pre, ref_time), (ref_time, ref_time + post)]
+
+    for c, (start, end) in enumerate(col_times):
+        Objs.plot_rate_timeseries(t_start=start, t_end=end, sub_ax=axes[0, c])
+        axes[0, c].set_xlabel("")
+        axes[0, c].set_title("Obj input")
+        Pyrs.plot_rate_timeseries(
+            separate_axes=True,
+            t_start=start,
+            t_end=end,
+            ax=axes[1:, c],
+            norm_by="shared_max",
+        )
+
+        for sub_ax in axes[:, c][:-1]:
+            sub_ax.spines[["bottom"]].set_visible(False)
+            sub_ax.set_xticks([])
+
+    return axes
+
+
+def plot_pre_post_dendrite_peaks(
+    Pyrs,
+    ref_time=0,
+    pre=60,
+    post=None,
+    pts_btw=100,
+    label=None,
+    ylims=None,
+    together=False,
+    ax=None,
+):
+    """
+    plot_pre_post_dendrite_peaks(Pyrs)
+
+    Plot the Pyramidal dendrite response peaks before and after a reference time.
+
+    Args:
+    - Pyrs (riab_neurons.Neurons): Pyramidal neurons.
+    - ref_time (float, optional): Reference time in seconds. Default is 0.
+    - pre (float, optional): Time before the reference time in seconds. Default is 60.
+    - post (float, optional): Time after the reference time in seconds. If None,
+        pre is used. Default is None.
+    - pts_btw (int, optional): Minimum number of points between peaks. Default is 100.
+    - label (str, optional): Label for the plot. Default is None.
+    - ylims (tuple, optional): y-axis limits to use. Default is None.
+    - together (bool, optional): Whether to plot the before and after responses
+        on the same plot. Default is False.
+    - ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is created.
+        Default is None.
+
+    Returns:
+    - ax (plt.Axes or 1D np.ndarray): Subplot or array of subplots with Pyr. dendrite
+        response peaks plotted.
+    """
+
+    if ax is None:
+        n_cols = 1 if together else 2
+        fig, ax = plt.subplots(1, n_cols, figsize=(6, 4), sharex=True, sharey=True)
+    else:
+        num_subplots = np.asarray(ax).size
+        if num_subplots != (2 - int(together)):
+            raise ValueError(
+                "If ax is provided, it must include 1 subplot if together is True, "
+                "and 2 otherwise."
+            )
+        fig = np.asarray(ax).ravel()[0].figure
+
+    dt = Pyrs.Agent.dt
+    t = np.asarray(Pyrs.DendriteCompartment.history["t"])
+    firingrates = np.asarray(Pyrs.DendriteCompartment.history["firingrate"])
+
+    # pre
+    pre_ids = plot_util.get_plotting_times(
+        t,
+        t_start=ref_time - pre,
+        t_end=ref_time,
+    )
+
+    # post
+    post = post or pre
+    post_ids = plot_util.get_plotting_times(
+        t,
+        t_start=ref_time,
+        t_end=ref_time + post,
+    )
+
+    pts_per_sec = int(0.5 / dt)
+
+    labels = ["before", "after"]
+    if label is not None:
+        labels = [f"{label_start} {label}" for label_start in labels]
+
+    colors = ["red", "grey"]
+    for i, (start_id, end_id) in enumerate(zip(pre_ids, post_ids)):
+        s = 0 if together else i
+        sub_ax = np.asarray(ax).ravel()[s]
+        rates = firingrates[start_id:end_id, 0]
+        peak_pts = gen_util.get_minima_indices(
+            -rates, minimum=-0.1, min_pts_btw=pts_btw // 6
+        )
+        # remove second part of double peaks
+        rem_idxs = np.where(np.diff(peak_pts) < pts_btw)[0] + 1
+        peak_pts = np.delete(peak_pts, rem_idxs)
+
+        exp_num_pts = 6 * pts_per_sec
+        responses = np.full((exp_num_pts, len(peak_pts)), np.nan)
+        for p, peak_pt in enumerate(peak_pts):
+            pre_peak_pt = max(0, peak_pt - pts_per_sec)
+            post_peak_pt = min(peak_pt + 5 * pts_per_sec, len(rates))
+            num_pts = post_peak_pt - pre_peak_pt
+            time = np.linspace(-0.5, 2.5, exp_num_pts)
+            response = rates[pre_peak_pt:post_peak_pt]
+            if pre_peak_pt == 0 and num_pts < exp_num_pts:
+                time = time[-num_pts:]
+
+            sub_ax.plot(
+                time[:num_pts],
+                response,
+                color=colors[i],
+                alpha=0.4,
+                lw=1,
+            )
+
+            start = pre_peak_pt - peak_pt + pts_per_sec
+            responses[start : start + len(response), p] = response
+
+        time = np.linspace(-0.5, 2.5, len(responses))
+        response_mean = np.nanmean(responses, axis=1)
+
+        sub_ax.plot(
+            time,
+            response_mean,
+            color=colors[i],
+            alpha=0.6,
+            lw=3,
+            ls="dashed",
+            label=labels[i],
+        )
+
+        if i == 1 and not together:
+            ax[0].fill_between(
+                time,
+                np.zeros_like(response_mean),
+                response_mean,
+                color=colors[i],
+                alpha=0.4,
+                lw=0,
+            )
+
+        sub_ax.axvline(0, color="k", zorder=-3, alpha=0.5, lw=1.5, ls="dashed")
+        sub_ax.set_xlabel("Time (s)")
+        sub_ax.spines[["top", "right"]].set_visible(False)
+        if ylims is not None:
+            sub_ax.set_ylim(*ylims)
+
+        sub_ax.set_ylabel("Firing rates")
+
+    sub_ax.legend()
+    fig.suptitle(
+        f"Comparing Pyr. dendrite response peaks before and after {label}", y=1.0
+    )
+
+    return ax
+
+
+def plot_1D_initial_conditions(Pyrs, axes=None):
+    """
+    plot_1D_initial_conditions(Pyrs)
+
+    Plot initial conditions for a 1D environment experiment.
+
+    Args:
+    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
+        Pyr. neuron layer
+    - axes (list, optional): List of axes to plot on. If None, new axes are created.
+        Default is None.
+
+    Returns:
+    - axes (list): List of axes with 1D environment information plotted.
+    """
+
+    Env, Ag, PCs, Objs = ext_util.extract_objects_from_Pyrs(Pyrs)
+
+    if axes is None:
+        height_ratios = [1, 1.2, 1.5]
+        if Objs is not None:
+            height_ratios.insert(1, 0.6)  # add height ratio for object rate map
+        gridspec_kw = {"height_ratios": height_ratios}
+        figsize = plot_util.get_figsize(sum(height_ratios), squat_height=True)
+        _, axes = plt.subplots(
+            nrows=len(height_ratios),
+            figsize=figsize,
+            sharex=True,
+            gridspec_kw=gridspec_kw,
+            squeeze=False,
+        )
+    ax1D = np.asarray(axes).ravel()
+    if len(ax1D) != 3 + int(Objs is not None):
+        raise ValueError(f"Expected 3 + {int(Objs is not None)} axes, got {len(ax1D)}.")
+
+    # Plot environment
+    plot_1D_reset_environment(Ag, sub_ax=ax1D[0], autosave=False)
+
+    # Plot object cell rate map, if applicable
+    i = 1
+    if Objs is not None:
+        Objs.plot_rate_map(chosen_neurons="all", ax=ax1D[1], autosave=False)
+        ax1D[1].set_title("Object cell rate map")
+        i = 2
+
+    # Plot place cell locations
+    PCs.plot_place_cell_locations(sub_ax=ax1D[i], autosave=False, plot_objects=False)
+    plot_overlayed_rate_maps(PCs, sub_ax=ax1D[i], method="max", autosave=False)
+    ymin, ymax = ax1D[i].get_ylim()
+    ymin = min(ymin, 0)
+    ax1D[i].set_ylim((ymin - 0.05 * (ymax - ymin)), ymax)
+    ax1D[i].set_title("Place cell locations")
+
+    # Plot place cell rate map
+    PCs.plot_rate_map(chosen_neurons="all", ax=ax1D[i + 1], autosave=False)
+    ax1D[i + 1].set_title("Place cell rate map")
+
+    ax1D[0].set_xticks([0, Env.scale])
+    for a, sub_ax in enumerate(ax1D[:-1]):
+        sub_ax.set_xlabel("")
+        if a > 0 and a != 1 + int(Objs is not None):
+            sub_ax.spines["bottom"].set_visible(False)
+            sub_ax.xaxis.set_visible(False)
+
+    return axes
+
+
+def plot_1D_spatial_info(
+    Pyrs: "learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer",
+    Pyr_weights: list[np.ndarray[tuple[int, int], np.dtype[np.float64]]] | None = None,
+    Pyrs_norm_by: str | float | None = None,
+    autosave: bool | None = None,
+) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
+    """
+    plot_1D_spatial_info(Pyrs)
+
+    Plot spatial info for a 1D environment experiment:
+        (1) Environment,
+        (2, optional): Object cell rate maps (if applicable),
+        (3) Place cell locations,
+        (4) Pyr. overlayed rate map,
+        (5, optional) Pyr. input weights (if provided),
+        (6-8) Pyr. rate map across learning
+        (9) Environment (again).
+
+    Args:
+    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer): Pyr. neurons.
+    - Pyr_weights (list): List of Pyr. weights with shape (num_epochs, num_cells, num_PCs).
+        Default is None.
+    - Pyrs_norm_by (str, optional): Normalization method for rate maps. If None,
+        default is used. Default is None.
+    - autosave (bool, optional): Whether to autosave the figure. If None, the global
+        autosave setting for ratinabox is used. Default is None.
+
+    Returns:
+    - Axes (2D np.ndarray): Array of subplots with 1D environment experiment info
+        plotted, with shape (7 or 8 or 9, 1). See description for details.
+    """
+
+    _, Ag, PCs, Objs = ext_util.extract_objects_from_Pyrs(Pyrs)
+
+    # 7 or 8 plots
+    height_ratios = [1, 1.2, 1.5, 1, 1, 1, 1]
+    if Pyr_weights is not None:
+        height_ratios.insert(3, 2)  # add height ratio for weights
+    if Objs is not None:
+        height_ratios.insert(1, 0.6)  # add height ratio for object rate map
+    gridspec_kw = {"height_ratios": height_ratios}
+    figsize = plot_util.get_figsize(sum(height_ratios), squat_height=True)
+    fig, axes = plt.subplots(
+        nrows=len(height_ratios),
+        figsize=figsize,
+        sharex=True,
+        gridspec_kw=gridspec_kw,
+        squeeze=False,
+    )
+    ax1D = np.asarray(axes).ravel()
+
+    i = 3 + int(Objs is not None)
+    plot_1D_initial_conditions(Pyrs, axes=ax1D[:i])
+
+    # Plot Pyr. weights
+    if Pyr_weights is not None:
+        plot_1D_input_place_cell_weights(
+            np.asarray(Pyr_weights),
+            PCs,
+            sub_ax=ax1D[i],
+            autosave=False,
+        )
+        i += 1
+
+    # Plot Pyr. rate maps across learning
+    plot_1D_rate_map_across_learning(
+        Pyrs, axes=ax1D[i : i + 3], norm_by=Pyrs_norm_by, autosave=False  # type: ignore[arg-type]
+    )
+
+    # Plot environment
+    plot_1D_reset_environment(Ag, sub_ax=ax1D[i + 3], autosave=False)
+
+    for a, sub_ax in enumerate(ax1D[:-1]):
+        sub_ax.set_xlabel("")
+        if a > 1:
+            sub_ax.spines["bottom"].set_visible(False)
+            sub_ax.xaxis.set_visible(False)
+
+    plot_util.save_figure(fig, "1D_env_info", save=autosave)
+
+    return axes
+
+
+def plot_1D_time_info(
+    Pyrs: "learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer",
+    Pyrs_norm_by: str | float | None = None,
+    autosave: bool | None = None,
+) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
+    """
+    plot_1D_time_info(Pyrs)
+
+    Plot time info for a 1D experiment:
+        (1) Trajectories,
+        (2) Place cell rate timeseries,
+        (3) Pyr. rate timeseries
+
+    Args:
+    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer): Pyr. neurons.
+    - Pyrs_norm_by (str, optional): Normalization method for rate maps. If None,
+        default is used. Default is None.
+    - autosave (bool, optional): Whether to autosave the figure. If None, the global
+        autosave setting for ratinabox is used. Default is None.
+
+    Returns:
+    - axes (2D np.ndarray): Array of subplots with 1D time info plotted,
+        with shape (3, 1). See description for details.
+    """
+
+    _, Ag, PCs, Objs = ext_util.extract_objects_from_Pyrs(Pyrs)
+
+    # 3 or 4 plots
+    height_ratios = [1.5, 1, 1.1**Pyrs.n]
+    if Objs is not None:
+        height_ratios.insert(1, 0.6)
+    gridspec_kw = {"height_ratios": height_ratios}
+    figsize = plot_util.get_figsize(sum(height_ratios), squat_height=True)
+    fig, axes = plt.subplots(
+        nrows=len(height_ratios),
+        figsize=figsize,
+        sharex=True,
+        gridspec_kw=gridspec_kw,
+        squeeze=False,
+    )
+    ax1D = np.asarray(axes).ravel()
+
+    # Plot trajectories
+    Ag.plot_trajectories_across_time(
+        framerate=1 / Ag.dt, sub_ax=ax1D[0], autosave=False
+    )
+    ax1D[0].set_title("Trajectories")
+
+    # Plot object cell rate timeseries
+    i = 1
+    if Objs is not None:
+        Objs.plot_rate_timeseries(
+            chosen_neurons="all",
+            spikes=False,
+            sub_ax=ax1D[1],
+            autosave=False,
+        )
+        ax1D[1].set_title("Object cell rate timeseries")
+        i = 2
+
+    # Plot place cell rate timeseries
+    PCs.plot_rate_timeseries(
+        chosen_neurons="all",
+        spikes=False,
+        sub_ax=ax1D[i],
+        autosave=False,
+        shade_kwargs={"rasterized": True},  # svg too big, othersize
+    )
+    ax1D[i].set_title("Place cell rate timeseries")
+
+    # Plot Pyr. rate timeseries
+    kwargs = dict()
+    if Pyrs_norm_by is not None:
+        kwargs["norm_by"] = Pyrs_norm_by
+    Pyrs.plot_rate_timeseries(
+        chosen_neurons="all",
+        spikes=True,
+        sub_ax=ax1D[i + 1],
+        shift=-10,
+        overlap=1,
+        autosave=False,
+        **kwargs,
+    )
+    ax1D[i + 1].set_title("Pyr. rate timeseries")
+
+    mark_target_and_reset_points(Pyrs, sub_ax=ax1D[i + 1])
+
+    for sub_ax in ax1D[:-1]:
+        sub_ax.set_xlabel("")
+
+    plot_util.pad_axis(ax1D[0], "x", pad_prop=0.03)
+
+    plot_util.save_figure(fig, "time_info", save=autosave)
+
+    return axes
 
 
 def plot_2D_input_place_cell_weights(
@@ -1328,9 +1996,12 @@ def plot_2D_input_place_cell_weights(
         "layer"
     ].place_cell_centres
 
+    chosen_neurons = np.asarray(target_neurons.return_list_of_neurons(chosen_neurons=chosen_neurons))  # type: ignore[arg-type]
+
+    BTSP_per = False
     if place_weights is None:
-        chosen_neurons = np.asarray(target_neurons.return_list_of_neurons(chosen_neurons=chosen_neurons))  # type: ignore[arg-type]
         place_weights = target_neurons.inputs[PCs_input_name]["w"][chosen_neurons]
+        BTSP_per = True
 
     if vmin is None:
         vmin = place_weights.min()
@@ -1377,9 +2048,26 @@ def plot_2D_input_place_cell_weights(
         )
 
     if plot_BTSP_events:
-        target_neurons.add_BTSP_markers_to_plots(
-            ax=ax1D, t_start=t_start, t_end=t_end, color=color
+        _, startid, endid = target_neurons.get_plotting_times(
+            t_start=t_start, t_end=t_end, raise_error=False
         )
+
+        if endid > startid:
+            BTSP_kwargs = {
+                "ax": ax1D,
+                "t_start": t_start,
+                "t_end": t_end,
+                "color": color,
+            }
+            if BTSP_per:
+                target_neurons.add_BTSP_markers_to_plots(
+                    chosen_neurons=chosen_neurons, **BTSP_kwargs
+                )
+            else:
+                for i in chosen_neurons:
+                    target_neurons.add_BTSP_markers_to_plots(
+                        chosen_neurons=[i], **BTSP_kwargs
+                    )
 
     norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
     im = mpl_cm.ScalarMappable(norm=norm, cmap=cmap)
@@ -1420,10 +2108,11 @@ def plot_series_of_2D_input_place_cell_weights(
     Args:
     - target_neurons (riab_neurons.Neurons): Target neurons.
     - place_weight_series (list): Series of place weights to plot.
-    - steps (np.ndarray, optional): Steps at which to plot the series. Step numbers are
-        included in the title of each figure. Default is None.
+    - steps (np.ndarray, optional): Steps numbers for each set of weights. Step
+        numbers are included in the title of each figure. Default is None.
     - ratio (float, optional): Ratio of the figure width to height. Default is 8.
-    - title (str, optional): Title to use for all figures. Default is None.
+    - title (str or list, optional): Title or titles to use for the figures.
+        Default is None.
     - y (float, optional): Y position of the title. Default is 1.
 
     Keyword args:
@@ -1441,17 +2130,28 @@ def plot_series_of_2D_input_place_cell_weights(
                 "provided."
             )
 
+    if title is None or isinstance(title, str):
+        titles = [title] * len(place_weight_series)
+    else:
+        titles = title
+
+    if len(titles) != len(place_weight_series):
+        raise ValueError(
+            "Number of titles must match the number of place weight series provided."
+        )
+
     all_axes = list()
     for i, weights in enumerate(place_weight_series):
-        if steps is None:
-            use_title = title
+        if steps is None or steps[i] is None:
+            title = titles[i]
+            t_end = None
         else:
             step = steps[i]
             t_end = step * target_neurons.Agent.dt
-            if title is None:
-                use_title = f"Step {step} at {t_end:.2f} s"
+            if titles[i] is None:
+                title = f"Step {step} at {t_end:.2f} s"
             else:
-                use_title = f"{title} (step {step} at {t_end:.2f} s)"
+                title = f"{titles[i]} (step {step} at {t_end:.2f} s)"
 
         num_plots = len(weights)
         num_rows = int(np.max([1, np.floor(np.sqrt(num_plots / ratio))]))
@@ -1473,8 +2173,8 @@ def plot_series_of_2D_input_place_cell_weights(
         for sub_ax in axes.ravel()[num_plots:]:
             sub_ax.axis("off")
 
-        if use_title is not None:
-            axes.ravel()[-1].figure.suptitle(use_title, y=y, fontsize=20)
+        if title is not None:
+            axes.ravel()[-1].figure.suptitle(title, y=y, fontsize=20)
 
         all_axes.append(axes)
 
@@ -1706,140 +2406,120 @@ def plot_overlayed_rate_maps(
     return sub_ax
 
 
-def plot_timeseries(
-    NeuronLayer: "riab_neurons.Neurons",
-    t_start: float | None = None,
-    t_end: float | None = None,
-    chosen_neurons: (
-        str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
-    ) = "all",
-    spikes: bool = False,
-    imshow: bool = False,
-    sub_ax: plt.Axes | None = None,
-    xlim: tuple[float, float] | None = None,
-    color: str | None = None,
-    background_color: str | None = None,
-    trace_name: str = "firingrate",
-    autosave=None,
-    **kwargs,
-):
+def plot_2D_initial_conditions(Pyrs, num_samples=10, autosave: bool | None = None):
     """
-    plot_timeseries(NeuronLayer)
+    plot_2D_initial_conditions(Pyrs)
 
-    Plot the rate timeseries of a layer of neurons.
+    Plot initial conditions for a 2D environment experiment.
 
     Args:
-    - NeuronLayer (riab_neurons.Neurons): The layer of neurons to plot.
-    - t_start (float, optional): The start time of the plot. Default is None.
-    - t_end (float, optional): The end time of the plot. Default is None.
-    - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
-        Default is "all".
-    - spikes (bool, optional): Whether to plot spikes or firing rate. Default is False.
-    - imshow (bool, optional): Whether to plot the timeseries as an image.
-        Default is False.
-    - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
-        created. Default is None.
-    - xlim (tuple[float, float], optional): The x limits of the plot. Default is None.
-    - color (str, optional): The color of the plot. Default is None.
-    - background_color (str, optional): The background color of the plot.
-        Default is None.
-    - trace_name (str, optional): The name of the trace to plot.
-        Default is "firingrate".
+    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
+        Pyr. neuron layer
+    - num_samples (int, optional): Number of samples to plot. Default is 10.
     - autosave (bool, optional): Whether to autosave the figure. If None, the global
         autosave setting for ratinabox is used. Default is None.
 
     Returns:
-    - sub_ax (plt.Axes): Subplot with timeseries of the layer plotted.
+    - fields_axes (2D np.ndarray): Array of subplots with place fields plotted, with
+        shape (num_layers, num_samples).
+    - aggreg_ax1D (1D np.ndarray): Array of subplots with environment and aggregated
+        fields plotted, with shape (3,).
     """
 
-    t = np.asarray(NeuronLayer.history["t"])
-    startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
+    Env, _, PCs, Objs = ext_util.extract_objects_from_Pyrs(Pyrs)
 
-    rate_timeseries = np.asarray(NeuronLayer.history[trace_name][startid : endid + 1])
+    # Plot fields
+    if Objs is None:
+        num_cols = min(PCs.n, num_samples)
+        neurons = [PCs]
+    else:
+        num_cols = min(min(PCs.n, Objs.n), num_samples)
+        neurons = [Objs, PCs]
 
-    # neurons to plot
-    if not isinstance(chosen_neurons, np.ndarray):
-        chosen_neurons = np.asarray(NeuronLayer.return_list_of_neurons(chosen_neurons))  # type: ignore[arg-type]
-    rate_timeseries = rate_timeseries[:, chosen_neurons]
+    fields_fig, fields_axes = plt.subplots(
+        len(neurons), num_cols, figsize=(num_cols * 2, len(neurons) * 2), squeeze=False
+    )
+    title_i = max(0, num_cols // 2 - 1)
 
-    was_ax = (
-        sub_ax is None
-    )  # remember whether a subplot was provided as xlims depend on this
-    fig = None if sub_ax is None else sub_ax.figure
-
-    if color is None:
-        color = NeuronLayer.color  # type: ignore[attr-defined]
-    if imshow == False:
-        firingrates = rate_timeseries.T
-        _, sub_ax = rutils.mountain_plot(
-            X=t / 60,
-            NbyX=firingrates,
-            color=color,  # type: ignore[assignment]
-            xlabel="Time / min",
-            ylabel="Neurons",
-            xlim=None,
-            fig=fig,
-            ax=sub_ax,
-            **kwargs,
+    for i, NeuronLayer in enumerate(neurons):
+        if num_cols >= NeuronLayer.n:
+            chosen_neurons = np.arange(NeuronLayer.n)
+        else:
+            chosen_neurons = np.sort(np.random.choice(NeuronLayer.n, num_cols))
+        ax1D = fields_axes[i, : len(chosen_neurons)]
+        NeuronLayer.plot_rate_map(
+            chosen_neurons=chosen_neurons, ax=ax1D, no_legend=True, autosave=False
         )
+        name = NeuronLayer.name.replace("_", " ")
+        ax1D[title_i].set_title(f"{name} rate maps", fontsize="x-large")  # type: ignore[attr-defined]
 
-        if sub_ax is None:
-            raise RuntimeError("sub_ax is None.")
+    # Plot aggregated fields
+    aggreg_fields, aggreg_ax1D = plt.subplots(1, 3, figsize=(9, 3))
 
-        if spikes == True:
-            spike_data = np.asarray(NeuronLayer.history["spikes"][startid : endid + 1])[
-                :, chosen_neurons
-            ]
-            for i in range(len(chosen_neurons)):
-                time_when_spiked = t[spike_data[:, i]] / 60
-                h = (i + 1 - 0.1) * np.ones_like(time_when_spiked)
-                sub_ax.scatter(
-                    time_when_spiked,
-                    h,
-                    color=(NeuronLayer.color or "C1"),  # type: ignore[attr-defined]
-                    alpha=0.5,
-                    s=5,
-                    linewidth=0,
-                )
+    for sub_ax in aggreg_ax1D[:2]:
+        Env.plot_environment(sub_ax=sub_ax, no_legend=True, autosave=False)
+    aggreg_ax1D[0].set_title("Environment")
 
-        xmin = t[0] / 60 if was_ax else min(t[0] / 60, sub_ax.get_xlim()[0])  # type: ignore[operator]
-        xmax = t[-1] / 60 if was_ax else max(t[-1] / 60, sub_ax.get_xlim()[1])  # type: ignore[operator]
-        sub_ax.set_xlim(xmin, xmax)
-        sub_ax.set_xticks([xmin, xmax])
-        sub_ax.set_xticklabels([round(xmin, 2), round(xmax, 2)])
-        if xlim is not None:
-            sub_ax.set_xlim(right=xlim / 60)  # type: ignore[operator]
-            sub_ax.set_xticks([round(t_start / 60, 2), round(xlim / 60, 2)])  # type: ignore[operator]
-            sub_ax.set_xticklabels([round(t_start / 60, 2), round(xlim / 60, 2)])  # type: ignore[operator]
+    plot_overlayed_rate_maps(
+        PCs, method="max", colorbar=False, sub_ax=aggreg_ax1D[1], autosave=False
+    )
+    aggreg_ax1D[1].set_title("Overlayed place fields")
 
-        if background_color is not None:
-            sub_ax.set_facecolor(background_color)
-            sub_ax.figure.patch.set_facecolor(background_color)  # type: ignore[attr-defined]
+    PCs.plot_place_cell_locations(sub_ax=aggreg_ax1D[2], autosave=False)
+    aggreg_ax1D[2].set_title("Place cell centers")
 
-    elif imshow == True:
-        if sub_ax is None:
-            _, sub_ax = plt.subplots(
-                figsize=(
-                    MOUNTAIN_PLOT_WIDTH_MM / 25,
-                    0.5 * MOUNTAIN_PLOT_WIDTH_MM / 25,
-                )
-            )
+    if autosave:
+        plot_util.save_figure(fields_fig, "initial_fields", save=autosave)
+        plot_util.save_figure(aggreg_fields, "initial_aggreg", save=autosave)
 
-        data = rate_timeseries.T
-        sub_ax.imshow(
-            data[::-1],
-            aspect="auto",
-            # aspect=0.5 * data.shape[1] / data.shape[0],
-            extent=(t_start, t_end, 0, 1),  # type: ignore[assignment]
-        )
-        sub_ax.spines[["right", "top", "left"]].set_visible(False)
-        sub_ax.set_xlabel("Time / min")
-        sub_ax.set_xticks([t_start, t_end])
-        sub_ax.set_xticklabels([round(t_start / 60, 2), round(t_end / 60, 2)])  # type: ignore[operator]
-        sub_ax.set_yticks([])
-        sub_ax.set_ylabel("Neurons")
+    return fields_axes, aggreg_ax1D
 
-    fig = sub_ax.figure
-    plot_util.save_figure(fig, f"{NeuronLayer.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
 
-    return sub_ax
+def plot_interleaved_openfield_rate_maps(Pyrs, Objs, num_cols=10, size_per=1.4):
+    """
+    plot_interleaved_openfield_rate_maps(Pyrs, Objs)
+
+    Plot interleaved open field rate maps for Pyr. neuron somata and the object neurons
+    thattarget their dendrites.
+
+    Rate maps are computed theoretically based on place cell inputs.
+
+    Args:
+    - Pyrs (two_comp_neurons.TwoComp): Pyr. neurons.
+    - Objs (object_neurons.ObjectCells): Object neurons.
+    - num_cols (int, optional): Number of columns in the plot. Default is 10.
+    - size_per (float, optional): Size per subplot. Default is 1.4.
+
+    Returns:
+    - axes (np.ndarray): Array of subplots with interleaved rate maps plotted.
+    """
+
+    if Pyrs.n != Objs.n:
+        raise ValueError("Pyrs and Objs should have the same number of neurons.")
+
+    num_cols = min(10, Objs.n)
+    num_rows = int(np.ceil(Objs.n / num_cols)) * 2
+
+    _, axes = plt.subplots(
+        num_rows,
+        num_cols,
+        figsize=(size_per * num_cols, size_per * num_rows),
+        squeeze=False,
+    )
+
+    Objs.plot_rate_map(ax=axes[::2].ravel()[: Objs.n], no_legend=True)
+    plot_2D_input_place_cell_weights(
+        Pyrs.SomaCompartment,
+        ax=axes[1::2].ravel()[: Objs.n],
+        alpha=0.5,
+        plot_BTSP_events=True,
+        no_legend=True,
+    )
+
+    # turn off extra subplots
+    for sub_ax in axes[::2].ravel()[Objs.n :]:
+        sub_ax.axis("off")
+    for sub_ax in axes[1::2].ravel()[Objs.n :]:
+        sub_ax.axis("off")
+
+    return axes

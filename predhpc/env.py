@@ -209,6 +209,8 @@ class TEnv(Environment):
 
         super().__init__(self.params)
 
+        self.scale = (self.scale_x + self.scale_y) / 2  # type: ignore[attr-defined]
+
         prop_env = self.prop_env  # type: ignore[attr-defined]
         if self.stem_width_as_prop_of_x is None:  # type: ignore[attr-defined,has-type]
             self.stem_width_as_prop_of_x = prop_env
@@ -347,6 +349,24 @@ class TEnv(Environment):
             self._T_split = [x_dim, y_dim]
 
         return self._T_split
+
+    @property
+    def T_split_top(self) -> list[float]:
+        """
+        self.T_split_top
+
+        Obtain the coordinates at the top of the split of the T branches.
+
+        Returns:
+        - (list): Top coordinates above location where the T branches split from the trunk.
+        """
+
+        if not hasattr(self, "_T_split_top"):
+            x_dim = 0.5 * self.get_scale_x()
+            y_dim = self.get_scale_y()
+            self._T_split_top = [x_dim, y_dim]
+
+        return self._T_split_top
 
     @property
     def top_arms_prop_of_area(self):
@@ -580,6 +600,9 @@ class OpenField(Environment):
         "init_random_walls": 5,
         "init_random_teleport_pairs": 2,
         "wall_lengths": [0.1, 0.2],
+        "init_reward_objs": list(),
+        "init_novel_objs": list(),
+        "init_teleport_pairs": list(),
         "min_dist": 0.1,  # between objects (walls is half)
         "init_seed": None,
     }
@@ -616,6 +639,9 @@ class OpenField(Environment):
         "init_random_walls": 5,
         "init_random_teleport_pairs": 2,
         "wall_lengths": [0.1, 0.2],
+        "init_reward_obj": list(),
+        "init_novel_obj": list(),
+        "init_teleport_pairs": list(),
         "min_dist": 0.1,  # between objects (walls is half)
         "init_seed": None,
     }
@@ -660,6 +686,10 @@ class OpenField(Environment):
             self.rng = np.random.RandomState(self.init_seed)  # type: ignore[attr-defined,assignment]
 
         self.num_teleport_pairs = 0
+        self.add_reward_objects(coords=self.init_reward_obj)
+        self.add_novel_objects(coords=self.init_novel_obj)
+        self.add_teleport_pairs(coord_pairs=self.init_teleport_pairs)
+
         self.add_reward_objects(self.init_random_reward_obj)  # type: ignore[attr-defined]
         self.add_novel_objects(self.init_random_novel_obj)  # type: ignore[attr-defined]
         self.add_teleport_pairs(self.init_random_teleport_pairs)  # type: ignore[attr-defined]
@@ -1074,9 +1104,9 @@ class OpenField(Environment):
         """
 
         if teleport_pair_num % 2 == 0:
-            orientation = "vertical"
-        else:
             orientation = "horizontal"
+        else:
+            orientation = "vertical"
 
         return orientation
 
@@ -1522,7 +1552,7 @@ class OpenField(Environment):
         if orientation == "vertical":
             marker = "v" if direction == "in" else "^"
         else:
-            marker = "<" if direction == "in" else ">"
+            marker = ">" if direction == "in" else "<"
 
         return marker
 
@@ -1531,6 +1561,7 @@ class OpenField(Environment):
         fig: mpl_figure.Figure | None = None,
         sub_ax: plt.Axes | None = None,
         plot_objects: bool = True,
+        size_fact: float = 2.5,
         no_legend: bool = False,
         return_env_fig: bool = False,
         autosave: bool | None = None,
@@ -1549,6 +1580,8 @@ class OpenField(Environment):
             created.
         - plot_objects (bool, optional): Whether to plot objects in environment.
             Default is True.
+        - size_fact (float, optional): Factor to multiply environment width by to
+            determine figure size. Default is 2.5.
         - no_legend (bool, optional): Whether to remove legend from plot.
             Default is False.
         - return_env_fig (bool, optional): Whether to return the figure
@@ -1566,13 +1599,10 @@ class OpenField(Environment):
         kwargs = plot_util.organize_fig_ax_kwargs(fig=fig, sub_ax=sub_ax, **kwargs)
 
         if "ax" not in kwargs.keys():
-            env_width = self.extent[1] - self.extent[0]
-            add_x = 0
+            env_width, env_height = self.get_environment_figsize(size_fact=size_fact)
             if plot_objects:
-                add_x = 3 * env_width  # for legend and labels
-            kwargs["fig"], kwargs["ax"] = plt.subplots(
-                figsize=(3 * env_width + add_x, 3 * (self.extent[3] - self.extent[2]))
-            )
+                env_width *= 1.5  # for legend and labels
+            kwargs["fig"], kwargs["ax"] = plt.subplots(figsize=(env_width, env_height))
 
         sub_ax = super().plot_environment(autosave=False, plot_objects=False, **kwargs)
 

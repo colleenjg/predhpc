@@ -1,14 +1,24 @@
 import copy
 
+import numpy as np
 from ratinabox import utils as rutils
 
-from predhpc.util import ext_util
+from predhpc.util import gen_util, ext_util
 
-SCALE_LINEAR = 4.0
-SCALE_TMAZE = 3.0
-SCALE = 3.0
+SCALE_LINEAR = 5.0
+SCALE_TMAZE = 4.0
+SCALE = 2.0
 DT = 0.03
-SPEED_MEAN = 0.08
+SPEED_MEAN_LINEAR = 0.25  # m/s
+SPEED_STD = SPEED_MEAN_LINEAR / 8
+SPEED_MEAN_2D = 0.28  # m/s (mean tends to be undershot)
+
+BTSP_FILTER_TAU = 2  # s
+POST_BTSP_FILTER_TAU = "half"  # wrt BTSP_FILTER_TAU
+BASE_LR = 4e-5
+
+TOLERANCE_LINEAR = 0.55
+TOLERANCE_2D = 5
 
 OBJ_COLOR = "#22772E"  # dark green
 PC_COLOR = "#99193A"  # dark red
@@ -116,7 +126,7 @@ def get_env_params(scale=None, environment="linear", **kwargs):
     elif environment == "tmaze":
         scale = scale or SCALE_TMAZE
         env_params = {
-            "prop_env": 0.1,
+            "prop_env": 0.3 / scale,
             "scale_x": scale,
             "scale_y": scale,
         }
@@ -128,8 +138,10 @@ def get_env_params(scale=None, environment="linear", **kwargs):
             "init_random_reward_obj": 4,
             "init_random_novel_obj": 4,
             "init_random_teleport_pairs": 6,
-            "init_seed": 55,
+            "wall_lengths": [0.1 * SCALE, 0.2 * SCALE],
+            "init_seed": 75,
             "scale": scale,
+            "dx": scale / 100,
         }
 
     for key, value in kwargs.items():
@@ -165,37 +177,49 @@ def get_agent_params(dt=DT, scale=None, environment="linear", **kwargs):
     agent_params = {
         "dt": dt,
         "head_direction_smoothing_timescale": dt * 2,
-        "speed_mean": 0.08,  # sets directionality
-        "speed_std": 0.04,
     }
 
     if environment == "linear":
         scale = scale or SCALE_LINEAR
 
+        agent_params["speed_mean"] = SPEED_MEAN_LINEAR
+        agent_params["speed_std"] = SPEED_STD
         agent_params["start_position"] = 0 + dt
         agent_params["reset_position"] = scale - dt
         agent_params["target_position"] = scale - dt * 8
         agent_params["fixed_direction"] = True
+        agent_params["wait_at_end"] = int(16 / dt)  # 16 sec
         agent_params["wait_between_targets"] = 30
+        agent_params["target_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_LINEAR
+        agent_params["reset_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_LINEAR
 
     elif environment == "tmaze":
+        agent_params["speed_mean"] = SPEED_MEAN_2D
         agent_params["thigmotaxis"] = 0.5
         agent_params["left_arm_prop"] = 0.5
-        agent_params["target_reached_within_tol_prop_to_speed_dt"] = (
-            8  # very wide for target
-        )
+        agent_params["wait_between_targets"] = 30
+        agent_params["target_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_2D
+        agent_params["reset_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_2D
 
     elif environment == "openfield":
+        agent_params["speed_mean"] = SPEED_MEAN_2D
         agent_params["thigmotaxis"] = 0.5
         agent_params["num_random_walk_steps"] = 300
         agent_params["always_log_teleportation"] = True
         agent_params["no_target_factor"] = 5
-        agent_params["target_reached_within_tol_prop_to_speed_dt"] = (
-            8  # very wide for target
-        )
+        agent_params["target_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_2D
 
     for key, value in kwargs.items():
         agent_params[key] = value
+
+    # 2D environments use speed_mean as the Rayleigh sigma, unless speed_std is 0
+    if environment in ["tmaze", "openfield"] and "speed_mean" in agent_params.keys():
+        if "speed_std" in agent_params.keys() and agent_params["speed_std"] == 0:
+            pass
+        else:
+            agent_params["speed_mean"] = gen_util.get_rayleigh_sigma(
+                agent_params["speed_mean"]
+            )
 
     return agent_params
 
@@ -228,20 +252,12 @@ def get_Obj_params(n=None, environment="linear", vector=False, **kwargs):
         "description": "gaussian",
         "min_fr": 0,
         "max_fr": 10,
+        "widths": 0.1,
         "color": OBJ_COLOR,
     }
 
     if vector:
         Obj_params["line_of_sight"] = True
-
-    if environment == "linear":
-        Obj_params["widths"] = 0.1
-
-    elif environment == "tmaze":
-        Obj_params["widths"] = 0.1
-
-    elif environment == "openfield":
-        Obj_params["widths"] = 0.07
 
     if n is not None:
         Obj_params["n"] = n
@@ -284,21 +300,18 @@ def get_PC_params(n=None, environment="linear", **kwargs):
     }
 
     if environment == "linear":
-        n = 32 if n is None else n
-        PC_params["n"] = n
+        n = n or SCALE_LINEAR * 10
+        PC_params["n"] = int(n)
 
     elif environment == "tmaze":
-        n = 177 if n is None else n  # 40 for one row, one column
-        PC_params["n"] = n
+        n = n or (SCALE_TMAZE * 10 * 2 * 3 - 9)
+        PC_params["n"] = int(n)
         PC_params["wall_geometry"] = "line_of_sight"  # due to environment shape
 
     elif environment == "openfield":
-        n = 30**2 if n is None else n
-        PC_params["n"] = n
+        n = n or (SCALE * 10) ** 2
+        PC_params["n"] = int(n)
         PC_params["wall_geometry"] = "line_of_sight"  # due to environment shape
-
-    if n is not None:
-        PC_params["n"] = n
 
     for key, value in kwargs.items():
         PC_params[key] = value
@@ -368,17 +381,18 @@ def get_Pyr_params(
             "soma_to_dend_weight": 0.2,
             "dend_to_soma_weight": 1,
             "soma_normalize_weights_divisively": True,
-            "soma_regularization_alpha": 0.45,
+            "soma_regularization_alpha": 0.6,
             "soma_p": 1,
-            "soma_lr": 3e-5,  # basic learning rate
+            "soma_lr": BASE_LR,  # basic learning rate
             "soma_BTSP_lr_fact": 100,  # BTSP clamp
             "soma_NMDA_activation_threshold": 2,  # threshold for NMDA activation
             "soma_BTSP_induction_threshold": 8,  # sustainedrequired for BTSP
             "soma_BTSP_plateau_length": 0.12,  # plateau length required for BTSP
-            "soma_BTSP_filter_tau": 4,  # BTSP kernel tau
+            "soma_BTSP_filter_tau": BTSP_FILTER_TAU,  # BTSP kernel tau
+            "soma_post_BTSP_filter_tau": POST_BTSP_FILTER_TAU,  # BTSP post-filter tau
             "soma_BTSP_trend_tau": None,  # BTSP kernel tau
-            "inhibit_weight": 1.3,  # strength of dendritic inhibition from soma
-            "inhibit_input_filter_tau": 3,
+            "inhibit_weight": 1.8,  # strength of dendritic inhibition from soma
+            "inhibit_input_filter_tau": 1.0,
             "inhibit_input_trend_tau": None,
             "mutual_inhibition_weight": None,
             "lateral_tau": 0.3,
@@ -393,7 +407,7 @@ def get_Pyr_params(
             "w_init_loc": 0.02,
             "w_init_scale": 0,
             "regularization_alpha": 0.8,
-            "lr": 3e-5,
+            "lr": BASE_LR,
             "normalize_weights_divisively": True,
             "p": 1,
         }
@@ -402,7 +416,8 @@ def get_Pyr_params(
             Pyr_params["BTSP_lr_fact"] = (
                 3e4  # very high clamp, since activity during BTSP is likely low
             )
-            Pyr_params["BTSP_filter_tau"] = 4
+            Pyr_params["BTSP_filter_tau"] = BTSP_FILTER_TAU
+            Pyr_params["post_BTSP_filter_tau"] = POST_BTSP_FILTER_TAU
             Pyr_params["BTSP_trend_tau"] = None  # BTSP kernel tau
 
             if NMDA:

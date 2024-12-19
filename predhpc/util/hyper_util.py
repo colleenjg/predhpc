@@ -4,8 +4,6 @@ from datetime import datetime
 import numpy as np
 from matplotlib import pyplot as plt
 
-from predhpc.util import params_util
-
 
 def get_save_directory(save_directory=None):
     """
@@ -348,10 +346,18 @@ def plot_metrics_by_parameters(df, parameters=None, save_directory=None, name_st
     if name_str is None:
         name_str = "metrics"
 
+    if len(metrics) == 0:
+        raise RuntimeError("No metrics found in dataframe.")
+
     ncols = int(np.ceil(np.sqrt(len(metrics))))
+    ncols = 6 if ncols == 5 else ncols
     nrows = int(np.ceil(len(metrics) / ncols))
     fig, axes = plt.subplots(
-        nrows, ncols, figsize=[ncols * 6, nrows * 6], squeeze=False
+        nrows,
+        ncols,
+        figsize=[ncols * 6, nrows * 6],
+        squeeze=False,
+        gridspec_kw={"hspace": 0.3},
     )
     for a, sub_ax in enumerate(axes.ravel()):
         if a < len(metrics):
@@ -366,7 +372,6 @@ def plot_metrics_by_parameters(df, parameters=None, save_directory=None, name_st
 def run_hyperparameter_search(
     objective,
     search_space,
-    dt=None,
     save_directory=None,
     save_name="hyperparameter_search",
     num_CPUs=4,
@@ -382,8 +387,6 @@ def run_hyperparameter_search(
     Args:
     - objective (function): Objective function to optimize.
     - search_space (dict): Dictionary of hyperparameters to search over.
-    - dt (float, optional): Time step for simulations. If None, a default time step is
-        used. Default is None.
     - save_directory (str or Path, optional): Directory to save results in.
         Default is None.
     - save_name (str, optional): Name of the file in which to save hyperparameter
@@ -403,8 +406,6 @@ def run_hyperparameter_search(
 
     import ray
     from ray import tune, air
-
-    dt = dt or params_util.DT
 
     ray.init(num_cpus=num_CPUs, log_to_driver=debug)
 

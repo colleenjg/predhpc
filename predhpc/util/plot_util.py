@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any
 import warnings
 
@@ -11,10 +12,12 @@ import seaborn as sns  # type: ignore[import]
 from ratinabox import utils as rutils  # type: ignore[import]
 from ratinabox import stylize_plots as rstylize_plots  # type: ignore[import]
 
-from predhpc.util import ext_util, gen_util
+from predhpc.util import gen_util
 
 
-def save_figure(fig, name: str = "figure", save: bool | None = None):
+def save_figure(
+    fig, name: str = "figure", direc=None, save: bool | None = None, **kwargs
+):
     """
     save_figure(fig)
 
@@ -23,12 +26,20 @@ def save_figure(fig, name: str = "figure", save: bool | None = None):
     Args:
     - fig (mpl_figure.Figure): Figure to save.
     - name (str, optional): Name of figure. Default is "figure".
+    - direc (str, optional): Directory to save the figure in. Default is None.
     - save (bool, optional): If True, saves the figure. If False, does not save the
         figure. If None, the global variable for ratinabox is checked.
         Default is None.
+
+    Keyword args:
+    - **kwargs: Additional keyword arguments to pass to rutils.save
     """
 
-    rutils.save_figure(fig, name, save=save)  # type: ignore[arg-type]
+    if direc is None:
+        rutils.save_figure(fig, name, save=save, **kwargs)  # type: ignore[arg-type]
+    else:
+        with gen_util.TempFigureDirectory(str(Path(direc))):
+            rutils.save_figure(fig, name, save=save, **kwargs)  # type: ignore[arg-type]
 
 
 def stylize_plots_for_notebook(dpi: int = 150):
@@ -292,7 +303,7 @@ def pad_axis(sub_ax, axis="y", pad_prop=0.1, end="both"):
     - axis (str, optional): Subplot to pad. Defaut is "y".
     - pad_prop (float, optional): Proportion of the axis range to pad by.
         Default is 0.1.
-    - end (str, optional): End to pad. Defaut is "both".
+    - end (str, optional): End to pad ("both", "low" or "high"). Defaut is "both".
     """
 
     if axis not in ["x", "y", "both"]:
@@ -377,11 +388,11 @@ def complete_legend_kwargs(legend, **legend_kwargs):
     return legend_kwargs
 
 
-def remove_prev_handle_labels(sub_ax: plt.Axes, **legend_kwargs):
+def remove_duplicate_handle_labels(sub_ax: plt.Axes, **legend_kwargs):
     """
-    remove_prev_handle_labels(sub_ax)
+    remove_duplicate_handle_labels(sub_ax)
 
-    Remove previous handle labels from the legend.
+    Remove duplicate handle labels from the legend.
 
     Args:
     - sub_ax (plt.Axes): Subplot from which to remove handle labels.
@@ -398,13 +409,13 @@ def remove_prev_handle_labels(sub_ax: plt.Axes, **legend_kwargs):
     if len(labels) == 0:
         return
 
-    num_unique = len(set(labels))
-    handles = handles[:-num_unique]
-    labels = labels[:-num_unique]
+    indices = list()
+    for label in set(labels):
+        indices.append(labels.index(label))
+    indices = np.sort(indices)
 
-    order = np.argsort(labels)
-    handles = [handles[i] for i in order]
-    labels = [labels[i] for i in order]
+    handles = [handles[i] for i in indices]
+    labels = [labels[i] for i in indices]
 
     # gather a few kwargs from the current legend
     legend_kwargs = complete_legend_kwargs(legend, **legend_kwargs)
@@ -531,8 +542,8 @@ def get_plotting_times(
         less than or equal to the start time. Default is True.
 
     Returns:
-    - startid (int): Index of the start time.
-    - endid (int): Index of the end time.
+    - startid (int): Index of the start time point.
+    - endid (int): Index of the end time point (exclusionary, add 1 for indexing).
     """
 
     times = np.asarray(times)
@@ -600,7 +611,17 @@ def init_rate_map_axes(
     return axes
 
 
-def add_colorbars(axes, im, vmin=None, vmax=None, label=None, end_only=False, round=2):
+def add_colorbars(
+    axes,
+    im,
+    vmin=None,
+    vmax=None,
+    label=None,
+    end_only=False,
+    round=2,
+    length=0,
+    outline=False,
+):
     """
     add_colorbars(axes, im)
 
@@ -615,6 +636,8 @@ def add_colorbars(axes, im, vmin=None, vmax=None, label=None, end_only=False, ro
     - end_only (bool, optional): Whether to add colorbars only to the end of each row.
         Default is False.
     - round (int, optional): Number of decimal places to round to. Default is 2.
+    - length (int, optional): Length of the colorbar ticks. Default is 0.
+    - outline (bool, optional): Whether to show the colorbar outline. Default is False.
 
     Returns:
     - cbars (list): Colorbars.
@@ -641,14 +664,16 @@ def add_colorbars(axes, im, vmin=None, vmax=None, label=None, end_only=False, ro
     for divider in dividers:
         cax = divider.append_axes("right", size="5%", pad=0.05)
         cbar = plt.colorbar(im, cax=cax)
-        cbar.ax.tick_params(length=0)
+        if length is not None:
+            cbar.ax.tick_params(length=length)
         if label is not None:
             cbar.set_label(label, labelpad=-10)
 
         vmin_tick = np.around(vmin, round)
         vmax_tick = np.around(vmax, round)
         cbar.set_ticks([vmin_tick, vmax_tick])
-        cbar.outline.set_visible(False)
+        if outline is False:
+            cbar.outline.set_visible(False)
         cbars.append(cbar)
 
     return cbars
@@ -785,6 +810,8 @@ def get_trajectory_dict(
         - "midpoint" (int): Midpoint of trajectory lengths.
         - "midpoint_idx" (int): Index of the midpoint.
     """
+
+    from predhpc.util import ext_util
 
     if trajectory_lengths is None:
         trajectory_lengths = ext_util.get_trajectory_lengths(**kwargs)
@@ -968,6 +995,161 @@ def plot_rate_correlations(firingrates, sub_ax=None, cut_off_thr=None):
     return sub_ax
 
 
+def get_binned_rate_axes(
+    num_neurons=1, num_rows=1, plot_occ=True, plot_colorbars=True, base_size=1.5
+):
+    """
+    get_binned_rate_axes()
+
+    Obtain axes for plotting binned firing rates.
+
+    Args:
+    - num_neurons (int, optional): Number of neurons. Default is 1.
+    - num_rows (int, optional): Number of rows. Default is 1.
+    - plot_occ (bool, optional): Whether to include an occupancy column. Default is True.
+    - plot_colorbars (bool, optional): Whether to include space for colorbars.
+        Default is True.
+    - base_size (float, optional): Base size of the plot. Default is 1.5.
+
+    Returns:
+    - axes (2D np.ndarray): Array of axes.
+    """
+
+    num_cols = num_neurons + int(plot_occ)
+    fig_width = base_size * num_cols
+    gridspec_kw = dict()
+    if plot_colorbars:
+        fig_width += 0.8
+        if plot_occ:
+            fig_width += 0.4
+            gridspec_kw["width_ratios"] = [1] * num_neurons + [0.85]
+
+    _, axes = plt.subplots(
+        num_rows,
+        num_cols,
+        figsize=(fig_width, base_size * num_rows),
+        squeeze=False,
+        gridspec_kw=gridspec_kw,
+    )
+
+    return axes
+
+
+def plot_binned_rates(
+    binned_rate_means,
+    occupancy=None,
+    ax=None,
+    vmin=0,
+    vmax=None,
+    plot_colorbars=True,
+):
+    """
+    plot_binned_rates(binned_rate_means)
+
+    Plot the binned firing rates.
+
+    Args:
+    - binned_rate_means (3D np.ndarray): Binned firing rates (num_bins, num_runs, num_neurons).
+    - occupancy (2D np.ndarray, optional): Occupancy. Default is None.
+    - ax (plt.Axes or np.ndarray, optional): Axes to plot on. Default is None.
+    - vmin (float, optional): Minimum value. Default is None.
+    - vmax (float, optional): Maximum value. Default is None.
+    - plot_colorbars (bool, optional): Whether to plot colorbars. Default is True
+
+    Returns:
+    - ax (plt.Axes or np.ndarray): Subplot or array of subplots with the binned firing
+        rates plotted.
+    """
+
+    num_neurons = binned_rate_means.shape[-1]
+    num_cols = num_neurons + (occupancy is not None)
+    if ax is None:
+        plot_occ = occupancy is not None
+        ax = get_binned_rate_axes(
+            num_neurons=num_neurons, plot_occ=plot_occ, plot_colorbars=plot_colorbars
+        )
+
+    ax1D = np.asarray(ax).reshape(-1)
+    if len(ax1D) != num_cols:
+        err_str = " not" if occupancy is None else ""
+        raise ValueError(
+            f"Number of axes must be {num_cols} for rate colormap plotting for "
+            f"{num_neurons} neurons, if occupancy is{err_str} provided."
+        )
+
+    if vmax is None:
+        vmax = np.nanmax(binned_rate_means)
+    for i in range(num_neurons):
+        im = ax1D[i].imshow(
+            binned_rate_means,
+            aspect="auto",
+            cmap="viridis",
+            interpolation="none",
+            vmin=vmin,
+            vmax=vmax,
+        )
+        if plot_colorbars:
+            cbar = plt.colorbar(im, ax=ax1D[0], pad=0.15)
+            cbar.set_label("Firing rate")
+            cbar.ax.yaxis.set_label_position("left")
+
+        ax1D[i].set_title(f"Neuron #{i}")
+
+    ax1D[0].set_ylabel(f"Runs ({len(binned_rate_means)})")
+
+    if occupancy is not None:
+        im = ax1D[-1].imshow(
+            occupancy,
+            aspect="auto",
+            cmap="viridis",
+            interpolation="none",
+            vmin=0,
+        )
+        ax1D[-1].set_title("Occupancy")
+
+        if plot_colorbars:
+            plt.colorbar(im, ax=ax1D[1])
+
+    for sub_ax in ax1D:
+        sub_ax.set_xlabel("Bins")
+        sub_ax.spines[["left", "bottom", "top", "right"]].set_visible(False)
+        sub_ax.set_xticks([])
+        sub_ax.set_yticks([])
+
+    return ax
+
+
+def plot_CC_across_periods(CC, sub_ax=None):
+    """
+    plot_CC_across_periods(CC)
+
+    Plot the correlation matrix across time periods.
+
+    Args:
+    - CC (2D np.ndarray): Correlation matrix across time periods.
+    - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
+
+    Returns:
+    - sub_ax (plt.Axes): Subplot with the correlation matrix plotted.
+    """
+
+    if sub_ax is None:
+        fig, sub_ax = plt.subplots(figsize=(4, 3))
+    else:
+        fig = sub_ax.figure
+    im = sub_ax.imshow(CC, vmin=0, vmax=1)
+    cbar = fig.colorbar(im)
+    cbar.ax.set_ylabel("Similarity")
+    sub_ax.set_xlabel("Binned time periods")
+    sub_ax.set_ylabel("Binned time periods")
+    sub_ax.set_xticks(list())
+    sub_ax.set_yticks(list())
+
+    sub_ax.set_title("Neural correlations across time")
+
+    return sub_ax
+
+
 def plot_learning_kernel(Is, xs, kernel=None, kernel_xs=None):
     """
     plot_learning_kernel(Is, xs)
@@ -1132,6 +1314,47 @@ def plot_skewed_gaussian_kernel(
     save_figure(fig, "skewed_gaussian_kernel", save=autosave)
 
     return sub_ax, skewed_Gaussian_kernel, max_value_idx
+
+
+def plot_pre_post_exponential(dt=0.03, color=None, sub_ax=None, xlims=None, **kwargs):
+    """
+    plot_pre_post_exponential()
+
+    Plot a pre-post exponential function.
+
+    Args:
+    - dt (float, optional): Time step size in seconds. Default is 0.03.
+    - color (str, optional): Line color. Default is None.
+
+    Keyword args:
+    - **kwargs: Keyword arguments passed to gen_util.get_pre_post_exponential().
+
+    Returns:
+    - sub_ax (plt.Axes): Subplot with the pre-post exponential function plotted.
+    - pre_post_exp (1D np.ndarray): Pre-post exponential function.
+    """
+
+    pre_post_exp = gen_util.get_pre_post_exponential(dt=dt, **kwargs)
+    time = (np.arange(len(pre_post_exp)) - np.argmax(pre_post_exp)) * dt
+
+    _, sub_ax = plt.subplots(figsize=[4, 1.8])
+    sub_ax.plot(time, pre_post_exp, lw=2.5, color=color)
+
+    # get color from plotted line
+    color = sub_ax.get_lines()[-1].get_color()
+    sub_ax.fill_between(
+        time, np.zeros_like(pre_post_exp), pre_post_exp, lw=0, color=color, alpha=0.4
+    )
+    sub_ax.set_xlabel("Time (s)")
+
+    sub_ax.set_yticks([])
+    sub_ax.axhline(1 / np.e, zorder=-2, ls="dashed", color="k")
+    if xlims is not None:
+        sub_ax.set_xlim(xlims)
+    sub_ax.set_ylim(0, None)
+    sub_ax.spines[["top", "right", "left"]].set_visible(False)
+
+    return sub_ax, pre_post_exp
 
 
 def plot_lr_factor_assessment(assessment_dict):
