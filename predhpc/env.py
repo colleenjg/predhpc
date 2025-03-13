@@ -10,7 +10,7 @@ import pandas as pd  # type: ignore[import]
 
 from ratinabox import Environment as riabEnv  # type: ignore[import]
 
-from predhpc.util import gen_util, plot_util, ext_util
+from predhpc.util import trig_util, plot_util, ext_util
 
 
 class EnvironmentWarning(UserWarning):
@@ -973,7 +973,7 @@ class OpenField(Environment):
 
         side_lengths = np.linalg.norm(distances[:2], ord=2, axis=1)
         angle = np.deg2rad(
-            gen_util.get_angle_between_vectors(distances[0], distances[1])
+            trig_util.get_angle_between_vectors(distances[0], distances[1])
         )
         short_idx = np.argmin(side_lengths)
         height = np.sin(angle) * side_lengths[short_idx]
@@ -1028,7 +1028,7 @@ class OpenField(Environment):
         walls_ends_too_close = False
         for wall in self.walls:
             # get angle between two vectors
-            angle = gen_util.get_angle_between_vectors(
+            angle = trig_util.get_angle_between_vectors(
                 np.diff(new_wall_coords, axis=0)[0], np.diff(wall, axis=0)[0]
             )
 
@@ -1185,7 +1185,9 @@ class OpenField(Environment):
 
         # returns points (1) x vectors x coords
         closest_dist = float(
-            np.min(gen_util.shortest_distances_from_points_to_lines(coords, self.walls))
+            np.min(
+                trig_util.shortest_distances_from_points_to_lines(coords, self.walls)
+            )
         )
 
         return closest_dist
@@ -1292,7 +1294,7 @@ class OpenField(Environment):
             # check that end_coords are far enough from objects, if there are any
             if end_coords is not None and len(self.objects["objects"]) != 0:
                 closest_dist = np.min(
-                    gen_util.shortest_distances_from_points_to_lines(
+                    trig_util.shortest_distances_from_points_to_lines(
                         self.objects["objects"], [start_coords, end_coords]
                     )
                 )

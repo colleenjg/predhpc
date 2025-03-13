@@ -12,7 +12,9 @@ import seaborn as sns  # type: ignore[import]
 from ratinabox import utils as rutils  # type: ignore[import]
 from ratinabox import stylize_plots as rstylize_plots  # type: ignore[import]
 
-from predhpc.util import gen_util
+from predhpc.util import gen_util, signal_util
+
+plt.rcParams["svg.fonttype"] = "none"
 
 
 def save_figure(
@@ -1204,7 +1206,7 @@ def plot_learning_kernel(Is, xs, kernel=None, kernel_xs=None):
     sub_ax.axhline(0, ls="dashed", color="k", alpha=0.6)
     pad = 0.05 * (xs[-1] - xs[0])
     sub_ax.set_xlim(xs[0] - pad, xs[-1] + pad)
-    sub_ax.set_ylim(-0.5, Is.max() + 0.5)
+    sub_ax.set_ylim(min(Is.min(), 0) - 0.5, Is.max() + 0.5)
     sub_ax.set_title("Learning kernel")
     sub_ax.set_ylabel("Kernel-inferred input")
     sub_ax.set_xlabel("Position")
@@ -1253,7 +1255,7 @@ def plot_skewed_gaussian_kernel(
     if sub_ax is None:
         _, sub_ax = plt.subplots()
 
-    skewed_Gaussian_kernel, max_value_idx = gen_util.get_skewed_Gaussian_kernel(
+    skewed_Gaussian_kernel, max_value_idx = signal_util.get_skewed_Gaussian_kernel(
         wid_half_max, prop, atol, dt, num_estimate_pts=num_estimate_pts
     )
     pts = (
@@ -1327,15 +1329,15 @@ def plot_pre_post_exponential(dt=0.03, color=None, sub_ax=None, xlims=None, **kw
     - color (str, optional): Line color. Default is None.
 
     Keyword args:
-    - **kwargs: Keyword arguments passed to gen_util.get_pre_post_exponential().
+    - **kwargs: Keyword arguments passed to signal_util.get_pre_post_exponential().
 
     Returns:
     - sub_ax (plt.Axes): Subplot with the pre-post exponential function plotted.
     - pre_post_exp (1D np.ndarray): Pre-post exponential function.
     """
 
-    pre_post_exp = gen_util.get_pre_post_exponential(dt=dt, **kwargs)
-    time = (np.arange(len(pre_post_exp)) - np.argmax(pre_post_exp)) * dt
+    pre_post_exp, align_pt = signal_util.get_pre_post_exponential(dt=dt, **kwargs)
+    time = (np.arange(len(pre_post_exp)) - align_pt) * dt
 
     _, sub_ax = plt.subplots(figsize=[4, 1.8])
     sub_ax.plot(time, pre_post_exp, lw=2.5, color=color)
@@ -1357,14 +1359,142 @@ def plot_pre_post_exponential(dt=0.03, color=None, sub_ax=None, xlims=None, **kw
     return sub_ax, pre_post_exp
 
 
-def plot_lr_factor_assessment(assessment_dict):
+def plot_summed_exp_kernel(
+    pre_filter_tau_pos=2,
+    pre_filter_tau_neg=4,
+    pre_neg_weight=0.5,
+    dt=0.03,
+    post_filter_tau_pos=None,
+    post_filter_tau_neg=None,
+    post_neg_weight=None,
+    sigma_in_steps=None,
+    plot_unsmoothed=False,
+    target_root_dict=None,
+    color="k",
+    xlims=[-10, 10],
+    sub_ax=None,
+    **kwargs,
+):
     """
-    plot_lr_actor_assessment(assessment_dict)
+    plot_summed_exp_kernel()
 
-    Plot the assessment of the learning rate actor.
+    Plot a summed exponential kernel.
 
     Args:
-    - assessment_dict (dict): Learning factor assessment dictionary with initial and
+    - pre_filter_tau_pos (float, optional): Positive filter time constant. Default is 2.
+    - pre_filter_tau_neg (float, optional): Negative filter time constant. Default is 4.
+    - pre_neg_weight (float, optional): Weight to attribute to pre, negative filter
+        component. Default is 0.5.
+    - dt (float, optional): Time step. Default is 0.03.
+    - post_filter_tau_pos (float, str, optional): Post-filter time constant for positive
+        exponential. Default is None.
+    - post_filter_tau_neg (float, str, optional): Post-filter time constant for negative
+        exponential. Default is None.
+    - post_neg_weight (float, optional): Weight to attribute to post, negative filter
+        component. If None, pre_neg_weight is used. Default is 0.5.
+    - sigma_in_steps (float, optional): Standard deviation of the Gaussian noise in
+        steps. If None, no smoothing is applied. Default is None.
+    - plot_unsmoothed (bool, optional): Whether to plot the unsmoothed kernel as well,
+        if applicable. Default is True.
+    - target_root_dict (dict, optional): Dictionary with target root positions for
+        plotting. Default is None.
+    - color (str, optional): Line color. Default is "k".
+    - xlims (list, optional): X-axis limits. Default is [-10, 10].
+    - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
+
+    Keyword args:
+    - **kwargs: Additional keyword arguments passed to signal_util.get_summed_exp().
+
+    Returns:
+    - sub_ax (plt.Axes): Subplot with the summed exponential kernel plotted.
+    - summed_exp_kernel (1D np.ndarray): Summed exponential kernel.
+    - align_pt (int): Alignment point of the summed exponential kernel.
+    """
+
+    use_sigmas = [sigma_in_steps]
+
+    if sigma_in_steps is not None and plot_unsmoothed:
+        use_sigmas = [None, sigma_in_steps]
+
+    for use_sigma in use_sigmas:
+        summed_exp_kernel, align_pt = signal_util.get_summed_exp(
+            pre_filter_tau_pos=pre_filter_tau_pos,
+            pre_filter_tau_neg=pre_filter_tau_neg,
+            pre_neg_weight=pre_neg_weight,
+            dt=dt,
+            post_filter_tau_pos=post_filter_tau_pos,
+            post_filter_tau_neg=post_filter_tau_neg,
+            post_neg_weight=post_neg_weight,
+            sigma_in_steps=use_sigma,
+            **kwargs,
+        )
+        if use_sigma is None:
+            unsmoothed = summed_exp_kernel
+
+    time = dt * (np.arange(len(summed_exp_kernel)) - align_pt)
+
+    if sub_ax is None:
+        _, sub_ax = plt.subplots(figsize=(7, 3))
+
+    data_to_plot = [summed_exp_kernel]
+    linestyles = [None]
+    if plot_unsmoothed and sigma_in_steps is not None:
+        data_to_plot.append(unsmoothed)
+        linestyles.append("dashed")
+
+    for ls, data in zip(linestyles[::-1], data_to_plot[::-1]):
+        if ls is None:
+            alpha = 1.0
+            min_vals = data[:align_pt].min(), data[align_pt:].min()
+            near_zero = max([data[0], data[-1]])
+            AUC_perc_pos = np.sum(data[data > 0]) / np.absolute(data).sum() * 100
+            label = (
+                f"min vals: {min_vals[0]:.4f}, {min_vals[1]:.4f}\n"
+                f"near zero: {near_zero:.4f}\nAUC pos: {AUC_perc_pos:.2f}%"
+            )
+        else:  # unsmoothed
+            alpha, label = 0.6, None
+        sub_ax.plot(time, data, color=color, label=label, ls=ls, alpha=alpha)
+    sub_ax.legend()
+
+    if target_root_dict is not None:
+        leads = ["pre", "post"]
+        for lead in leads:
+            for sub in ["center", "outer"]:
+                key = f"{lead}_{sub}"
+                if key not in target_root_dict.keys():
+                    raise KeyError(f"Root dictionary missing '{key}'.")
+
+        pos_edges = [target_root_dict[key] for key in ["pre_center", "post_center"]]
+        sub_ax.axvspan(*pos_edges, color="red", alpha=0.2, lw=0)
+
+        for lead in ["pre", "post"]:
+            neg_edges = [
+                target_root_dict[f"{lead}_outer"],
+                target_root_dict[f"{lead}_center"],
+            ]
+            sub_ax.axvspan(*neg_edges, color="blue", alpha=0.2, lw=0)
+
+    sub_ax.set_xlim(*xlims)
+    sub_ax.axhline(0, color="k", ls="dashed")
+    sub_ax.axvline(0, color="k", ls="dashed")
+    sub_ax.set_xlabel("Time (s)")
+    sub_ax.set_ylabel("Kernel value")
+
+    sub_ax.spines[["top", "right"]].set_visible(False)
+    pad_axis(sub_ax, axis="y", pad_prop=0.05)
+
+    return sub_ax, summed_exp_kernel, align_pt
+
+
+def plot_learning_rate_assessment(assessment_dict):
+    """
+    plot_learning_rate_assessment(assessment_dict)
+
+    Plot the assessment of the learning rate.
+
+    Args:
+    - assessment_dict (dict): Learning rate assessment dictionary with initial and
         updated weights (under "ws"), computed output firing rates (under "Os"), and
         biases if applicable (under "bs").
 

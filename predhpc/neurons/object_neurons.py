@@ -25,7 +25,7 @@ class ObjectInstanceCells(riab_neurons.PlaceCells):
     default_params = {
         "name": "ObjectInstanceCells",
         "description": "gaussian",  # input place cells
-        "widths": 0.20,  # input place cells
+        "widths": 0.10,  # input place cells
         "wall_geometry": "line_of_sight",  # input place cells
         "min_fr": 0,
         "max_fr": 1,
@@ -42,7 +42,7 @@ class ObjectInstanceCells(riab_neurons.PlaceCells):
     default_params = {
         "name": "ObjectInstanceCells",
         "description": "gaussian",  # input place cells
-        "widths": 0.20,  # input place cells
+        "widths": 0.10,  # input place cells
         "wall_geometry": "line_of_sight",  # input place cells
         "min_fr": 0,
         "max_fr": 1,
@@ -188,7 +188,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
     default_params = {
         "name": "ObjectCells",
         "description": "gaussian",  # input place cells
-        "widths": 0.20,  # input place cells
+        "widths": 0.10,  # input place cells
         "wall_geometry": "line_of_sight",  # input place cells
         "min_fr": 0,
         "max_fr": 1,
@@ -209,7 +209,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
     default_params = {
         "name": "ObjectCells",
         "description": "gaussian",  # input place cells
-        "widths": 0.20,  # input place cells
+        "widths": 0.10,  # input place cells
         "wall_geometry": "line_of_sight",  # input place cells
         "min_fr": 0,
         "max_fr": 1,

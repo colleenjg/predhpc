@@ -2,12 +2,9 @@ import copy
 from typing import Any
 import warnings
 
-from matplotlib import pyplot as plt
 import numpy as np
-from scipy.ndimage import gaussian_filter
-from scipy.signal import fftconvolve
 
-from predhpc.util import ext_util, gen_util, params_util, plot_util
+from predhpc.util import ext_util, signal_util, params_util, plot_util
 
 
 def calculate_layer_output(
@@ -78,7 +75,7 @@ def calculate_mse_loss(
 
 
 def get_weight_norm(
-    ws: list[np.ndarray[tuple[int, int], np.dtype[np.float64]]]
+    ws: list[np.ndarray[tuple[int, int], np.dtype[np.float64]]],
 ) -> float:
     """
     get_weight_norm(ws)
@@ -271,7 +268,7 @@ def perform_divisively_normalized_Hebbian_update_(
         decrease weights. Default is True.
 
     Returns:
-    - w_div (float): Divisive normalization factor for weights.
+    - w_divs (np.ndarray): Divisive normalization factor for each set of weights.
     - b_div (float): Divisive normalization factor for biases. None, if b is None.
     """
 
@@ -284,26 +281,26 @@ def perform_divisively_normalized_Hebbian_update_(
     perform_Hebbian_update_(Is, ws, O, lr=lr, b=b)
 
     # in-place update
-    w_div = calculate_Hebbian_norm(ws, p=p) * alpha
-    use_w_div = copy.deepcopy(w_div)
+    w_divs = calculate_Hebbian_norm(ws, p=p) * alpha
+    use_w_divs = copy.deepcopy(w_divs)
     if only_if_above:
-        use_w_div[use_w_div <= 1] = 1
+        use_w_divs[use_w_divs <= 1] = 1
 
     # adjustment
     for i in range(len(ws)):
-        ws[i] /= use_w_div.reshape(-1, 1)
+        ws[i] /= use_w_divs.reshape(-1, 1)
 
     # update biases, if provided
     if b is None:
         b_div = None
     else:
-        b_div = calculate_Hebbian_norm([b], p=p) * alpha
-        use_b_div = copy.deepcopy(b_div)
-        if only_if_above:
-            use_b_div[use_b_div <= 1] = 1
-        b /= b_div  # adjust
+        b_div = calculate_Hebbian_norm([b], p=p)[0] * alpha
+        use_b_div = b_div
+        if only_if_above and b_div <= 1:
+            use_b_div = 1
+        b /= use_b_div  # adjust
 
-    return w_div, b_div
+    return w_divs, b_div
 
 
 def calculate_Oja_subtrahend(
@@ -369,6 +366,10 @@ def perform_Oja_update_(
     - normalize_on_predictions (bool, optional): If True, normalizes the weights
         based on the predictions, rather than the actual output (target) provided.
         Default is False.
+
+    Returns:
+    - w_subtrahends (list): Subtrahends for Oja's rule.
+    - b_subtrahends (1D np.array): Subtrahends for biases. None, if b is None.
     """
 
     if alpha < 0 or lr < 0:
@@ -382,9 +383,9 @@ def perform_Oja_update_(
     w_subtrahends = calculate_Oja_subtrahend(ws, O_for_normalization)
     w_subtrahends = [w_subtrahend * alpha * lr for w_subtrahend in w_subtrahends]
 
-    b_subtrahend = None
+    b_subtrahends = None
     if b is not None:
-        b_subtrahend = O**2 * b * alpha * lr  # Oja-like subtrahend for biases
+        b_subtrahends = O**2 * b * alpha * lr  # Oja-like subtrahend for biases
 
     # in-place update
     perform_Hebbian_update_(Is, ws, O, lr=lr, b=b)
@@ -393,9 +394,9 @@ def perform_Oja_update_(
     for i in range(len(ws)):
         ws[i] -= w_subtrahends[i]
     if b is not None:
-        b -= b_subtrahend  # type: ignore[operator]
+        b -= b_subtrahends  # type: ignore[operator]
 
-    return w_subtrahends, b_subtrahend
+    return w_subtrahends, b_subtrahends
 
 
 def perform_update_(
@@ -444,7 +445,7 @@ def perform_update_(
     Returns:
     if apply_Ojas_rule:
     - w_subs (list): Subtrahends for Oja's rule.
-    - b_subs (float): Subtrahend for biases. None, if b is None.
+    - b_subs (np.ndarray): Subtrahends for biases. None, if b is None.
 
     if normalize_weights_divisively:
     - w_div (float): Divisive normalization factor for weights.
@@ -470,47 +471,44 @@ def perform_update_(
         w_div, b_div = perform_divisively_normalized_Hebbian_update_(
             Is, ws, O, lr=lr, b=b, p=p, alpha=alpha, only_if_above=only_if_above
         )
+
         return w_div, b_div
 
     else:
         perform_Hebbian_update_(Is, ws, O, lr=lr, b=b)
 
 
-def infer_learning_kernel(
-    filter_tau=4,
-    trend_tau=None,
-    post_filter_tau="half",
-    post_trend_tau=None,
+def infer_spatial_learning_kernel(
     dt=0.03,
     speed_mean=0.08,
     PC_input_density_1D=11,
-    PC_width=0.20,
+    PC_width=0.10,
     PC_max_fr=1,
     env_scale=1,
     env_1D=False,
     plot=False,
+    summed_exp_kernel=True,
+    kernel_kwargs=dict(),
 ):
     """
-    infer_learning_kernel()
+    infer_spatial_learning_kernel()
 
-    Infer the learning kernel applied to a set of uniformly arranged place cells.
+    Infer the spatial profile of a learning kernel applied to a set of uniformly
+    arranged place cells, traversed by an agent at a constant speed.
 
     Args:
-    - filter_tau (float): Time constant for the rising exponential filter.
-    - trend_tau (float, optional): Time constant for the rising exponential trend.
-        Default is None.
-    - post_filter_tau (str, optional): Time constant for the falling exponential filter.
-        Default is "half".
-    - post_trend_tau (float, optional): Time constant for the falling exponential trend.
-        Default is None.
     - dt (float): Time step. Default is 0.03.
     - speed_mean (float): Mean speed of the agent. Default is 0.08.
     - PC_input_density_1D (int): Density of place cells to use (PCs/m). Default is 11.
-    - PC_width (float): Width of place cell fields. Default is 0.20.
+    - PC_width (float): Width of place cell fields. Default is 0.10.
     - PC_max_fr (float, optional): Maximum firing rate of place cells. Default is 1.
     - env_scale (int): Scale of the environment. Default is 1.
     - env_1D (bool): If True, a 1D environment is modeled. Default is False.
     - plot (bool): If True, plots the inferred learning kernel. Default is False.
+    - summed_exp_kernel (bool): If True, applies a summed exponential kernel to the
+        input. Default is True.
+    - kernel_kwargs (dict): Additional arguments for gen_util.get_summed_exp() or
+        signal_util.get_pre_post_exponential().
 
     Returns:
     - Is (2D np.ndarray): Interpolated 2D learning kernel. The second dimension is of
@@ -520,48 +518,36 @@ def infer_learning_kernel(
     """
 
     # filtered input PC activity if crossing place fields in a perfect straight line
-    pre_post_exp = gen_util.get_pre_post_exponential(
-        filter_tau=filter_tau,
-        trend_tau=trend_tau,
-        dt=dt,
-        post_filter_tau=post_filter_tau,
-        post_trend_tau=post_trend_tau,
-    )
-    pre_post_exp = pre_post_exp / pre_post_exp.max() * PC_max_fr
+    if summed_exp_kernel:
+        kernel, align_pt = signal_util.get_summed_exp(dt=dt, **kernel_kwargs)
+    else:
+        kernel, align_pt = signal_util.get_pre_post_exponential(dt=dt, **kernel_kwargs)
+
+    kernel = kernel / kernel.max() * PC_max_fr
 
     # apply Gaussian filter to smooth the input
-    distance_btw = dt * speed_mean
-    width_per = PC_width / (dt * speed_mean)
-    num_pts = len(pre_post_exp)
-    pre_post_exp_2D = pre_post_exp.reshape(-1, 1)
-
-    if not env_1D:
-        post = (num_pts - 1) // 2
-        pre = num_pts - post - 1
-        pre_post_exp_2D = np.pad(
-            pre_post_exp_2D, pad_width=((0, 0), (pre, post)), mode="constant"
-        )
-
-    if width_per > 4:
-        gaussian_kernel = gen_util.get_2D_Gaussian_kernel(
-            sigma=width_per, max_aperture=num_pts * 2
-        )
-        smoothed_kernel = fftconvolve(pre_post_exp_2D, gaussian_kernel, mode="same")
-    else:
-        smoothed_kernel = gaussian_filter(
-            pre_post_exp_2D, width_per, mode="constant", cval=0
-        )
-
-    # get x-coordinates
-    xs = np.arange(len(pre_post_exp)) * distance_btw
-    smoothed_kernel = smoothed_kernel / smoothed_kernel.max() * PC_max_fr
-    peak_pt = np.argmax(smoothed_kernel.max(axis=1))
-    xs -= xs[peak_pt]
+    sigma_in_steps = ext_util.get_sigma_in_steps(
+        sigma=float(PC_width), dt=dt, mean_speed=speed_mean
+    )
 
     # interpolate at PC field locations (evenly spaced)
     num_pts = int(np.around(2 * env_scale * PC_input_density_1D))
     coords_base = np.linspace(0, 2 * env_scale, num_pts)
     coords_base -= coords_base[(len(coords_base) - 1) // 2]
+
+    smoothed_kernel = signal_util.smooth_kernel(
+        kernel,
+        sigma_in_steps,
+        smooth_2D=not (env_1D),
+    )
+
+    smoothed_kernel = smoothed_kernel / smoothed_kernel.max() * PC_max_fr
+
+    # get x-coordinates
+    distance_btw = dt * speed_mean
+    xs = np.arange(len(kernel)) * distance_btw
+
+    xs -= xs[align_pt]
 
     Is = np.asarray(
         [
@@ -571,15 +557,13 @@ def infer_learning_kernel(
     ).T
 
     # center kernel to maximize AUC
-    max_i, max_val = 0, -np.inf
     num_pts_keep = len(coords_base) // 2
-    for i in range(num_pts_keep):
-        val = Is[i : i + num_pts_keep, (Is.shape[1] - 1) // 2].sum()
-        if val > max_val:
-            max_i = i
-            max_val = val
-    x_coords = coords_base[max_i : max_i + num_pts_keep]
-    Is = Is[max_i : max_i + num_pts_keep]
+    best = np.argmax(
+        np.convolve(np.absolute(Is).sum(axis=-1), np.ones(num_pts_keep), mode="valid")
+    )
+
+    Is = Is[best : best + num_pts_keep]
+    x_coords = coords_base[best : best + num_pts_keep]
 
     if not env_1D:
         # interpolate along y axis
@@ -587,6 +571,7 @@ def infer_learning_kernel(
         ys -= ys[(len(ys) - 1) // 2]
         y_coords = coords_base[(num_pts_keep - 1) // 2 :][:num_pts_keep]
         Is = np.asarray([np.interp(y_coords, ys, Is[i]) for i in range(len(x_coords))])
+
     if plot:
         sub_ax = plot_util.plot_learning_kernel(Is, x_coords, smoothed_kernel, xs)
         return Is, sub_ax
@@ -595,16 +580,13 @@ def infer_learning_kernel(
         return Is
 
 
-def assess_lr_factors(
+def assess_learning_rates_spatially(
+    learning_kernel=None,
     lr=1e-4,
-    filter_tau=4,
-    trend_tau=None,
-    post_filter_tau="half",
-    post_trend_tau=None,
     dt=0.03,
     speed_mean=0.08,
     PC_input_density_1D=11,
-    PC_width=0.20,
+    PC_width=0.10,
     PC_max_fr=10,
     env_scale=1,
     w_init_loc=0,
@@ -621,28 +603,25 @@ def assess_lr_factors(
     log_reg=False,
     plot=False,
     plot_input_kernel=False,
+    summed_exp_kernel=True,
+    kernel_kwargs=dict(),
 ):
     """
-    assess_lr_factors()
+    assess_learning_rates_spatially()
 
-    Assess the learning rate factors for a simple learning rule. Infers a learning
-    kernel applied to uniformly distributed Gaussian place cells, and simulates a
-    series of weight updates using the inferred kernel.
+    Assess learning rates spatially for a simple learning rule. Infers a spatial
+    learning kernel applied to uniformly distributed Gaussian place cells, and
+    simulates a series of weight updates using the provided or inferred kernel.
 
     Args:
+    - learning_kernel (1D np.ndarray): Learning kernel. If None, a kernel is inferred.
+        Default is None.
     - lr (float): Learning rate. Default is 1e-4.
-    - filter_tau (float): Time constant for the rising exponential filter. Default is 4.
-    - trend_tau (float, optional): Time constant for the rising exponential trend.
-        Default is None.
-    - post_filter_tau (str, optional): Time constant for the falling exponential filter.
-        Default is "half".
-    - post_trend_tau (float, optional): Time constant for the falling exponential trend.
-        Default is None.
     - dt (float): Time step. Default is 0.03.
     - speed_mean (float): Mean speed of the agent. Default is 0.08.
     - PC_input_density_1D (int): Density of place cells to use (PCs/m or PCs/m2).
         Default is 11.
-    - PC_width (float): Width of place cell fields. Default is 0.20.
+    - PC_width (float): Width of place cell fields. Default is 0.10.
     - PC_max_fr (float): Maximum firing rate of place cells. Default is 10.
     - env_scale (int): Scale of the environment. Default is 1.
     - w_init_loc (float): Initial weight mean. Default is 0.
@@ -663,28 +642,38 @@ def assess_lr_factors(
         Default is False.
     - plot (bool): If True, plots the learning rate assessment results. Default is False.
     - plot_input_kernel (bool): If True, plots the input kernel. Default is False.
+    - summed_exp_kernel (bool): If True, applies a summed exponential kernel to the
+        input. Default is True.
+    - kernel_kwargs (dict): Additional arguments for signal_util.get_summed_exp() or
+        signal_util.get_pre_post_exponential().
 
     Returns:
-    - assessment_dict (dict): Learning factor assessment dictionary with initial and
+    - assessment_dict (dict): Learning rate assessment dictionary with initial and
         updated weights (under "ws"), computed output firing rates (under "Os"), and
         biases if applicable (under "bs").
     """
 
-    outputs = infer_learning_kernel(
-        filter_tau=filter_tau,
-        trend_tau=trend_tau,
-        post_filter_tau=post_filter_tau,
-        post_trend_tau=post_trend_tau,
-        dt=dt,
-        speed_mean=speed_mean,
-        PC_input_density_1D=PC_input_density_1D,
-        PC_width=PC_width,
-        PC_max_fr=PC_max_fr,
-        env_scale=env_scale,
-        env_1D=env_1D,
-        plot=plot_input_kernel,
-    )
-    Is = outputs[0] if plot_input_kernel else outputs
+    if learning_kernel is None:
+        outputs = infer_spatial_learning_kernel(
+            dt=dt,
+            speed_mean=speed_mean,
+            PC_input_density_1D=PC_input_density_1D,
+            PC_width=PC_width,
+            PC_max_fr=PC_max_fr,
+            env_scale=env_scale,
+            env_1D=env_1D,
+            plot=plot_input_kernel,
+            summed_exp_kernel=summed_exp_kernel,
+            kernel_kwargs=kernel_kwargs,
+        )
+        Is = outputs[0] if plot_input_kernel else outputs
+
+    else:
+        Is = learning_kernel.copy()
+        if plot_input_kernel:
+            raise NotImplementedError(
+                "Plotting of the input kernel is not implemented if kernel is provided."
+            )
 
     # ws
     ws = [np.full((1, Is.size), w_init_loc).astype(float)]
@@ -704,6 +693,7 @@ def assess_lr_factors(
     V = np.dot(ws, Is.ravel())
     O = activation_function(V, deriv=False)
     assessment_dict["Os"] = [copy.deepcopy(O)[0][0]]
+
     if output_fr is not None:
         O = np.asarray([output_fr])
 
@@ -724,6 +714,7 @@ def assess_lr_factors(
             p=p,
             alpha=regularization_alpha,
         )
+
         if log_reg and (apply_Ojas_rule or normalize_weights_divisively):
             reg_str = f"Update {i + 1} regul.: {outputs[0][0]:.4f} (w)"
             if incl_bias:
@@ -739,12 +730,12 @@ def assess_lr_factors(
         assessment_dict["Os"].append(copy.deepcopy(O[0][0]))
 
     if plot:
-        plot_util.plot_lr_factor_assessment(assessment_dict)
+        plot_util.plot_learning_rate_assessment(assessment_dict)
 
     return assessment_dict
 
 
-def assess_Pyrs_lr_factors(
+def assess_Pyrs_learning_rates_spatially(
     Pyrs,
     PCs_name="PCs",
     BTSP=True,
@@ -760,9 +751,9 @@ def assess_Pyrs_lr_factors(
     plot_input_kernel=False,
 ):
     """
-    assess_Pyrs_lr_factors()
+    assess_Pyrs_learning_rates_spatially()
 
-    Assess learning rate factors for a Pyramidal neuron layer.
+    Assess learning rates spatially for a Pyramidal neuron layer.
 
     Args:
     - Pyrs (Pyrs): Pyramidal neuron layer.
@@ -789,27 +780,22 @@ def assess_Pyrs_lr_factors(
     - ValueError: If Pyrs is not a HebbianLayer.
 
     Returns:
-    - assessment_dict (dict): Learning factor assessment dictionary with initial and
+    - assessment_dict (dict): Learning rate assessment dictionary with initial and
         updated weights (under "ws"), computed output firing rates (under "Os"), and
         biases if applicable (under "bs").
     """
 
     if BTSP:
-        if not hasattr(Pyrs, "BTSP_lr_fact"):
+        if not hasattr(Pyrs, "BTSP_lr"):
             raise ValueError("BTSP cannot be set to True if Pyrs is not a BTSPLayer.")
-        lr = Pyrs.lr * Pyrs.BTSP_lr_fact
-        filter_tau = Pyrs.BTSP_filter_tau
-        trend_tau = Pyrs.BTSP_trend_tau
-        post_filter_tau = Pyrs.post_BTSP_filter_tau
-        post_trend_tau = Pyrs.post_BTSP_trend_tau
+        lr = Pyrs.BTSP_lr / Pyrs.BTSP_integral
+        kernel_kwargs = Pyrs.get_BTSP_kernel_kwargs()
+
     else:
         if not hasattr(Pyrs, "lr"):
             raise ValueError("Pyrs must be a HebbianLayer.")
         lr = Pyrs.lr
-        filter_tau = Pyrs.learning_filter_tau
-        trend_tau = Pyrs.learning_trend_tau
-        post_filter_tau = None
-        post_trend_tau = None
+        kernel_kwargs = Pyrs.get_learning_kernel_kwargs()
 
     if PCs_name not in Pyrs.inputs.keys():
         raise RuntimeError(f"{PCs_name} not found in inputs to Pyrs.")
@@ -855,12 +841,8 @@ def assess_Pyrs_lr_factors(
     if regularization_alpha is None:
         regularization_alpha = Pyrs.regularization_alpha
 
-    outputs = assess_lr_factors(
+    outputs = assess_learning_rates_spatially(
         lr=lr,
-        filter_tau=filter_tau,
-        trend_tau=trend_tau,
-        post_filter_tau=post_filter_tau,
-        post_trend_tau=post_trend_tau,
         dt=Pyrs.Agent.dt,
         speed_mean=Pyrs.Agent.speed_mean,
         PC_input_density_1D=PC_input_density_1D,
@@ -881,30 +863,10 @@ def assess_Pyrs_lr_factors(
         log_reg=log_reg,
         plot=plot,
         plot_input_kernel=plot_input_kernel,
+        summed_exp_kernel=BTSP,
+        kernel_kwargs=kernel_kwargs,
     )
 
-    if plot or plot_input_kernel:
-        assessment_dict = outputs[0]
-    else:
-        assessment_dict = outputs
+    assessment_dict = outputs
 
     return assessment_dict
-
-
-def test_lr_factors(
-    Pyrs,
-    PCs_name="PCs",
-    BTSP=True,
-    output_fr=None,
-    num_updates=1,
-    flip=False,
-    plot=False,
-    plot_input_kernel=False,
-):
-    """
-    test_lr_factors()
-
-    Test learning rate factors for a Pyramidal neuron layer.
-    """
-
-    Pyrs = copy.deepcopy(Pyrs)

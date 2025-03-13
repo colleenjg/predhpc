@@ -12,6 +12,20 @@ from ratinabox import utils as rutils  # type: ignore[import]
 from predhpc.util import gen_util  # type: ignore[import]
 
 
+class TemporarilyChangeAttribute:
+    def __init__(self, obj, attr, temp_value):
+        self.obj = obj
+        self.attr = attr
+        self.temp_value = temp_value
+
+    def __enter__(self):
+        self.prev_value = getattr(self.obj, self.attr)
+        setattr(self.obj, self.attr, self.temp_value)
+
+    def __exit__(self, *args):
+        setattr(self.obj, self.attr, self.prev_value)
+
+
 def extract_objects_from_Pyrs(Pyrs):
     """
     extract_objects_from_Pyrs(Pyrs)
@@ -187,6 +201,26 @@ def repeat_to_fill(
     trajectory_lengths = np.repeat(trajectory_lengths, num_repeats)
 
     return trajectory_lengths
+
+
+def get_sigma_in_steps(sigma=0.1, dt=0.03, mean_speed=0.25):
+    """
+    get_sigma_in_steps()
+
+    Obtain Gaussian sigma value in steps from value in meters.
+
+    Args:
+    - sigma (float, optional): Sigma value in meters. Default is 0.1.
+    - dt (float, optional): Time step in seconds. Default is 0.03.
+    - mean_speed (float, optional): Mean speed in meters per second. Default is 0.25.
+
+    Returns:
+    - sigma_in_steps (float): Sigma value in steps.
+    """
+
+    sigma_in_steps = sigma / (mean_speed * dt)
+
+    return sigma_in_steps
 
 
 def get_oscillation_df(firingrates, window=5, amp_thr=0.1):

@@ -8,7 +8,7 @@ import numpy as np
 
 from predhpc import plot_fcts
 from predhpc.neurons import learning_neurons, riab_neurons
-from predhpc.util import gen_util, plot_util, params_util
+from predhpc.util import gen_util, trig_util, plot_util, params_util
 
 if TYPE_CHECKING:
     import ratinabox  # type: ignore[import]
@@ -490,7 +490,7 @@ class TwoCompLayer(object):
         )
         pos = np.asarray(self.Agent.history["pos"])
 
-        vectors = gen_util.get_vectors_to_target(
+        vectors = trig_util.get_vectors_to_target(
             pos, target=place_cell_centre, polar=polar, radians=radians
         )
 
@@ -527,7 +527,7 @@ class TwoCompLayer(object):
         self,
         neuron_num=0,
         target_src_name="Obj",
-        min_dist=0.2,
+        min_dist=0.1,
         min_steps_btw=20,
         log=False,
     ):
@@ -542,7 +542,7 @@ class TwoCompLayer(object):
             (must be a place cell-derived layer). Default is "Obj".
         - neuron_num (int, optional): Neuron number. Default is 0.
         - min_dist (float, optional): Minimum distance to be considered closest.
-            Default is 0.2.
+            Default is 0.1.
         - min_steps_btw (int, optional): Minimum number of steps between closest steps.
             Default is 20.
         - log (bool, optional): Whether to print the number of closest steps identified.
@@ -572,7 +572,7 @@ class TwoCompLayer(object):
         target_src_name="Obj",
         neuron_num=0,
         max_step_dist=40,
-        min_dist=0.2,
+        min_dist=0.1,
         t_start=None,
         t_end=None,
     ):
@@ -588,7 +588,7 @@ class TwoCompLayer(object):
         - max_step_dist (int, optional): Maximum distance between steps to be considered
             a match. Default is 40.
         - min_dist (float, optional): Minimum distance to be considered closest.
-            Default is 0.2.
+            Default is 0.1.
         - t_start (int, optional): Start time for matching. Default is None.
         - t_end (int, optional): End time for matching. Default is None.
 
@@ -1164,7 +1164,7 @@ class TwoCompLayer(object):
         mark_soma_BTSP=True,
         mark_teleport=True,
         mark_closest=True,
-        min_dist=0.2,
+        min_dist=0.1,
         min_steps_btw=20,
         log_num_closest=False,
     ):
@@ -1186,7 +1186,7 @@ class TwoCompLayer(object):
         - mark_closest (bool, optional): Whether to mark the closest points to the
             target. Default is True.
         - min_dist (float, optional): Minimum distance to be considered closest.
-            Default is 0.2.
+            Default is 0.1.
         - min_steps_btw (int, optional): Minimum number of steps between closest steps.
             Default is 20.
         - log_num_closest (bool, optional): Whether to print the number of closest
@@ -1256,7 +1256,7 @@ class TwoCompLayer(object):
         mark_soma_BTSP=True,
         mark_teleport=True,
         mark_closest=True,
-        min_dist=0.2,
+        min_dist=0.1,
         min_steps_btw=20,
         axes=None,
         num_cols=2,
@@ -1282,7 +1282,7 @@ class TwoCompLayer(object):
         - mark_closest (bool, optional): Whether to mark the closest points to the
             target. Default is True.
         - min_dist (float, optional): Minimum distance to be considered closest.
-            Default is 0.2.
+            Default is 0.1.
         - min_steps_btw (int, optional): Minimum number of steps between closest steps.
             Default is 20.
         - num_cols (int, optional): Number of columns in the subplot array.

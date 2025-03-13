@@ -12,9 +12,10 @@ from ratinabox.Neurons import GridCells as riabGridCells  # type: ignore[import]
 from ratinabox.Neurons import ObjectVectorCells as riabObjectVectorCells  # type: ignore[import]
 from ratinabox.Neurons import FeedForwardLayer as riabFeedForwardLayer  # type: ignore[import]
 from ratinabox.contribs import ValueNeuron as riabValueNeuron
+from ratinabox import utils as rutils  # type: ignore[import]
 
 from predhpc import plot_fcts
-from predhpc.util import gen_util, plot_util, ext_util
+from predhpc.util import signal_util, plot_util, ext_util
 
 
 warnings.filterwarnings(
@@ -431,7 +432,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         )
         vel = np.asarray(self.Agent.history["vel"])[startid : endid + 1, 0]
 
-        binned_rate_means, occupancy = gen_util.get_binned_rates(
+        binned_rate_means, occupancy = signal_util.get_binned_rates(
             rate,
             rel_pos,
             vel=vel,
@@ -767,6 +768,8 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
     See ratinabox.Neurons.PlaceCells for default parameters, and
     NeuronsMixin for additional properties and methods.
 
+
+
     List of methods (in addition ratinabox.Neurons.PlaceCells methods):
         • self.plot_place_cell_locations()
         • self.shuffle_place_cell_locations
@@ -810,6 +813,57 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
         self._current_sorter = np.arange(self.n)
         self.shuffle_sorters = list()
         self.shuffle_times = list()
+
+    def get_place_field_FWHM(self, average=True):
+        """
+        self.get_place_field_FWHM()
+
+        Obtain the full width at half maximum of the place fields.
+
+        Args:
+        - average (bool, optional): Whether to return the average FWHM. Default is True.
+
+        Returns:
+        - FWHM (float or 1D np.ndarray): Full width at half maximum of the place fields.
+        """
+
+        if self.description != "gaussian":
+            raise ValueError("FWHM is only available for gaussian place fields.")
+
+        FWHM = self.place_cell_widths * np.sqrt(8 * np.log(2))
+
+        if average:
+            FWHM = np.mean(FWHM)
+
+        return FWHM
+
+    def get_place_field_sigma_in_steps(self, average=True):
+        """
+        self.get_place_field_sigma_in_steps()
+
+        Obtain the standard deviation of the place fields in steps.
+
+        Args:
+        - average (bool, optional): Whether to return the average sigma in steps.
+            Default is True.
+
+        Returns:
+        - sigma_in_steps (float or 1D np.ndarray): Standard deviation of the place
+            fields in steps.
+        """
+
+        mean_speed = self.Agent.speed_mean
+        if self.Agent.Environment.dimensionality == "2D" and self.Agent.speed_std != 0:
+            mean_speed = rutils.get_rayleigh_mean(mean_speed)
+
+        sigma_in_steps = ext_util.get_sigma_in_steps(
+            sigma=self.place_cell_widths, dt=self.Agent.dt, mean_speed=mean_speed
+        )
+
+        if average:
+            sigma_in_steps = np.mean(sigma_in_steps)
+
+        return sigma_in_steps
 
     def shuffle_place_cell_locations(
         self, randst=None, shuffle_sorter=None, record=True

@@ -12,7 +12,7 @@ import seaborn as sns  # type: ignore[import]
 from ratinabox import utils as rutils  # type: ignore[import]
 from ratinabox import MOUNTAIN_PLOT_WIDTH_MM, MOUNTAIN_PLOT_SHIFT_MM
 
-from predhpc.util import ext_util, gen_util, plot_util
+from predhpc.util import ext_util, gen_util, learn_util, signal_util, plot_util
 
 if TYPE_CHECKING:
     from predhpc.agent import ResetableAgent
@@ -541,7 +541,7 @@ def plot_with_marked_oscillations(
     - sub_ax (plt.Axes): Subplot with firing rates and oscillations plotted.
     """
 
-    norm_firingrates = gen_util.get_norm_data(firingrates, axis=0) * norm_height
+    norm_firingrates = signal_util.get_norm_data(firingrates, axis=0) * norm_height
     num_frames, num_neurons = firingrates.shape
 
     if t is None:
@@ -638,7 +638,7 @@ def plot_oscillations(
     - sub_ax (plt.Axes): Subplot with oscillations plotted
     """
 
-    norm_firingrates = gen_util.get_norm_data(firingrates, axis=0) * norm_height
+    norm_firingrates = signal_util.get_norm_data(firingrates, axis=0) * norm_height
     num_frames, num_neurons = firingrates.shape
 
     if sub_ax is None:
@@ -677,7 +677,7 @@ def plot_oscillations(
     if len(frames_to_plot):
         if aligned:
             frames_to_plot = np.sort(np.unique(np.concatenate(frames_to_plot)))
-            frames_to_plot = gen_util.pad_throughout(
+            frames_to_plot = signal_util.pad_throughout(
                 frames_to_plot, pad_prop=pad_prop, min_val=0, max_val=num_frames
             )
             num_frames_to_plot = len(frames_to_plot)
@@ -706,7 +706,7 @@ def plot_oscillations(
             sub_idxs = np.where(np.isin(frames_to_plot, indices))[0]
         else:
             pad_prop = num_frames_to_plot / len(indices) - 1
-            padded_idxs = gen_util.pad_throughout(
+            padded_idxs = signal_util.pad_throughout(
                 indices, pad_prop=pad_prop, min_val=0, max_val=num_frames
             )
 
@@ -1432,16 +1432,18 @@ def plot_1D_BTSP_stats(
     - target_position (float, optional): Target position. Default is None.
 
     Returns:
-    - ax1D (np.ndarray): Array of subplots with BTSP stats plotted.
+    - BTSP_ramp_ax1D (np.ndarray): Array of subplots with BTSP ramp stats plotted.
+    - PCs_sub_ax (plt.Axes): Subplot with input place cell weights plotted.
     """
 
-    _, ax1D = plt.subplots(4, 1, figsize=(7, 7))
+    _, BTSP_ramp_ax1D = plt.subplots(3, 1, figsize=(7, 6))
+    _, PCs_sub_ax = plt.subplots(figsize=(7, 2))
 
     if hasattr(Pyrs, "plot_BTSP_ramp"):
-        Pyrs.plot_BTSP_ramp(axes=ax1D[:3])
+        Pyrs.plot_BTSP_ramp(axes=BTSP_ramp_ax1D)
     else:
-        Pyrs.SomaCompartment.plot_BTSP_ramp(axes=ax1D[:3])
-        ax1D[1].plot(
+        Pyrs.SomaCompartment.plot_BTSP_ramp(axes=BTSP_ramp_ax1D)
+        BTSP_ramp_ax1D[1].plot(
             Pyrs.DendriteCompartment.history["t"],
             Pyrs.DendriteCompartment.history["firingrate"],
             lw=1.2,
@@ -1450,7 +1452,7 @@ def plot_1D_BTSP_stats(
             label="dend",
             color=Pyrs.DendriteCompartment.color,
         )
-        ax1D[1].plot(
+        BTSP_ramp_ax1D[1].plot(
             Pyrs.DendriteInhibition.history["t"],
             Pyrs.DendriteInhibition.history["firingrate"],
             lw=1.2,
@@ -1466,15 +1468,15 @@ def plot_1D_BTSP_stats(
         PCs.place_cell_centres,
         color=PCs.color,
         marker="none",
-        sub_ax=ax1D[3],
+        sub_ax=PCs_sub_ax,
     )
 
     if target_position is not None:
-        ax1D[3].axvline(target_position, ls="dashed", color="k")
+        PCs_sub_ax.axvline(target_position, ls="dashed", color="k")
     for position in other_positions:
-        ax1D[3].axvline(position, ls="dashed", color="k", alpha=0.6)
+        PCs_sub_ax.axvline(position, ls="dashed", color="k", alpha=0.6)
 
-    return ax1D
+    return BTSP_ramp_ax1D, PCs_sub_ax
 
 
 def plot_pre_post_responses(Pyrs, Objs, ref_time=0, pre=60, post=None, axes=None):
@@ -2523,3 +2525,81 @@ def plot_interleaved_openfield_rate_maps(Pyrs, Objs, num_cols=10, size_per=1.4):
         sub_ax.axis("off")
 
     return axes
+
+
+def compare_theoretical_and_true_weights(
+    Pyrs, PCs_name="PCs", target_position=None, output_fr=4, **kwargs
+):
+    """
+    compare_theoretical_and_true_weights(Pyrs)
+
+    Compare the theoretical and true weights of a layer.
+
+    Args:
+    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
+        Pyr. neuron layer for which to compare theoretical and true weights.
+    - PCs_name (str, optional): Name of the input place cell layer. Default is "PCs".
+    - target_position (float, optional): Target position to use to roll the theoretical
+        weights. Inferred from Agent if not provided. If Agent has not target position,
+        the weights are rolled approximately, based on peak difference. Default is None.
+    - output_fr (int, optional): Output framerate to use to compute theoretical weights.
+        Default is 4.
+
+    Keyword args:
+    - **kwargs: Keyword arguments passed to
+        learn_util.assess_Pyrs_learning_rates_spatially().
+
+    Returns:
+    - norm_theor_axes (np.ndarray): Array of subplots with normalized theoretical
+        weights plotted.
+    - no_norm_theor_axes (np.ndarray): Array of subplots with non-normalized
+        theoretical weights plotted.
+    - comp_sub_ax (plt.Axes): Subplot with actual weights vs theoretical weights
+        plotted.
+    """
+
+    if Pyrs.Agent.Environment.dimensionality != "1D":
+        raise RuntimeError("This function only works for 1D environments.")
+
+    if PCs_name not in Pyrs.inputs.keys():
+        raise RuntimeError(f"{PCs_name} not found in inputs to Pyrs.")
+    PCs = Pyrs.inputs[PCs_name]["layer"]
+
+    theor_axes = list()
+    for normalize_weights_divisively in [True, False]:
+        assessment_dict = learn_util.assess_Pyrs_learning_rates_spatially(
+            Pyrs,
+            normalize_weights_divisively=normalize_weights_divisively,
+            output_fr=output_fr,
+            log_reg=True,
+            **kwargs,
+        )
+        axes = plot_util.plot_learning_rate_assessment(assessment_dict)
+        title_str = "With" if normalize_weights_divisively else "No"
+        axes.ravel()[0].figure.suptitle(f"{title_str} normalization", y=1.7)
+        theor_axes.append(axes)
+
+    norm_theor_axes, no_norm_theor_axes = theor_axes
+
+    true_ws = Pyrs.inputs[PCs_name]["w"]
+    comp_sub_ax = plot_1D_input_place_cell_weights(true_ws, PCs)
+
+    # roll theoretical weights
+    theor_ws = assessment_dict["ws"][-1][:, 0]
+    if target_position is None:
+        target_position = Pyrs.Agent.target_position[0]
+    if target_position is not None:
+        rel_pos = target_position / Pyrs.Agent.Environment.scale
+        peak_pt_diff = int(np.argmax(theor_ws) - len(theor_ws) * rel_pos)
+    else:
+        peak_pt_diff = np.argmax(theor_ws) - np.argmax(true_ws)
+    rolled_theor_ws = np.roll(theor_ws, -peak_pt_diff)
+
+    x = np.linspace(0, Pyrs.Agent.Environment.scale, len(theor_ws) + 1)[:-1]
+    comp_sub_ax.plot(x, rolled_theor_ws, color="k", alpha=0.7, label="theoret.")
+    comp_sub_ax.set_title("Actual weights vs theoretical weights")
+    comp_sub_ax.legend()
+    comp_sub_ax.autoscale(axis="y")
+    plot_util.pad_axis(comp_sub_ax, axis="y", end="high")
+
+    return norm_theor_axes, no_norm_theor_axes, comp_sub_ax

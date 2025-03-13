@@ -15,7 +15,14 @@ from ratinabox import Agent as riabAgent  # type: ignore[import]
 from ratinabox import utils as rutils
 
 from predhpc import env, plot_fcts
-from predhpc.util import gen_util, plot_util, ext_util, params_util
+from predhpc.util import (
+    gen_util,
+    trig_util,
+    signal_util,
+    plot_util,
+    ext_util,
+    params_util,
+)
 
 
 class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
@@ -449,6 +456,40 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         self.velocity = new_velocity
 
+    def get_step_and_time(self, step=None, min=False, as_str=False):
+        """
+        self.get_step_and_time()
+
+        Obtain the time corresponding to a step. If no step is provided, current step
+        and time are returned.
+
+        Args:
+        - step (int, optional): Step to obtain time for. Default is None.
+        - min (bool, optional): Whether to return time in minutes. Default is False.
+        - as_str (bool, optional): Whether to return as a string. Default is False.
+
+        Returns:
+        if as_str:
+        - step_time_str (str): String with step and time information.
+        else:
+        - step (int): Step.
+        - time (float): Time.
+        """
+
+        if step is None:
+            step = self.num_steps_total
+
+        time = step * self.dt
+        if min:
+            time /= 60
+
+        if as_str:
+            unit = "min" if min else "sec"
+            step_time_str = f"step {step} ({time:.2f} {unit})"
+            return step_time_str
+        else:
+            return step, time
+
     def get_speed(
         self,
         linear: bool = True,
@@ -505,7 +546,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             speed *= 100
 
         if smooth_k > 1:
-            speed = gen_util.smooth_data(speed.T, k=smooth_k).T
+            speed = signal_util.smooth_data(speed.T, k=smooth_k).T
 
         return speed
 
@@ -3466,7 +3507,7 @@ class OpenFieldAgent(ResetableAgent):
         )
 
         # get the output vector
-        out_vector = gen_util.rotate_to(
+        out_vector = trig_util.rotate_to(
             in_vector=self.pos - teleport_in_coords,
             in_basis=teleport_in_vector,  # type: ignore[arg-type]
             out_basis=teleport_out_vector,  # type: ignore[arg-type]
@@ -3503,7 +3544,7 @@ class OpenFieldAgent(ResetableAgent):
             teleport_pair_num, direction="out"
         )
 
-        out_velocity = -gen_util.rotate_to(
+        out_velocity = -trig_util.rotate_to(
             in_vector=self.velocity,
             in_basis=teleport_in_vector,  # type: ignore[arg-type]
             out_basis=teleport_out_vector,  # type: ignore[arg-type]

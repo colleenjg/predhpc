@@ -5,7 +5,7 @@ from ratinabox import utils as rutils
 
 from predhpc.util import gen_util, ext_util
 
-SCALE_LINEAR = 5.0
+SCALE_LINEAR = 6.0
 SCALE_TMAZE = 4.0
 SCALE = 2.0
 DT = 0.03
@@ -13,8 +13,19 @@ SPEED_MEAN_LINEAR = 0.25  # m/s
 SPEED_STD = SPEED_MEAN_LINEAR / 8
 SPEED_MEAN_2D = 0.28  # m/s (mean tends to be undershot)
 
-BTSP_FILTER_TAU = 2  # s
-POST_BTSP_FILTER_TAU = "half"  # wrt BTSP_FILTER_TAU
+PC_SIGMA = 0.1  # x2 for width at 50% of peak, x4 for 10% of peak
+
+PRE_BTSP_FILTER_TAU_POS = 2.0
+PRE_BTSP_NEG_FILTER_DELTA = 0.010
+PRE_BTSP_NEG_FILTER_WEIGHT = 1.0010
+
+POST_BTSP_FILTER_TAU_POS = 1.4
+POST_BTSP_NEG_FILTER_DELTA = 0.010
+POST_BTSP_NEG_FILTER_WEIGHT = 1.0006
+
+PRE_BTSP_FILTER_TAU_NEG = PRE_BTSP_FILTER_TAU_POS + PRE_BTSP_NEG_FILTER_DELTA
+POST_BTSP_FILTER_TAU_NEG = POST_BTSP_FILTER_TAU_POS + POST_BTSP_NEG_FILTER_DELTA
+
 BASE_LR = 4e-5
 
 TOLERANCE_LINEAR = 0.55
@@ -92,6 +103,43 @@ def get_activation_function(activation_function=None):
         )
 
     return activation_function
+
+
+def get_default_BTSP_filter_param_dict(incl_BTSP_str=True, neg_delta=False):
+    """
+    get_default_BTSP_filter_param_dict()
+
+    Obtain default parameters for BTSP filters.
+
+    Args:
+    - incl_BTSP_str (bool, optional): If True, "BTSP_" is included in the keys.
+        If False, it is omitted. Defaults to True.
+
+    Returns:
+    - BTSP_filter_param_dict (dict): Default parameters for BTSP filters.
+    """
+
+    BTSP_str = "_BTSP" if incl_BTSP_str else ""
+
+    BTSP_filter_param_dict = {
+        f"pre{BTSP_str}_filter_tau_pos": PRE_BTSP_FILTER_TAU_POS,
+        f"pre{BTSP_str}_neg_weight": PRE_BTSP_NEG_FILTER_WEIGHT,
+        f"post{BTSP_str}_filter_tau_pos": POST_BTSP_FILTER_TAU_POS,
+        f"post{BTSP_str}_neg_weight": POST_BTSP_NEG_FILTER_WEIGHT,
+    }
+
+    if neg_delta:
+        BTSP_filter_param_dict[f"pre{BTSP_str}_neg_delta"] = PRE_BTSP_NEG_FILTER_DELTA
+        BTSP_filter_param_dict[f"post{BTSP_str}_neg_delta"] = POST_BTSP_NEG_FILTER_DELTA
+    else:
+        BTSP_filter_param_dict[f"pre{BTSP_str}_filter_tau_neg"] = (
+            PRE_BTSP_FILTER_TAU_NEG
+        )
+        BTSP_filter_param_dict[f"post{BTSP_str}_filter_tau_neg"] = (
+            POST_BTSP_FILTER_TAU_NEG
+        )
+
+    return BTSP_filter_param_dict
 
 
 def get_env_params(scale=None, environment="linear", **kwargs):
@@ -252,7 +300,7 @@ def get_Obj_params(n=None, environment="linear", vector=False, **kwargs):
         "description": "gaussian",
         "min_fr": 0,
         "max_fr": 10,
-        "widths": 0.1,
+        "widths": PC_SIGMA / 2,
         "color": OBJ_COLOR,
     }
 
@@ -296,7 +344,7 @@ def get_PC_params(n=None, environment="linear", **kwargs):
         "min_fr": 0,
         "max_fr": 10,
         "color": PC_COLOR,
-        "widths": 0.2,
+        "widths": PC_SIGMA,
     }
 
     if environment == "linear":
@@ -357,13 +405,21 @@ def get_Pyr_params(
     if two_compartment and not (BTSP and NMDA):
         raise ValueError("Two-compartment model requires BTSP and NMDA.")
 
+    BIASES = None
+    INIT_WEIGHTS_ZERO = False
+    W_INIT_LOC = 0.1
+    W_INIT_SCALE = 0
+    REG_ALPHA = 0.15
+    P = 1
+    BTSP_LR = 0.3
+
     if two_compartment:
         Pyr_params = {
             "name": "Pyr_TwoComp",
             "n": n,
-            "biases": None,
+            "biases": BIASES,
             "dend_init_weights_zero": False,
-            "soma_init_weights_zero": False,
+            "soma_init_weights_zero": INIT_WEIGHTS_ZERO,
             "soma_activation_function": LINEAR_SIGMOID_ACTIVATION_PARAMS,
             "dend_activation_function": DEND_SIGMOID_ACTIVATION_PARAMS,
             "inhibit_activation_function": LINEAR_SIGMOID_ACTIVATION_PARAMS,
@@ -375,52 +431,53 @@ def get_Pyr_params(
             "soma_single_BTSP": False,
             "soma_BTSP_distance_prop": None,
             "dend_w_init_loc": 0.4,
-            "soma_w_init_loc": 0.04,
+            "soma_w_init_loc": W_INIT_LOC,
             "dend_w_init_scale": 0,
-            "soma_w_init_scale": 0,
+            "soma_w_init_scale": W_INIT_SCALE,
             "soma_to_dend_weight": 0.2,
             "dend_to_soma_weight": 1,
-            "soma_normalize_weights_divisively": True,
-            "soma_regularization_alpha": 0.6,
-            "soma_p": 1,
+            "soma_normalize_weights_divisively": False,
+            "soma_regularization_alpha": REG_ALPHA,
+            "soma_p": P,
             "soma_lr": BASE_LR,  # basic learning rate
-            "soma_BTSP_lr_fact": 100,  # BTSP clamp
+            "soma_BTSP_lr": BTSP_LR,  # BTSP learning rate
             "soma_NMDA_activation_threshold": 2,  # threshold for NMDA activation
-            "soma_BTSP_induction_threshold": 8,  # sustainedrequired for BTSP
+            "soma_BTSP_induction_threshold": 8,  # sustained required for BTSP
             "soma_BTSP_plateau_length": 0.12,  # plateau length required for BTSP
-            "soma_BTSP_filter_tau": BTSP_FILTER_TAU,  # BTSP kernel tau
-            "soma_post_BTSP_filter_tau": POST_BTSP_FILTER_TAU,  # BTSP post-filter tau
-            "soma_BTSP_trend_tau": None,  # BTSP kernel tau
-            "inhibit_weight": 1.8,  # strength of dendritic inhibition from soma
-            "inhibit_input_filter_tau": 1.0,
+            "inhibit_weight": 1.2,  # strength of dendritic inhibition from soma
+            "inhibit_input_filter_tau": 0.5,
             "inhibit_input_trend_tau": None,
             "mutual_inhibition_weight": None,
             "lateral_tau": 0.3,
         }
+
+        BTSP_filter_param_dict = get_default_BTSP_filter_param_dict()
+        for key, value in BTSP_filter_param_dict.items():
+            Pyr_params[f"soma_{key}"] = value
+
     else:
         Pyr_params = {
             "name": "Pyr",
             "n": n,
             "color": PYR_SOMA_COLOR,
-            "biases": None,
-            "init_weights_zero": False,
-            "w_init_loc": 0.02,
-            "w_init_scale": 0,
-            "regularization_alpha": 0.8,
+            "biases": BIASES,
+            "init_weights_zero": INIT_WEIGHTS_ZERO,
+            "w_init_loc": W_INIT_LOC,
+            "w_init_scale": W_INIT_SCALE,
             "lr": BASE_LR,
+            "p": P,
             "normalize_weights_divisively": True,
-            "p": 1,
+            "regularization_alpha": REG_ALPHA,
         }
         if BTSP:
             Pyr_params["name"] = "Pyr_BTSP"
-            Pyr_params["BTSP_lr_fact"] = (
-                3e4  # very high clamp, since activity during BTSP is likely low
-            )
-            Pyr_params["BTSP_filter_tau"] = BTSP_FILTER_TAU
-            Pyr_params["post_BTSP_filter_tau"] = POST_BTSP_FILTER_TAU
-            Pyr_params["BTSP_trend_tau"] = None  # BTSP kernel tau
+
+            BTSP_filter_param_dict = get_default_BTSP_filter_param_dict()
+            for key, value in BTSP_filter_param_dict.items():
+                Pyr_params[key] = value
 
             if NMDA:
+                Pyr_params["BTSP_lr"] = BTSP_LR
                 Pyr_params["NMDA_activation_threshold"] = (
                     2  # threshold for NMDA activation
                 )
@@ -430,6 +487,8 @@ def get_Pyr_params(
                 Pyr_params["BTSP_plateau_length"] = (
                     0.12  # plateau length required for BTSP
                 )
+            else:
+                Pyr_params["BTSP_lr"] = int(BTSP_LR * 1.5)
 
     for key, value in kwargs.items():
         Pyr_params[key] = value
