@@ -495,9 +495,13 @@ def plot_metrics_by_parameters(df, parameters=None, save_directory=None, name_st
     if len(metrics) == 0:
         raise RuntimeError("No metrics found in dataframe.")
 
-    ncols = int(np.ceil(np.sqrt(len(metrics))))
-    ncols = 6 if ncols == 5 else ncols
-    nrows = int(np.ceil(len(metrics) / ncols))
+    if len(metrics) < 10:
+        ncols = int(np.ceil(np.sqrt(len(metrics))))
+        nrows = int(np.ceil(len(metrics) / ncols))
+    else:
+        nrows = 4
+        ncols = int(np.ceil(len(metrics) / nrows))
+
     fig, axes = plt.subplots(
         nrows,
         ncols,

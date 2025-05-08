@@ -9,6 +9,12 @@ SCALE_LINEAR = 6.0
 SCALE_TMAZE = 4.0
 SCALE = 2.0
 DT = 0.03
+
+REL_TARGET_POS = 3 / 5
+MOVE_CLOSE = 0.2
+MOVE_MID = 0.9
+MOVE_FAR = 2.0
+
 SPEED_MEAN_LINEAR = 0.25  # m/s
 SPEED_STD = SPEED_MEAN_LINEAR / 8
 SPEED_MEAN_2D = 0.28  # m/s (mean tends to be undershot)
@@ -411,7 +417,7 @@ def get_Pyr_params(
     W_INIT_SCALE = 0
     REG_ALPHA = 0.15
     P = 1
-    BTSP_LR = 0.3
+    BTSP_LR = 0.15
 
     if two_compartment:
         Pyr_params = {
@@ -444,8 +450,8 @@ def get_Pyr_params(
             "soma_NMDA_activation_threshold": 2,  # threshold for NMDA activation
             "soma_BTSP_induction_threshold": 8,  # sustained required for BTSP
             "soma_BTSP_plateau_length": 0.12,  # plateau length required for BTSP
-            "inhibit_weight": 1.2,  # strength of dendritic inhibition from soma
-            "inhibit_input_filter_tau": 0.5,
+            "inhibit_weight": 1.0,  # strength of dendritic inhibition from soma
+            "inhibit_input_filter_tau": 0.3,
             "inhibit_input_trend_tau": None,
             "mutual_inhibition_weight": None,
             "lateral_tau": 0.3,
