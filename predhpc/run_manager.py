@@ -143,7 +143,7 @@ class Learner:
         self.steps_BTSP_triggered = list()
 
         # weight recording
-        self.weights = [(self.Pyrs_for_weights.inputs["PCs"]["w"].copy())]
+        self.weights = [self.Pyrs_for_weights.inputs["PCs"]["w"].copy()]
         self.weight_steps = [self.agent_start_step]
         self.steps_triggered = [None]
 
@@ -697,7 +697,7 @@ def run_learner(
 
 
 def learn(
-    Pyrs,
+    Pyrs_or_learner,
     num_target_reaches=None,
     num_trajectories=None,
     max_num_steps=10000,
@@ -712,13 +712,13 @@ def learn(
     no_logs=False,
 ):
     """
-    learn(Pyrs)
+    learn(Pyrs_or_learner)
 
     Run a learning experiment with BTSP learning.
 
     Args:
-    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
-        Pyr. neuron layer
+    - Pyrs_or_learner (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer or Learner):
+        Pyr. neuron layer or learner.
     - num_target_reaches (int, optional): Target number of rewards to reach.
         Default is None.
     - num_trajectories (int, optional): Number of trajectories to complete. Default is 1.
@@ -749,17 +749,20 @@ def learn(
     if num_end_without_BTSP:
         stop_BTSP = max(0, max_num_steps - num_end_without_BTSP)
 
-    learner = Learner(
-        Pyrs,
-        reverse_linear=reverse_linear,
-        stop_BTSP=stop_BTSP,
-        BTSP_on=BTSP_on,
-        record_weights_at_BTSP=record_weights_at_BTSP,
-        use_Hebbian=use_Hebbian,
-        weight_recording_freq=weight_recording_freq,
-        num_target_reaches=num_target_reaches,
-        num_trajectories=num_trajectories,
-    )
+    if isinstance(Pyrs_or_learner, Learner):
+        learner = Pyrs_or_learner
+    else:
+        learner = Learner(
+            Pyrs_or_learner,
+            reverse_linear=reverse_linear,
+            stop_BTSP=stop_BTSP,
+            BTSP_on=BTSP_on,
+            record_weights_at_BTSP=record_weights_at_BTSP,
+            use_Hebbian=use_Hebbian,
+            weight_recording_freq=weight_recording_freq,
+            num_target_reaches=num_target_reaches,
+            num_trajectories=num_trajectories,
+        )
 
     run_learner(
         learner,
@@ -776,7 +779,9 @@ def learn(
 
 
 def learn_openfield_BTSP(
-    Pyrs: learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | None = None,
+    Pyrs_or_learner: (
+        learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | Learner | None
+    ) = None,
     max_num_steps: int = 10000,
     finish_trajectory: bool = False,
     record_weights_at_BTSP: bool = True,
@@ -794,8 +799,8 @@ def learn_openfield_BTSP(
     Run an openfield learning experiment with BTSP learning.
 
     Args:
-    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer):
-        Pyr. neuron layer.
+    - Pyrs_or_learner (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer or Learner):
+        Pyr. neuron layer or learner.
     - max_num_steps (int, optional): Maximum number of steps to run. Default is 10000.
     - finish_trajectory (bool, optional): Whether to finish the last trajectory.
         Default is False.
@@ -819,15 +824,20 @@ def learn_openfield_BTSP(
     - learner (Learner): Learner object.
     """
 
-    if Pyrs is None:
-        Pyrs = init_env_objects(
+    if Pyrs_or_learner is None:
+        Pyrs_or_learner = init_env_objects(
             environment="openfield",
             autosave=autosave,
             plot=False,
             **init_kwargs,
         )
-    elif not isinstance(Pyrs.Agent.Environment, env.OpenField):
-        raise ValueError("Pyrs must be an openfield environment.")
+    else:
+        if isinstance(Pyrs_or_learner, Learner):
+            Pyrs = Pyrs_or_learner.Pyrs
+        else:
+            Pyrs = Pyrs_or_learner
+        if not isinstance(Pyrs.Agent.Environment, env.OpenField):
+            raise ValueError("Pyrs must be an openfield environment.")
 
     if updater is None:
         updater = {
@@ -836,7 +846,7 @@ def learn_openfield_BTSP(
         }
 
     learner = learn(
-        Pyrs,
+        Pyrs_or_learner,
         BTSP_on=0,
         max_num_steps=max_num_steps,
         finish_trajectory=finish_trajectory,
@@ -940,7 +950,9 @@ def plot_T_maze(
 
 
 def learn_T_maze_BTSP(
-    Pyrs: learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | None = None,
+    Pyrs_or_learner: (
+        learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | Learner | None
+    ) = None,
     num_target_reaches: int = 200,
     max_num_steps: int = 10000,
     finish_trajectory: bool = True,
@@ -960,11 +972,8 @@ def learn_T_maze_BTSP(
     Run a T-maze learning experiment with BTSP learning.
 
     Args:
-    - env_params (dict, optional): Parameters for the environment. Default is None.
-    - agent_params (dict, optional): Parameters for the agent. Default is None.
-    - PC_params (dict, optional): Parameters for the place cells. Default is
-        None.
-    - Pyr_params (dict, optional): Parameters for the Pyr. neurons. Default is None.
+    - Pyrs_or_learner (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer or Learner):
+        Pyr. neuron layer or learner.
     - num_target_reaches (int, optional): Target number of rewards to reach.
         Default is 200.
     - max_num_steps (int, optional): Maximum number of steps to run. Default is 10000.
@@ -999,15 +1008,21 @@ def learn_T_maze_BTSP(
         plotted. See plot_fcts.plot_time_series_with_BTSP_events() for details.
     """
 
-    if Pyrs is None:
-        Pyrs = init_env_objects(
+    if Pyrs_or_learner is None:
+        Pyrs_or_learner = init_env_objects(
             environment="tmaze",
             autosave=autosave,
             plot=False,
             **init_kwargs,
         )
-    elif not isinstance(Pyrs.Agent.Environment, env.TEnv):
-        raise ValueError("Pyrs must be a T-maze environment.")
+
+    else:
+        if isinstance(Pyrs_or_learner, Learner):
+            Pyrs = Pyrs_or_learner.Pyrs
+        else:
+            Pyrs = Pyrs_or_learner
+        if not isinstance(Pyrs.Agent.Environment, env.TEnv):
+            raise ValueError("Pyrs must be a T-maze environment.")
 
     if updater is None:
         updater = {
@@ -1016,7 +1031,7 @@ def learn_T_maze_BTSP(
         }
 
     learner = learn(
-        Pyrs,
+        Pyrs_or_learner,
         num_target_reaches=num_target_reaches,
         max_num_steps=max_num_steps,
         finish_trajectory=finish_trajectory,
@@ -1048,7 +1063,9 @@ def learn_T_maze_BTSP(
 
 
 def learn_1D_BTSP(
-    Pyrs: learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | None = None,
+    Pyrs_or_learner: (
+        learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | Learner | None
+    ) = None,
     num_target_reaches: int = 10,
     num_trajectories: int | None = None,
     max_num_steps: int = 5000,
@@ -1070,7 +1087,7 @@ def learn_1D_BTSP(
     Run a 1D learning experiment with BTSP learning. Plot spatial and time information.
 
     Args:
-    - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer, optional):
+    - Pyrs_or_learner (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer, Learner, optional):
         Pyr. neurons. If None, will be initialized. Default is None.
     - num_target_reaches (int, optional): Target number of rewards to reach.
         Default is 200.
@@ -1111,18 +1128,24 @@ def learn_1D_BTSP(
         shape (3, 1). See run_manager.plot_1D_time_info() for details.
     """
 
-    if Pyrs is None:
-        Pyrs = init_env_objects(
+    if Pyrs_or_learner is None:
+        Pyrs_or_learner = init_env_objects(
             environment="linear",
             autosave=autosave,
             plot=False,
             **init_kwargs,
         )
-    elif Pyrs.Agent.Environment.D != 1:
-        raise ValueError("Pyrs must be a 1D environment.")
+    else:
+        if isinstance(Pyrs_or_learner, Learner):
+            Pyrs = Pyrs_or_learner.Pyrs
+        else:
+            Pyrs = Pyrs_or_learner
+
+        if Pyrs.Agent.Environment.D != 1:
+            raise ValueError("Pyrs must be a 1D environment.")
 
     learner = learn(
-        Pyrs,
+        Pyrs_or_learner,
         num_target_reaches=num_target_reaches,
         num_trajectories=num_trajectories,
         max_num_steps=max_num_steps,
@@ -1152,6 +1175,6 @@ def learn_1D_BTSP(
 
 
 if __name__ == "__main__":
-    learner, spatial_axes, time_axes = learn_1D_BTSP()
+    learner, spatial_axes, time_axes = learn_1D_BTSP(plot=True)
 
     breakpoint()

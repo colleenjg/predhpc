@@ -523,6 +523,43 @@ class TwoCompLayer(object):
 
         return distances
 
+    def get_target_visits(
+        self,
+        neuron_num: int = 0,
+        target_src_name: str = "Obj",
+        min_pts_btw=30,
+        min_dist=0.05,
+    ):
+        """
+        self.get_target_visits()
+
+        Get the indices of the steps where the agent is closest to the target specified
+        by the place cell centre of the main input to the neuron's dendrite.
+
+        Args:
+        - neuron_num (int, optional): Neuron number. Default is 0.
+        - target_src_name (str, optional): Name of the input layer
+            (must be a place cell-derived layer). Default is "Obj".
+        - min_pts_btw (int, optional): Minimum number of steps between closest steps.
+            Default is 30.
+        - min_dist (float, optional): Minimum distance to be considered a visit.
+            Default is 0.05.
+
+        Returns:
+        - visit_indices (1D np.ndarray): Indices of the steps where the agent is
+            closest to the target.
+        """
+
+        distances = self.get_distances_to_place_cell_centre_of_main_dendrite_input(
+            neuron_num=neuron_num, src_name=target_src_name
+        )
+
+        visit_indices = gen_util.get_minima_indices(
+            distances, min_pts_btw=min_pts_btw, minimum=min_dist
+        )
+
+        return visit_indices
+
     def get_closest_steps_to_target(
         self,
         neuron_num=0,
@@ -566,6 +603,59 @@ class TwoCompLayer(object):
             )
 
         return closest_steps
+
+    def get_nbr_visits_per_target(
+        self,
+        target_src_name: str = "Obj",
+        min_pts_btw=30,
+        min_dist=0.1,
+        t_start=None,
+        t_end=None,
+    ):
+        """
+        self.get_nbr_visits_per_target()
+
+        Get the number of visits to the target specified by the place cell centre of
+        the main input to the neuron's dendrite for each neuron in the layer.
+
+        Args:
+        - target_src_name (str, optional): Name of the input layer
+            (must be a place cell-derived layer). Default is "Obj".
+        - min_pts_btw (int, optional): Minimum number of steps between closest steps.
+            Default is 30.
+        - min_dist (float, optional): Minimum distance to be considered a visit.
+            Default is 0.1.
+        - t_start (int, optional): Start time for obtaining number of visits.
+            Default is None.
+        - t_end (int, optional): End time for obtaining number of visits.
+            Default is None.
+
+        Returns:
+        - nbr_visits_per_BTSP_target (1D np.ndarray): Number of visits to the target
+            specified by the place cell centre of the main input to the neuron's
+            dendrite for each neuron in the layer.
+        """
+
+        _, startid, endid = self.SomaCompartment.get_plotting_times(
+            t_start=t_start, t_end=t_end
+        )
+
+        nbr_visits_per_BTSP_target = np.zeros(self.n, dtype=int)
+        for neuron_num in range(self.n):
+            visit_indices = self.get_target_visits(
+                neuron_num=neuron_num,
+                target_src_name=target_src_name,
+                min_pts_btw=min_pts_btw,
+                min_dist=min_dist,
+            )
+
+            if len(visit_indices):
+                visit_indices = visit_indices[
+                    (visit_indices >= startid) & (visit_indices < endid)
+                ]
+                nbr_visits_per_BTSP_target[neuron_num] = len(visit_indices)
+
+        return nbr_visits_per_BTSP_target
 
     def match_closest_to_target_steps_to_BTSP_steps(
         self,
@@ -1543,3 +1633,76 @@ class TwoCompLayer(object):
             sub_ax.set_ylabel("Dist. from target")
 
         return axes
+
+    def plot_BTSP_counts_vs_target_visits(
+        self,
+        target_src_name="Obj",
+        min_pts_btw=30,
+        min_dist=0.1,
+        applied_only=False,
+        t_start=None,
+        t_end=None,
+        sub_ax=None,
+        autosave=None,
+    ):
+        """
+        self.plot_BTSP_counts_vs_target_visits()
+
+        Plot the number BTSP events vs visits for each neuron's targets.
+
+        Args:
+        - target_src_name (str, optional): Name of the input layer
+            (must be a place cell-derived layer). Default is "Obj".
+        - min_pts_btw (int, optional): Minimum number of points between BTSP events.
+            Default is 30.
+        - min_dist (float, optional): Minimum distance to be considered a visit.
+            Default is 0.1.
+        - applied_only (bool, optional): Whether to only include neurons with
+            applied BTSP events. Default is False.
+        - t_start (float, optional): Start time of the plot. Default is None.
+        - t_end (float, optional): End time of the plot. Default is None.
+        - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
+        - autosave (bool, optional): Whether to autosave the figure. Default is None.
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with BTSP frequency plotted.
+        """
+
+        nbr_visits_per_target = self.get_nbr_visits_per_target(
+            target_src_name=target_src_name,
+            min_pts_btw=min_pts_btw,
+            min_dist=min_dist,
+            t_start=t_start,
+            t_end=t_end,
+        )
+
+        BTSP_counts = self.SomaCompartment.get_BTSP_counts(
+            applied_only=applied_only, t_start=t_start, t_end=t_end
+        )
+
+        if sub_ax is None:
+            _, sub_ax = plt.subplots(figsize=(6, 3))
+
+        sub_ax.axhline(1, color="k", ls="dashed", lw=1, alpha=0.3)
+        sub_ax.scatter(
+            nbr_visits_per_target,
+            BTSP_counts,
+            color=self.SomaCompartment.color,
+            alpha=0.5,
+            s=10,
+        )
+
+        plot_util.pad_axis(sub_ax, axis="x")
+        plot_util.pad_axis(sub_ax, axis="y")
+        if sub_ax.get_xlim()[0] > 0:
+            sub_ax.set_xlim(0, None)
+
+        sub_ax.spines[["right", "top"]].set_visible(False)
+        sub_ax.set_xlabel("Number of target visits")
+        sub_ax.set_ylabel("Number of BTSP events")
+        sub_ax.set_title("BTSP target visits vs events", y=1.05)
+
+        fig = sub_ax.figure
+        plot_util.save_figure(fig, f"{self.name}_BTSP_counts_vs_visits", save=autosave)  # type: ignore[attr-defined]
+
+        return sub_ax

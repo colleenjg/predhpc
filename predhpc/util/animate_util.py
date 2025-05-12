@@ -325,6 +325,8 @@ def plot_linear_track(
     )
     if current_target_position is None:
         current_target_position = Ag.target_position
+    else:
+        current_target_position = np.asarray(current_target_position).reshape(-1)
 
     ncol = 4
     with TemporarilyMoveTarget(Ag, current_target_position):
@@ -333,13 +335,14 @@ def plot_linear_track(
 
         # plot previous target positions
         for p, plot_position in enumerate(previous_target_positions):
+            plot_position = np.asarray(plot_position).reshape(-1)[0]
             label = None
             if p == 0:
                 plural = "" if len(previous_target_positions) == 1 else "s"
                 label = f"prev. target{plural}"
             target_kwargs = plot_util.get_plot_marker_kwargs("target")
             ax1D[0].scatter(
-                plot_position[0], 0, zorder=10, alpha=0.2, label=label, **target_kwargs
+                plot_position, 0, zorder=10, alpha=0.2, label=label, **target_kwargs
             )
             ncol += 1
 
@@ -380,7 +383,8 @@ def plot_linear_track(
             target_Pyr_idx_str = f" (#{target_Pyr_idx + 1})"
 
         if current_target_position is not None:
-            ax1D[1].axvline(current_target_position[0], ls="dotted", color="k")
+            current_target_position = np.asarray(current_target_position).reshape(-1)[0]
+            ax1D[1].axvline(current_target_position, ls="dotted", color="k")
         ax1D[1].spines[["top", "right", "left", "bottom"]].set_visible(False)
         ax1D[1].set_xticks([])
         ax1D[1].set_yticks([])

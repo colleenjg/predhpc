@@ -12,7 +12,7 @@ DT = 0.03
 
 REL_TARGET_POS = 3 / 5
 MOVE_CLOSE = 0.2
-MOVE_MID = 0.9
+MOVE_MID = 0.7
 MOVE_FAR = 2.0
 
 SPEED_MEAN_LINEAR = 0.25  # m/s
@@ -39,8 +39,8 @@ TOLERANCE_2D = 5
 
 OBJ_COLOR = "#22772E"  # dark green
 PC_COLOR = "#99193A"  # dark red
-PYR_SOMA_COLOR = "#3D3D79"  # dark purple
-PYR_DEND_COLOR = "#8787C9"  # light purple
+PYR_SOMA_COLOR = "#8787C9"  # light purple
+PYR_DEND_COLOR = "#3D3D79"  # dark purple
 
 LINEAR_SIGMOID_ACTIVATION_PARAMS = ext_util.get_standard_sigmoid_params(
     min_fr=0.0, max_fr=10.0, mid_x=6.0, width_x=8.0
@@ -413,11 +413,19 @@ def get_Pyr_params(
 
     BIASES = None
     INIT_WEIGHTS_ZERO = False
-    W_INIT_LOC = 0.1
     W_INIT_SCALE = 0
-    REG_ALPHA = 0.15
-    P = 1
-    BTSP_LR = 0.15
+    NORM_WEIGHTS_DIV = True
+    LR = 2e-5
+    P = 4
+
+    if environment == "linear":
+        W_INIT_LOC = 0.1
+        REG_ALPHA = 2.75
+        BTSP_LR = 0.2
+    else:
+        W_INIT_LOC = 0.04
+        REG_ALPHA = 4.25
+        BTSP_LR = 0.15
 
     if two_compartment:
         Pyr_params = {
@@ -441,20 +449,20 @@ def get_Pyr_params(
             "dend_w_init_scale": 0,
             "soma_w_init_scale": W_INIT_SCALE,
             "soma_to_dend_weight": 0.2,
-            "dend_to_soma_weight": 1,
-            "soma_normalize_weights_divisively": False,
+            "dend_to_soma_weight": 1.0,
+            "soma_normalize_weights_divisively": NORM_WEIGHTS_DIV,
             "soma_regularization_alpha": REG_ALPHA,
             "soma_p": P,
-            "soma_lr": BASE_LR,  # basic learning rate
+            "soma_lr": LR,  # basic learning rate
             "soma_BTSP_lr": BTSP_LR,  # BTSP learning rate
             "soma_NMDA_activation_threshold": 2,  # threshold for NMDA activation
             "soma_BTSP_induction_threshold": 8,  # sustained required for BTSP
             "soma_BTSP_plateau_length": 0.12,  # plateau length required for BTSP
             "inhibit_weight": 1.0,  # strength of dendritic inhibition from soma
-            "inhibit_input_filter_tau": 0.3,
+            "inhibit_input_filter_tau": 0.25,
             "inhibit_input_trend_tau": None,
             "mutual_inhibition_weight": None,
-            "lateral_tau": 0.3,
+            "lateral_tau": 0.25,
         }
 
         BTSP_filter_param_dict = get_default_BTSP_filter_param_dict()
@@ -470,11 +478,15 @@ def get_Pyr_params(
             "init_weights_zero": INIT_WEIGHTS_ZERO,
             "w_init_loc": W_INIT_LOC,
             "w_init_scale": W_INIT_SCALE,
-            "lr": BASE_LR,
             "p": P,
-            "normalize_weights_divisively": True,
+            "normalize_weights_divisively": NORM_WEIGHTS_DIV,
             "regularization_alpha": REG_ALPHA,
         }
+        if NMDA:
+            Pyr_params["lr"] = LR
+        else:
+            Pyr_params["lr"] = LR * 1.5
+
         if BTSP:
             Pyr_params["name"] = "Pyr_BTSP"
 
@@ -494,7 +506,7 @@ def get_Pyr_params(
                     0.12  # plateau length required for BTSP
                 )
             else:
-                Pyr_params["BTSP_lr"] = int(BTSP_LR * 1.5)
+                Pyr_params["BTSP_lr"] = BTSP_LR * 1.5
 
     for key, value in kwargs.items():
         Pyr_params[key] = value

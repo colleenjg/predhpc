@@ -1221,6 +1221,70 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         return distances
 
+    def get_position_visits(
+        self,
+        position: None | np.ndarray[tuple[int], np.dtype[np.float64]] = None,
+        position_name: str = "target",
+        t_start: float | None = None,
+        t_end: float | None = None,
+        min_pts_btw: int = 30,
+        min_dist: float = 0.1,
+    ):
+        """
+        self.get_position_visits()
+
+        Get an agent's visits to a specific position.
+
+        Args:
+        - position (1D np.ndarray, optional): Position to plot distance to. If None,
+            position name is used. Default is None.
+        - position_name (str, optional): Position name to use in plot y axis label.
+            Also, if position is None, named position to use
+            (e.g., 'target', 'reset', 'start'). Default is 'target'.
+        - t_start (float, optional): Start time for plotting, in seconds.
+            Default is None.
+        - t_end (float, optional): End time for plotting, in seconds. Default is None.
+        - min_pts_btw (int, optional): Minimum number of points between visits.
+            Default is 30.
+        - min_dist (float, optional): Minimum distance to consider a visit.
+            Default is 0.1.
+
+        Returns:
+        - visit_indices (1D np.ndarray): Indices of the visits to the specified position.
+        """
+
+        _, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
+
+        positions = np.asarray(self.history["pos"])[startid : endid + 1]
+
+        if position is None:
+            if position_name == "target":
+                position = self.target_position
+            elif position_name == "reset":
+                position = self.reset_position
+            elif position_name == "start":
+                position = self.start_position
+            else:
+                raise ValueError(
+                    f"Can only infer `position` from `position_name` if the latter is "
+                    f"'target', 'reset' or 'start', but got {position_name}."
+                )
+            if position is None:
+                raise ValueError(f"{position_name} is set to None.")
+
+        position = self.format_position(position)
+
+        distances = np.linalg.norm(positions - position, ord=2, axis=1)
+        visit_indices = gen_util.get_minima_indices(
+            distances, min_pts_btw=min_pts_btw, minimum=min_dist
+        )
+
+        visit_indices = visit_indices[
+            (visit_indices >= startid) & (visit_indices < endid)
+        ]
+
+        return visit_indices
+
     def reset(self):
         """
         self.reset()
@@ -2541,9 +2605,9 @@ class TAgent(ResetableAgent):
                 self.target_in_branch = False
             else:
                 self.target_in_branch = True
-                if x > self.Environment.stim_right:
+                if x > self.Environment.stem_right:
                     self.target_arm = "right"
-                elif x < self.Environment.stim_left:
+                elif x < self.Environment.stem_left:
                     self.target_arm = "left"
                 else:
                     self.target_arm = None

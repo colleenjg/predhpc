@@ -1114,6 +1114,7 @@ class HebbianLayer(LearnLayer):
         • self.update_weights()
         • self.update()
         • self.plot_learning_kernel()
+        • self.plot_normalization_values()
     """
 
     default_params = {
@@ -1233,6 +1234,9 @@ class HebbianLayer(LearnLayer):
         - norm_values (dict): Dictionary of normalization values.
         """
 
+        if not (self.apply_Ojas_rule or self.normalize_weights_divisively):  # type: ignore[attr-defined]
+            raise RuntimeError("Normalization not applied.")
+
         norm_values = dict()
         for name_in, input_layer in self.inputs.items():
             if "w_norm" in input_layer.keys() or "w_init_norm" in input_layer.keys():
@@ -1274,6 +1278,76 @@ class HebbianLayer(LearnLayer):
                     norm_values[name_in]["b_norms"] = list(b_norm_vals)
 
         return norm_values
+
+    def get_normalization_values(
+        self,
+        input_layer: str,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        chosen_neurons: (
+            str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
+        ) = "all",
+        bias_norms: bool = False,
+    ):
+        """
+        self.get_normalization_values()
+
+        Obtain the normalization values for the weights of the layer.
+
+        Args:
+        - input_layer (str): Name of the input layer.
+        - t_start (float, optional): Start time of the plot. Default is None.
+        - t_end (float, optional): End time of the plot. Default is None.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
+            Default is "all".
+        - bias_norms (bool, optional): Whether to plot the bias normalization values.
+            Default is False.
+
+        Returns:
+        - norm_values (dict): Dictionary of normalization values.
+        """
+
+        norm_dict = self.get_normalization_value_dict()
+
+        key_str = "b" if bias_norms else "w"
+
+        norm_str = f"{key_str}_norms"
+        init_str = f"{key_str}_init_norm"
+        steps_str = f"{key_str}_norm_steps"
+
+        if input_layer not in norm_dict.keys():
+            raise KeyError(f"Input layer {input_layer} not found.")
+
+        norm_dict = norm_dict[input_layer]
+        if init_str not in norm_dict.keys():
+            data_type = "weight" if not bias_norms else "bias"
+            raise KeyError(f"No {data_type} normalization values found.")
+
+        chosen_neurons = self.return_list_of_neurons(chosen_neurons=chosen_neurons)  # type: ignore[arg-type]
+
+        t, startid, stopid = self.get_plotting_times(
+            t_start=t_start, t_end=t_end, raise_error=False
+        )
+
+        steps = [0]
+        norm_values = [norm_dict[init_str]]
+        if norm_str in norm_dict.keys():
+            steps = np.asarray(steps + norm_dict[steps_str])
+            norm_values = np.asarray(norm_values + norm_dict[norm_str])
+        else:
+            steps = np.asarray(steps)
+            norm_values = np.asarray(norm_values)
+
+        keep = np.where((steps >= startid) * (steps < stopid))[0]
+        steps = steps[keep]
+        norm_values = norm_values[keep]
+
+        t = t[steps - startid]
+
+        if bias_norms or self.normalize_weights_divisively:
+            norm_values = norm_values[:, chosen_neurons]
+
+        return steps, norm_values
 
     def get_learning_kernel_kwargs(self):
         """
@@ -1433,10 +1507,12 @@ class HebbianLayer(LearnLayer):
         else:
             if self.normalize_weights_divisively or self.apply_Ojas_rule:
                 w_norm, b_norm = norm_values
-                for i, name_in in enumerate(input_layers_with_learning):
-                    self.inputs[name_in]["w_norm"] = w_norm[i]
                 if self.trainable_biases:
                     self.b_norm = b_norm
+
+                for i, name_in in enumerate(input_layers_with_learning):
+                    val = w_norm[i] if self.apply_Ojas_rule else w_norm
+                    self.inputs[name_in]["w_norm"] = val
 
             return None
 
@@ -1485,10 +1561,235 @@ class HebbianLayer(LearnLayer):
 
         return sub_ax
 
+    def plot_normalization_values_over_time(
+        self,
+        input_layer: str,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        chosen_neuron: int | str = "max",
+        mark_BTSP: bool = True,
+        bias_norms: bool = False,
+        in_min: bool = True,
+        lw: float = 1,
+        autosave: bool | None = None,
+        sub_ax: plt.Axes | None = None,
+    ):
+        """
+        self.plot_normalization_values_over_time()
+
+        Plot the normalization values for the weights of the layer over time.
+
+        Args:
+        - input_layer (str): Name of the input layer.
+        - t_start (float, optional): Start time of the plot. Default is None.
+        - t_end (float, optional): End time of the plot. Default is None.
+        - chosen_neuron (int or str, optional): Neuron to plot. Default is "max".
+        - mark_BTSP (bool, optional): Whether to mark the BTSP. Default is True.
+        - bias_norms (bool, optional): Whether to plot the bias normalization values.
+            Default is False.
+        - in_min (bool, optional): Whether to plot the time in minutes. Default is True.
+        - lw (float, optional): Line width of the plot. Default is 1.
+        - autosave (bool, optional): Whether to save the figure. Default is None.
+        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
+            created. Default is None.
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with normalization values plotted.
+        """
+
+        valid = False
+        if isinstance(chosen_neuron, str) and chosen_neuron == "max":
+            chosen_neurons = "all"
+            valid = True
+        elif isinstance(chosen_neuron, int):
+            chosen_neurons = [chosen_neuron]
+            valid = True
+
+        if not valid:
+            raise ValueError(
+                "chosen_neuron must be an int or 'max'. If you want to plot all "
+                "neurons, use 'all' as chosen_neurons."
+            )
+
+        chosen_neurons = self.return_list_of_neurons(chosen_neurons=chosen_neurons)  # type: ignore[arg-type]
+
+        steps, norm_values = self.get_normalization_values(
+            input_layer=input_layer,
+            t_start=t_start,
+            t_end=t_end,
+            chosen_neurons=chosen_neurons,
+            bias_norms=bias_norms,
+        )
+
+        if len(norm_values.shape) == 2:
+            norm_values = norm_values.max(axis=1)  # max
+
+        if sub_ax is None:
+            _, sub_ax = plt.subplots(figsize=(6, 3))
+
+        if len(steps):
+            t = np.asarray(self.history["t"])[steps]
+            if in_min:
+                t = t / 60
+
+            color = self.inputs[input_layer]["layer"].color
+            if lw > 0:
+                sub_ax.plot(
+                    t,
+                    norm_values,
+                    color=color,
+                    lw=lw,
+                    alpha=0.3,
+                )
+            abv_1 = norm_values > 1
+            for i, alpha in enumerate([0.3, 0.8]):
+                use_bool = abv_1 if i == 1 else ~abv_1
+                if use_bool.sum():
+                    sub_ax.scatter(
+                        t[use_bool],
+                        norm_values[use_bool],
+                        color=color,
+                        marker="d",
+                        s=10,
+                        alpha=alpha,
+                    )
+                    if i == 1:
+                        sub_ax.axvline(
+                            t[use_bool][0],
+                            color="k",
+                            lw=1,
+                            ls="--",
+                            alpha=0.3,
+                            zorder=-2,
+                        )
+
+        plot_util.pad_axis(sub_ax, axis="x", pad_prop=0.05)
+        plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.5, end="high")
+
+        if mark_BTSP:
+            self.add_BTSP_markers_to_plots(
+                ax=sub_ax,
+                t_start=t_start,
+                t_end=t_end,
+                chosen_neurons=chosen_neurons,
+                timeseries=True,
+            )
+            plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.05, end="high")
+
+        sub_ax.axhline(1, color="k", lw=1, ls="--", alpha=0.3)
+
+        if sub_ax.get_ylim()[0] > 0:
+            sub_ax.set_ylim(bottom=0)
+
+        if sub_ax.get_ylim()[1] < 1.05:
+            sub_ax.set_ylim(top=1.05)
+
+        time_str = "Time / min" if in_min else "Time / s"
+        sub_ax.set_xlabel(time_str)
+
+        norm_str = "Oja" if self.apply_Ojas_rule else "Divisive"
+        sub_ax.set_ylabel(f"{norm_str} normalization value")
+
+        sub_ax.set_title(
+            f"Normalization calculated for weights from {input_layer}", y=1.05
+        )
+
+        sub_ax.spines[["top", "right"]].set_visible(False)
+
+        fig = sub_ax.figure
+        plot_util.save_figure(fig, f"{self.name}_norm_over_time", save=autosave)  # type: ignore[attr-defined]
+
+        return sub_ax
+
+    def plot_normalization_value_hist(
+        self,
+        input_layer: str,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        chosen_neurons: (
+            str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
+        ) = "all",
+        bias_norms: bool = False,
+        above_one: bool = False,
+        max_per_step: bool = False,
+        bins: int = 50,
+        autosave: bool | None = None,
+        sub_ax: plt.Axes | None = None,
+    ):
+        """
+        self.plot_normalization_values()
+
+        Plot the normalization values for the weights of the layer.
+
+        Args:
+        - input_layer (str): Name of the input layer.
+        - t_start (float, optional): Start time of the plot. Default is None.
+        - t_end (float, optional): End time of the plot. Default is None.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
+            Default is "all".
+        - bias_norms (bool, optional): Whether to plot the bias normalization values.
+            Default is False.
+        - above_one (bool, optional): Whether to plot only values above 1. Default is
+            False.
+        - max_per_step (bool, optional): Whether to plot the maximum value per step.
+            Default is False.
+        - bins (int, optional): Number of bins for the histogram. Default is 50.
+        - autosave (bool, optional): Whether to save the figure. Default is None.
+        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
+            created. Default is None.
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with normalization histogram plotted.
+
+        """
+
+        _, norm_values = self.get_normalization_values(
+            input_layer=input_layer,
+            t_start=t_start,
+            t_end=t_end,
+            chosen_neurons=chosen_neurons,
+            bias_norms=bias_norms,
+        )
+
+        if max_per_step:
+            norm_values = np.max(norm_values, axis=1)
+        else:
+            norm_values = norm_values.flatten()
+
+        if above_one:
+            norm_values = norm_values[norm_values > 1]
+
+        if sub_ax is None:
+            _, sub_ax = plt.subplots(figsize=(8, 3))
+
+        if len(norm_values):
+            sub_ax.hist(
+                norm_values, bins=bins, density=False, color=self.color, alpha=0.8
+            )
+
+        if not above_one:
+            sub_ax.axvline(1, color="k", lw=1, ls="--", alpha=0.3)
+
+        norm_str = "Oja" if self.apply_Ojas_rule else "Divisive"
+        sub_ax.set_xlabel(f"{norm_str} normalization value")
+
+        sub_ax.set_ylabel("Frequency")
+
+        sub_ax.set_title(
+            f"Normalization calculated for weights from {input_layer}", y=1.05
+        )
+
+        sub_ax.spines[["top", "right"]].set_visible(False)
+
+        fig = sub_ax.figure
+        plot_util.save_figure(fig, f"{self.name}_norm_hist", save=autosave)  # type: ignore[attr-defined]
+
+        return sub_ax
+
 
 class BTSPLayer(HebbianLayer):
     """
-    BTSPLayer
+    BTSPLayer()
 
     Class extending HebbianLayer. Defines a population of neurons that tune their
     weights through Hebbian learning with BTSP.
@@ -3575,6 +3876,8 @@ class BTSPLayer(HebbianLayer):
             str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
         ) = "all",
         timeseries: bool = False,
+        in_min: bool = True,
+        in_steps: bool = False,
         color: str | None = None,
     ):
         """
@@ -3591,6 +3894,10 @@ class BTSPLayer(HebbianLayer):
             Default is "all".
         - timeseries (bool, optional): Whether the plot is timeseries (map expected,
             otherwise). Default is False.
+        - in_min (bool, optional): Whether to plot time in minutes if timeseries is
+            True. Default is True.
+        - in_steps (bool, optional): Whether to plot time in steps if timeseries is
+            True. If True, takes precedence over in_min. Default is False.
         - color (str, optional): Color of the BTSP markers. Default is None.
         """
 
@@ -3635,7 +3942,12 @@ class BTSPLayer(HebbianLayer):
                 if timeseries:
                     if step < startid:
                         continue
-                    x_pos = t[step - startid] / 60
+                    if in_steps:
+                        x_pos = step
+                    else:
+                        x_pos = t[step - startid]
+                        if in_min:
+                            x_pos = x_pos / 60
                     line_sep = (ymax - 1) / num_neurons
                     y_pos = 1 + line_sep * i + line_sep * 0.7
                     pos = [x_pos, y_pos]

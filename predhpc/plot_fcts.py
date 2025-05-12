@@ -1906,10 +1906,10 @@ def plot_1D_time_info(
     )
     ax1D[i + 1].set_title("Pyr. rate timeseries")
 
-    mark_target_and_reset_points(Pyrs, sub_ax=ax1D[i + 1])
-
-    for sub_ax in ax1D[:-1]:
-        sub_ax.set_xlabel("")
+    for i, sub_ax in enumerate(ax1D):
+        mark_target_and_reset_points(Pyrs, sub_ax=sub_ax)
+        if i != len(ax1D) - 1:
+            sub_ax.set_xlabel("")
 
     plot_util.pad_axis(ax1D[0], "x", pad_prop=0.03)
 
@@ -1956,6 +1956,10 @@ def plot_2D_input_place_cell_weights(
         (number of output neurons, number of input neurons). If None, uses the
         input weights to the target_neurons from the layer specified by PCs_input_name.
         Default is None.
+    - chosen_neurons (str, int, list, or np.ndarray, optional): Neurons to plot.
+        Default is "all". If "all", all neurons are plotted. If int, a single neuron
+        is plotted. If list or np.ndarray, a list of neurons is plotted.
+        Default is "all".
     - cmap (str, optional): Colormap to use. Default is "inferno".
     - vmin (float, optional): Minimum value for the colorbar. Default is None.
     - vmax (float, optional): Maximum value for the colorbar. Default is None.
@@ -1998,22 +2002,27 @@ def plot_2D_input_place_cell_weights(
         "layer"
     ].place_cell_centres
 
-    chosen_neurons = np.asarray(target_neurons.return_list_of_neurons(chosen_neurons=chosen_neurons))  # type: ignore[arg-type]
+    chosen_neurons = np.asarray(
+        target_neurons.return_list_of_neurons(chosen_neurons=chosen_neurons)
+    )  # type: ignore[arg-type]
 
     BTSP_per = False
     if place_weights is None:
         place_weights = target_neurons.inputs[PCs_input_name]["w"][chosen_neurons]
         BTSP_per = True
 
+    orig_vmin = vmin
     if vmin is None:
         vmin = place_weights.min()
         vmin = min(vmin, np.around(vmin, 2))
 
     if vmax is None:
         vmax = place_weights.max()
-        if vmax < 0.02:
-            vmax = 0.02
-        vmax = max(vmax, np.around(vmax, 2))
+        vmax = max(vmax, np.around(vmax, 2), 0.02)
+
+    if vmax == vmin and orig_vmin is None:
+        vmax = np.around(vmin * 2, 2)
+        vmin = 0
 
     if ax is None:
         ax = plot_util.init_rate_map_axes(
@@ -2102,6 +2111,7 @@ def plot_series_of_2D_input_place_cell_weights(
     ratio: float = 8,
     title: str | None = None,
     y: float = 1,
+    split: bool = True,
     **kwargs,
 ):
     """
@@ -2116,13 +2126,18 @@ def plot_series_of_2D_input_place_cell_weights(
     - title (str or list, optional): Title or titles to use for the figures.
         Default is None.
     - y (float, optional): Y position of the title. Default is 1.
+    - split (bool, optional): Whether to split the figure into subplots. Default is True.
 
     Keyword args:
     - **kwargs: Keyword arguments passed to plot_2D_input_place_cell_weights().
 
     Returns:
+    if split:
     - all_axes (list): List of subplots with the 2D input place cell weights plotted
         for each series.
+    else:
+    - axes (np.ndarray): Subplot with the 2D input place cell weights plotted
+        for all series.
     """
 
     if steps is not None:
@@ -2142,6 +2157,17 @@ def plot_series_of_2D_input_place_cell_weights(
             "Number of titles must match the number of place weight series provided."
         )
 
+    if not split:
+        num_plots = len(place_weight_series)
+        num_cols = min(5, num_plots)
+        num_rows = int(np.ceil(num_plots / num_cols))
+        axes = plot_util.init_rate_map_axes(
+            num_plots=num_plots,
+            num_cols=num_cols,
+            size_per=2,
+            **kwargs,
+        )
+
     all_axes = list()
     for i, weights in enumerate(place_weight_series):
         if steps is None or steps[i] is None:
@@ -2155,32 +2181,45 @@ def plot_series_of_2D_input_place_cell_weights(
             else:
                 title = f"{titles[i]} (step {step} at {t_end:.2f} s)"
 
-        num_plots = len(weights)
-        num_rows = int(np.max([1, np.floor(np.sqrt(num_plots / ratio))]))
-        num_cols = int(np.ceil(num_plots / num_rows))
-        axes = plot_util.init_rate_map_axes(
-            num_plots=len(weights),
-            num_cols=num_cols,
-            **kwargs,
-        )
+        if split:
+            num_plots = len(weights)
+            num_rows = int(np.max([1, np.floor(np.sqrt(num_plots / ratio))]))
+            num_cols = int(np.ceil(num_plots / num_rows))
+            use_ax = plot_util.init_rate_map_axes(
+                num_plots=num_plots,
+                num_cols=num_cols,
+                **kwargs,
+            )
+        else:
+            weights = np.asarray(weights).max(axis=0)[np.newaxis]
+            use_ax = axes.ravel()[i]
 
         plot_2D_input_place_cell_weights(
             target_neurons,
             place_weights=weights,
             t_end=t_end,
-            ax=axes,
+            ax=use_ax,
             **kwargs,
         )
 
-        for sub_ax in axes.ravel()[num_plots:]:
-            sub_ax.axis("off")
+        if split:
+            for sub_ax in use_ax.ravel()[num_plots:]:
+                sub_ax.axis("off")
 
-        if title is not None:
-            axes.ravel()[-1].figure.suptitle(title, y=y, fontsize=20)
+            if title is not None:
+                use_ax.ravel()[-1].figure.suptitle(title, y=y, fontsize=20)
 
-        all_axes.append(axes)
+            all_axes.append(use_ax)
+        else:
+            if title is not None:
+                use_ax.set_title(title)
 
-    return all_axes
+            all_axes.append(use_ax)
+
+    if split:
+        return all_axes
+    else:
+        return axes
 
 
 def plot_place_cell_inputs_over_time(
@@ -2528,7 +2567,7 @@ def plot_interleaved_openfield_rate_maps(Pyrs, Objs, num_cols=10, size_per=1.4):
 
 
 def compare_theoretical_and_true_weights(
-    Pyrs, PCs_name="PCs", target_position=None, output_fr=4, **kwargs
+    Pyrs, PCs_name="PCs", target_position=None, output_fr=4, chosen_neuron=0, **kwargs
 ):
     """
     compare_theoretical_and_true_weights(Pyrs)
@@ -2544,6 +2583,7 @@ def compare_theoretical_and_true_weights(
         the weights are rolled approximately, based on peak difference. Default is None.
     - output_fr (int, optional): Output framerate to use to compute theoretical weights.
         Default is 4.
+    - chosen_neuron (int, optional): Neuron to plot. Default is 0.
 
     Keyword args:
     - **kwargs: Keyword arguments passed to
@@ -2554,16 +2594,15 @@ def compare_theoretical_and_true_weights(
         weights plotted.
     - no_norm_theor_axes (np.ndarray): Array of subplots with non-normalized
         theoretical weights plotted.
-    - comp_sub_ax (plt.Axes): Subplot with actual weights vs theoretical weights
-        plotted.
+    - act_sub_ax (plt.Axes): Subplot with actual weights plotted. If the environment is
+        1D, the theoretical weights are also plotted.
     """
-
-    if Pyrs.Agent.Environment.dimensionality != "1D":
-        raise RuntimeError("This function only works for 1D environments.")
 
     if PCs_name not in Pyrs.inputs.keys():
         raise RuntimeError(f"{PCs_name} not found in inputs to Pyrs.")
     PCs = Pyrs.inputs[PCs_name]["layer"]
+
+    y = 1.7 if Pyrs.Agent.Environment.dimensionality == "1D" else 1.3
 
     theor_axes = list()
     for normalize_weights_divisively in [True, False]:
@@ -2576,30 +2615,38 @@ def compare_theoretical_and_true_weights(
         )
         axes = plot_util.plot_learning_rate_assessment(assessment_dict)
         title_str = "With" if normalize_weights_divisively else "No"
-        axes.ravel()[0].figure.suptitle(f"{title_str} normalization", y=1.7)
+        axes.ravel()[0].figure.suptitle(f"{title_str} normalization", y=y)
         theor_axes.append(axes)
 
     norm_theor_axes, no_norm_theor_axes = theor_axes
 
-    true_ws = Pyrs.inputs[PCs_name]["w"]
-    comp_sub_ax = plot_1D_input_place_cell_weights(true_ws, PCs)
+    if Pyrs.Agent.Environment.dimensionality == "1D":
+        true_ws = Pyrs.inputs[PCs_name]["w"]
+        act_sub_ax = plot_1D_input_place_cell_weights(true_ws, PCs)
 
-    # roll theoretical weights
-    theor_ws = assessment_dict["ws"][-1][:, 0]
-    if target_position is None:
-        target_position = Pyrs.Agent.target_position[0]
-    if target_position is not None:
-        rel_pos = target_position / Pyrs.Agent.Environment.scale
-        peak_pt_diff = int(np.argmax(theor_ws) - len(theor_ws) * rel_pos)
+        # roll theoretical weights
+        theor_ws = assessment_dict["ws"][-1][:, 0]
+        if target_position is None:
+            target_position = Pyrs.Agent.target_position[0]
+        if target_position is not None:
+            rel_pos = target_position / Pyrs.Agent.Environment.scale
+            peak_pt_diff = int(np.argmax(theor_ws) - len(theor_ws) * rel_pos)
+        else:
+            peak_pt_diff = np.argmax(theor_ws) - np.argmax(true_ws)
+        rolled_theor_ws = np.roll(theor_ws, -peak_pt_diff)
+
+        x = np.linspace(0, Pyrs.Agent.Environment.scale, len(theor_ws) + 1)[:-1]
+        act_sub_ax.plot(x, rolled_theor_ws, color="k", alpha=0.7, label="theoret.")
+        act_sub_ax.set_title("Actual weights vs theoretical weights")
+        act_sub_ax.legend()
+        act_sub_ax.autoscale(axis="y")
+        plot_util.pad_axis(act_sub_ax, axis="y", end="high")
+
     else:
-        peak_pt_diff = np.argmax(theor_ws) - np.argmax(true_ws)
-    rolled_theor_ws = np.roll(theor_ws, -peak_pt_diff)
+        dim = Pyrs.Agent.Environment.scale / 4 * 3
+        _, act_sub_ax = plt.subplots(figsize=(dim, dim))
+        plot_2D_input_place_cell_weights(
+            Pyrs, ax=act_sub_ax, chosen_neurons=[chosen_neuron]
+        )
 
-    x = np.linspace(0, Pyrs.Agent.Environment.scale, len(theor_ws) + 1)[:-1]
-    comp_sub_ax.plot(x, rolled_theor_ws, color="k", alpha=0.7, label="theoret.")
-    comp_sub_ax.set_title("Actual weights vs theoretical weights")
-    comp_sub_ax.legend()
-    comp_sub_ax.autoscale(axis="y")
-    plot_util.pad_axis(comp_sub_ax, axis="y", end="high")
-
-    return norm_theor_axes, no_norm_theor_axes, comp_sub_ax
+    return norm_theor_axes, no_norm_theor_axes, act_sub_ax
