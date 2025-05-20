@@ -228,6 +228,7 @@ def calculate_Hebbian_norm(
     """
 
     div = np.sum([np.sum(np.absolute(w**p), axis=-1) for w in ws], axis=0) ** (1 / p)
+
     return div
 
 

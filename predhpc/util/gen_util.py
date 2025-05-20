@@ -1,4 +1,7 @@
 import copy
+from datetime import datetime
+from pathlib import Path
+import time
 
 import numpy as np
 
@@ -15,6 +18,111 @@ class TempFigureDirectory:
 
     def __exit__(self, exc_type, exc_value, traceback):
         ratinabox.figure_directory = self.original_figure_directory
+
+
+def get_duration_str(start_time, log=False):
+    """
+    get_duration_str(start_time)
+
+    Report time elapsed since start time.
+
+    Args:
+    - start_time (float): Start time.
+    - log (bool, optional): If True, print the time elapsed. Default is False.
+
+    Returns:
+    - time_str (str): Time elapsed as a string.
+    """
+
+    stop_time = time.perf_counter()
+
+    time_sec = stop_time - start_time
+    if time_sec / 3600 > 1.5:
+        time_hour = int(time_sec // 3600)
+        time_min = time_sec / 60 - time_hour * 60
+        time_str = f"{time_hour}h {time_min:.2f}m"
+    elif time_sec / 60 > 1.5:
+        time_min = int(time_sec // 60)
+        time_sec = time_sec - time_min * 60
+        time_str = f"{time_min}m {time_sec:.2f}s"
+    else:
+        time_str = f"{time_sec:.2f} s"
+
+    if log:
+        print(f"Time elapsed: {time_str}.")
+
+    return time_str
+
+
+def get_short_time_str():
+    """
+    get_short_time_str()
+
+    Obtain the time as a short string (HHMM).
+
+    Returns:
+    - short_time_str (str): Current time as a short string.
+    """
+
+    include_str = "%H%M"
+    date_time_str = datetime.now().strftime(include_str)
+
+    return date_time_str
+
+
+def get_date_time_str(include_time=True):
+    """
+    get_date_time_str()
+
+    Obtain the current date, and optionally time, as a string:
+    - date only: "YY_MM_DD"
+    - date and time: "YY-MM-DD_HH-MM-SS"
+
+    Args:
+    - include_time (bool, optional): If True, include time in the string.
+        Default is True.
+
+    Returns:
+    - date_time_str (str): Current date and time as a string.
+    """
+
+    if include_time:
+        include_str = "%y-%m-%d_%H-%M-%S"
+    else:
+        include_str = "%y_%m_%d"
+
+    date_time_str = datetime.now().strftime(include_str)
+    return date_time_str
+
+
+def get_save_path(save_name, direc=None, create_dir=True, log=True):
+    """
+    get_save_path()
+
+    Obtain the path to the save directory, which is the current working directory.
+
+    Returns:
+    - save_path (str): Path to the save directory.
+    """
+
+    today = get_date_time_str(include_time=False)
+    now = get_short_time_str()
+
+    stem = Path(save_name).stem
+    suffix = Path(save_name).suffix
+    save_name = f"{stem}_{now}{suffix}"
+
+    save_path = Path(today, save_name)
+    if direc is not None:
+        save_path = Path(direc, save_path)
+
+    if create_dir:
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if log:
+        print(f"Saving to: {save_path}.")
+
+    return save_path
 
 
 def trim_dict(data_dict):
@@ -295,6 +403,42 @@ def sample_gaussian_clipped(n, seed=None, max_abs=2.3):
             resample = np.abs(noise) > max_abs
 
     return noise
+
+
+def spread_data(x, y, max_spread=0.5):
+    """
+    spread_data(x, y)
+
+    Spread the data in y based on the duplicated values of x and y.
+
+    Args:
+    - x (1D np.ndarray): Array of x values.
+    - y (1D np.ndarray): Array of y values.
+    - max_spread (float, optional): Maximum spread of the y values. Default is 0.5.
+
+    Returns:
+    - y (1D np.ndarray): Array of y values with spread applied.
+    """
+
+    spread_y = np.zeros_like(y)
+    for n in np.unique(x):
+        x_mask = x == n
+        if x_mask.sum() == 1:
+            continue
+        for y_val in np.unique(y[x_mask]):
+            mask = (y == y_val) & x_mask
+            if mask.sum() == 1:
+                continue
+            vals = np.arange(mask.sum()) - (mask.sum() - 1) / 2
+            spread_y[mask] = vals
+
+    max_val = np.absolute(spread_y).max()
+    if max_val > 0:
+        spread_y = spread_y / max_val * max_spread
+
+    y = y + spread_y
+
+    return y
 
 
 def get_weights(num_in=10, num_out=10, distr="1to1", loc=1, scale=0):

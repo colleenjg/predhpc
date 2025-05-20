@@ -35,7 +35,9 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
     • self.get_min_max_firingrates()
     • self.get_oscillation_df()
     • self.log_oscillation_stats()
+    • self.get_binned_rates()
     • self.plot_oscillations()
+    • self.plot_binned_rates()
     • self.plot_rate_map()
     • self.plot_rate_timeseries()
     • self.plot_rate_correlations()
@@ -203,9 +205,9 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
             firingrates, window=window, amp_thr=amp_thr
         )
 
-        neuron_idx = oscillation_df["neuron_idx"].to_numpy()
-        neuron_num = chosen_neurons[neuron_idx.astype(int)]
-        oscillation_df["neuron_num"] = neuron_num
+        neuron_sub_idx = oscillation_df["neuron_sub_idx"].to_numpy()
+        neuron_idx = chosen_neurons[neuron_sub_idx.astype(int)]
+        oscillation_df["neuron_idx"] = neuron_idx
 
         if t_start is not None or t_end is not None:
             _, startid, endid = self.get_plotting_times(t_start, t_end)
@@ -253,8 +255,8 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
 
         num_events, prop_frs = list(), list()
         num_neurons = 0
-        for neuron_num in chosen_neurons:
-            sub_df = oscillation_df[oscillation_df["neuron_num"] == neuron_num]
+        for neuron_idx in chosen_neurons:
+            sub_df = oscillation_df[oscillation_df["neuron_idx"] == neuron_idx]
             if len(sub_df):
                 num_neurons += 1
                 num_events.append(len(sub_df))
@@ -269,112 +271,6 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
             log_str = f"{log_str}\n    ({mean_prop_frs} frames per neuron)"
 
         print(log_str)
-
-    def plot_oscillations(
-        self,
-        chosen_neurons="all",
-        t_start=None,
-        t_end=None,
-        plot_type="full",
-        aligned=True,
-        pad_prop=0.1,
-        order_by="neuron_num",
-        reverse=False,
-        max_num=1000,
-        sharey=True,
-        color=None,
-        ax=None,
-        **kwargs,
-    ):
-        """
-        self.plot_oscillations()
-
-        Plot the oscillations in the firing rates of the layer. Useful for debugging
-        network oscillation.
-
-        Args:
-        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
-            Default is "all".
-        - t_start (float, optional): Time at which to start plotting data.
-            Default is None.
-        - t_end (float, optional): Time at which to stop plotting data.
-            Default is None.
-        - plot_type (str, optional): Type of plot to make. Options are "full",
-            "limited" or "individual". Default is "full".
-        - aligned (bool, optional): Whether to align the oscillations, if plot type
-            is "limited". Default is True.
-        - pad_prop (float, optional): Proportion of the firing rate range to pad the
-            oscillation plot, if plot type is "limited". Default is 0.1.
-        - order_by (str, optional): Column to order the individual plots by, if plot
-            type is "individual". Default is "neuron_num".
-        - reverse (bool, optional): Whether to reverse the order of the individual
-            plots, if plot type is "individual". Default is False.
-        - max_num (int, optional): Maximum number of individual plots to make, if plot
-            type is "individual". Default is 1000.
-        - sharey (bool, optional): Whether to share the y-axis across individual plots.
-            Default is True.
-        - color (str, optional): Color to plot the oscillations. Default is None.
-        - ax (np.ndarray or plt.Axes, optional): Subplot or array of subplots
-            (if plot_type is "individual") to plot on. If None, a new subplot or
-            array of subplots is created. Default is None.
-
-        Keyword args:
-        - **kwargs: Keyword arguments passed to self.get_oscillation_df().
-
-        Returns:
-        - ax (np.ndarray or plt.Axes, optional): Subplot or array of subplots
-            (if plot_type is "individual") with oscillations plotted.
-        """
-
-        t, startid, endid = self.get_plotting_times(t_start, t_end)
-
-        chosen_neurons = self.get_chosen_neurons(chosen_neurons)
-        firingrates = np.asarray(self.history["firingrate"])[
-            startid : endid + 1, chosen_neurons
-        ]
-
-        oscillation_df = self.get_oscillation_df(
-            chosen_neurons=chosen_neurons, t_start=t_start, t_end=t_end, **kwargs
-        )
-
-        oscillation_df["start_frame"] -= startid
-        oscillation_df["stop_frame"] -= startid
-
-        if plot_type == "full":
-            sub_ax = plot_fcts.plot_with_marked_oscillations(
-                oscillation_df,
-                firingrates,
-                t=t,
-                sub_ax=ax,
-                color=color or self.color,
-            )
-        elif plot_type == "limited":
-            sub_ax = plot_fcts.plot_oscillations(
-                oscillation_df,
-                firingrates,
-                aligned=aligned,
-                pad_prop=pad_prop,
-                sub_ax=ax,
-                color=color or self.color,
-            )
-        elif plot_type == "individual":
-            sub_ax = plot_fcts.plot_oscillation_events(
-                oscillation_df,
-                firingrates,
-                order_by=order_by,
-                reverse=reverse,
-                max_num=max_num,
-                num_cols=15,
-                sharey=sharey,
-                axes=ax,
-                color=color or self.color,
-            )
-        else:
-            raise ValueError(
-                f"Invalid plot_type: {plot_type}. Must be 'full', 'limited' or 'individual'."
-            )
-
-        return sub_ax
 
     def get_binned_rates(
         self,
@@ -444,6 +340,122 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
 
         return binned_rate_means, occupancy
 
+    def plot_oscillations(
+        self,
+        chosen_neurons="all",
+        t_start=None,
+        t_end=None,
+        plot_type="full",
+        aligned=True,
+        pad_prop=0.1,
+        order_by="neuron_idx",
+        reverse=False,
+        max_num=1000,
+        sharey=True,
+        color=None,
+        in_min=True,
+        ax=None,
+        **kwargs,
+    ):
+        """
+        self.plot_oscillations()
+
+        Plot the oscillations in the firing rates of the layer. Useful for debugging
+        network oscillation.
+
+        Args:
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
+            Default is "all".
+        - t_start (float, optional): Time at which to start plotting data.
+            Default is None.
+        - t_end (float, optional): Time at which to stop plotting data.
+            Default is None.
+        - plot_type (str, optional): Type of plot to make. Options are "full",
+            "limited" or "individual". Default is "full".
+        - aligned (bool, optional): Whether to align the oscillations, if plot type
+            is "limited". Default is True.
+        - pad_prop (float, optional): Proportion of the firing rate range to pad the
+            oscillation plot, if plot type is "limited". Default is 0.1.
+        - order_by (str, optional): Column to order the individual plots by, if plot
+            type is "individual". Default is "neuron_idx".
+        - reverse (bool, optional): Whether to reverse the order of the individual
+            plots, if plot type is "individual". Default is False.
+        - max_num (int, optional): Maximum number of individual plots to make, if plot
+            type is "individual". Default is 1000.
+        - sharey (bool, optional): Whether to share the y-axis across individual plots.
+            Default is True.
+        - color (str, optional): Color to plot the oscillations. Default is None.
+        - in_min (bool, optional): Whether to plot time in minutes instead of seconds.
+            Default is True.
+        - ax (np.ndarray or plt.Axes, optional): Subplot or array of subplots
+            (if plot_type is "individual") to plot on. If None, a new subplot or
+            array of subplots is created. Default is None.
+
+        Keyword args:
+        - **kwargs: Keyword arguments passed to self.get_oscillation_df().
+
+        Returns:
+        - ax (np.ndarray or plt.Axes, optional): Subplot or array of subplots
+            (if plot_type is "individual") with oscillations plotted.
+        """
+
+        t, startid, endid = self.get_plotting_times(t_start, t_end)
+        if in_min:
+            t = t / 60
+            t_start = t_start / 60 if t_start is not None else None
+            t_end = t_end / 60 if t_end is not None else None
+
+        chosen_neurons = self.get_chosen_neurons(chosen_neurons)
+        firingrates = np.asarray(self.history["firingrate"])[
+            startid : endid + 1, chosen_neurons
+        ]
+
+        oscillation_df = self.get_oscillation_df(
+            chosen_neurons=chosen_neurons, t_start=t_start, t_end=t_end, **kwargs
+        )
+        if in_min:
+            oscillation_df["start_time"] = oscillation_df["start_time"] / 60
+            oscillation_df["stop_time"] = oscillation_df["stop_time"] / 60
+
+        oscillation_df["start_frame"] -= startid
+        oscillation_df["stop_frame"] -= startid
+
+        if plot_type == "full":
+            sub_ax = plot_fcts.plot_with_marked_oscillations(
+                oscillation_df,
+                firingrates,
+                t=t,
+                sub_ax=ax,
+                color=color or self.color,
+            )
+        elif plot_type == "limited":
+            sub_ax = plot_fcts.plot_oscillations(
+                oscillation_df,
+                firingrates,
+                aligned=aligned,
+                pad_prop=pad_prop,
+                sub_ax=ax,
+                color=color or self.color,
+            )
+        elif plot_type == "individual":
+            sub_ax = plot_fcts.plot_oscillation_events(
+                oscillation_df,
+                firingrates,
+                order_by=order_by,
+                reverse=reverse,
+                max_num=max_num,
+                num_cols=15,
+                sharey=sharey,
+                axes=ax,
+                color=color or self.color,
+            )
+        else:
+            raise ValueError(
+                f"Invalid plot_type: {plot_type}. Must be 'full', 'limited' or 'individual'."
+            )
+
+        return sub_ax
+
     def plot_binned_rates(
         self,
         t_start: float | None = None,
@@ -455,8 +467,10 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         vel_sign_smooth: int = 5,
         chosen_neurons: str | int | list | np.ndarray = "all",
         plot_occ: bool = True,
+        shared_range: bool = False,
         vmin: float = 0,
         vmax: float | None = None,
+        mark_runs: bool = False,
         plot_colorbars: bool = True,
         autosave: bool | None = None,
     ) -> plt.Axes | np.ndarray:
@@ -483,8 +497,11 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
             Default is "all".
         - plot_occ (bool, optional): Whether to plot the occupancy. Default is True.
+        - shared_range (bool, optional): Whether to use a shared range for the colormap.
+            Default is False.
         - vmin (float, optional): Minimum value for the colormap. Default is 0.
         - vmax (float, optional): Maximum value for the colormap. Default is None.
+        - mark_runs (bool, optional): Whether to mark runs in the plot. Default is False.
         - plot_colorbars (bool, optional): Whether to plot colorbars. Default is True.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
             global autosave setting for ratinabox is used. Default is None.
@@ -514,8 +531,10 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
             binned_rate_means,
             occupancy=occupancy,
             ax=ax,
+            shared_range=shared_range,
             vmin=vmin,
             vmax=vmax,
+            mark_runs=mark_runs,
             plot_colorbars=plot_colorbars,
         )
 
@@ -527,67 +546,6 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
             plot_util.save_figure(fig, f"{self.name}_binned_rates", save=autosave)
 
         return ax
-
-    def plot_rate_timeseries(
-        self,
-        t_start: float | None = None,
-        t_end: float | None = None,
-        sub_ax: plt.Axes | None = None,
-        adjust_xlim: bool = True,
-        autosave: bool | None = None,
-        **kwargs,
-    ) -> plt.Axes:
-        """
-        self.plot_rate_timeseries()
-
-        Plot the firing rate timeseries of the layer.
-
-        Args:
-        - t_start (float, optional): Time at which to start plotting data.
-            Default is None.
-        - t_end (float, optional): Time at which to stop plotting data.
-            Default is None.
-        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
-            created. Default is None.
-        - adjust_xlim (bool, optional): Whether to adjust the x limits to the start
-            and stop times. Default is True.
-        - autosave (bool, optional): Whether to autosave the figure. If None, the
-        global autosave setting for ratinabox is used. Default is None.
-
-        Keyword args:
-        - **kwargs: Keyword arguments passed to super().plot_rate_timeseries().
-
-        Returns:
-        - sub_ax (plt.Axes): Subplot with firing rate timeseries plotted.
-        """
-
-        kwargs = plot_util.organize_fig_ax_kwargs(
-            sub_ax=sub_ax, return_env_fig=True, **kwargs
-        )
-
-        t, _, _ = self.get_plotting_times(t_start, t_end)
-        t_start = t[0]
-        t_end = t[-1]
-
-        _, sub_ax = super().plot_rate_timeseries(
-            t_start=t_start,
-            t_end=t_end,
-            autosave=False,
-            **kwargs,
-        )
-
-        if adjust_xlim:
-            xlim = np.asarray([t_start, t_end]) / 60
-            sub_ax.set_xlim(*xlim)
-
-            xticks = np.around(xlim, 2)
-            sub_ax.set_xticks(xticks)
-            sub_ax.set_xticklabels(xticks)
-
-        fig = sub_ax.figure
-        plot_util.save_figure(fig, f"{self.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
-
-        return sub_ax
 
     def plot_rate_map(self, ax=None, **kwargs):
         """
@@ -622,6 +580,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         t_end: float | None = None,
         sub_ax: plt.Axes | None = None,
         adjust_xlim: bool = True,
+        in_min: bool = True,
         autosave: bool | None = None,
         **kwargs,
     ) -> plt.Axes:
@@ -639,6 +598,8 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
             created. Default is None.
         - adjust_xlim (bool, optional): Whether to adjust the x limits to the start
             and stop times. Default is True.
+        - in_min (bool, optional): Whether to plot time in minutes instead of seconds.
+            Default is True.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
         global autosave setting for ratinabox is used. Default is None.
 
@@ -648,6 +609,9 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         Returns:
         - sub_ax (plt.Axes): Subplot with firing rate timeseries plotted.
         """
+
+        if not in_min:
+            raise NotImplementedError("Plotting in seconds is not implemented.")
 
         kwargs = plot_util.organize_fig_ax_kwargs(
             sub_ax=sub_ax, return_env_fig=True, **kwargs
@@ -663,6 +627,9 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
             autosave=False,
             **kwargs,
         )
+
+        xlabel = "Time (min)" if in_min else "Time (s)"
+        sub_ax.set_xlabel(xlabel)
 
         if adjust_xlim:
             xlim = np.asarray([t_start, t_end]) / 60
@@ -930,7 +897,7 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
             fig = sub_ax.figure
 
         sub_ax = self.Agent.Environment.plot_environment(
-            sub_ax=sub_ax, autosave=False, **kwargs
+            sub_ax=sub_ax, alpha=0.6, autosave=False, **kwargs
         )
 
         place_cell_centres = self.place_cell_centres

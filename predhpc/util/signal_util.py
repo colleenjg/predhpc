@@ -59,6 +59,213 @@ def get_norm_data(data, axis=-1):
     return norm_data
 
 
+def smooth_circularly(data, k=3):
+    """
+    smooth_circularly(data)
+
+    Perform circular smoothing on 1D data with a kernel of size k.
+    The kernel is a uniform kernel of size k, i.e. [1/k, 1/k, ..., 1/k].
+
+    Args:
+    - data (1D np.ndarray): Data to convolve.
+    - k (int, optional): Size of the kernel. Default is 3.
+
+    Raises:
+    - ValueError: If k is larger than the data length.
+    - NotImplementedError: If data is not 1D.
+
+    Returns:
+    - smoothed (1D np.ndarray): Circularly smoothed data.
+    """
+
+    if k != int(k):
+        raise ValueError("Kernel size must be an integer.")
+
+    k = int(k)
+
+    if k < 0:
+        raise ValueError("Kernel size must be a positive integer.")
+    if k == 0 or k == 1:
+        return data
+
+    if len(data.shape) != 1:
+        raise NotImplementedError("Circular convolution only implemented for 1D data.")
+
+    n = len(data)
+    if k >= n:
+        raise ValueError(f"Kernel size {k} cannot be larger than the data ({n}).")
+    if k % 2 == 0:
+        raise ValueError("Kernel size must be odd.")
+
+    kernel = np.ones(k) / k
+
+    shift = int(k // 2)
+    smoothed = np.convolve(np.tile(data, 3), kernel)[n + shift : 2 * n + shift]
+
+    return smoothed
+
+
+def get_partway_idx_of_half_max_crossing_on_right(signal):
+    """
+    get_partway_idx_of_half_max_crossing_on_right(signal)
+
+    Find the index of the point at which the signal first crosses the half peak to on
+    the right side. Index is a decimal value that is partway between the points around
+    the half max crossing.
+
+    Args:
+    - signal (np.ndarray): 1D array of signal values.
+
+    Returns:
+    - partway_idx (float or None): Index of the point where the half max is first
+        crossed, to the right of the peak. If no crossing is found, returns np.nan.
+    """
+
+    peak_idx = np.argmax(signal)
+    half_max = get_half_max(signal)
+
+    right_side = np.concatenate((signal[peak_idx:], signal[:peak_idx])) - half_max
+
+    post_idxs = np.where(right_side < 0)[0]
+    if len(post_idxs) == 0:
+        return np.nan
+
+    post_idx = post_idxs[0]
+    pre_idx = post_idx - 1
+
+    # Find a decimal index under linear interpolation between points
+    pre_diff = right_side[pre_idx]
+    post_diff = right_side[post_idx]
+
+    pre_idx = (peak_idx + pre_idx) % len(signal)
+    partway_idx = pre_idx + pre_diff / (pre_diff + np.absolute(post_diff))
+
+    return partway_idx
+
+
+def get_interp_x(x, partway_idx, max_x=None):
+    """
+    get_interp_x(x, partway_idx)
+
+    Obtain the x value of the partway index interpolated from the x provided.
+
+    Args:
+    - x (1D np.ndarray): Sorted x.
+    - partway_idx (float): Index of the point where the half max is first crossed.
+    - max_x (float, optional): Maximum x value to consider for interpolation.
+
+    Returns:
+    - interp_x (float): Position corresponding to the partway index interpolated
+        from the x values provided.
+    """
+
+    if partway_idx >= len(x):
+        partway_idx = partway_idx % len(x)
+
+    idx = int(partway_idx)
+
+    left_pos = x[idx]
+    if idx + 1 == len(x):
+        if max_x is None:
+            right_pos = left_pos + x[0]
+        else:
+            right_pos = max_x + x[0]
+
+    else:
+        right_pos = x[idx + 1]
+
+    interp_x = left_pos + (right_pos - left_pos) * (partway_idx - idx)
+
+    return interp_x
+
+
+def get_half_max(signal):
+    """
+    get_half_max(signal)
+
+    Compute the half maximum of a signal.
+
+    Args:
+    - signal (1D np.ndarray): Signal values.
+
+    Returns:
+    - half_max (float): Half maximum of the signal.
+    """
+
+    signal = np.asarray(signal)
+
+    half_max = signal.min() + (signal.max() - signal.min()) / 2
+
+    return half_max
+
+
+def compute_FWHM(signal, x=None, k=1, max_x=None, return_edges=False):
+    """
+    compute_FWHM(signal)
+
+    Compute the full width at half maximum (FWHM) of a signal.
+
+    Args:
+    - signal (1D np.ndarray): Signal values.
+    - x (1D np.ndarray): X axis. If None, indices are used.
+    - k (int, optional): Kernel size for circular smoothing. Default is 1.
+    - max_x (float, optional): Maximum x value to consider for FWHM. If None,
+        the maximum value of x is used. Default is None.
+    - return_positions (bool, optional): If True, return the positions defining the
+        FWHM.
+
+    Returns:
+    - FWHM (float): Full width at half maximum of the signal.
+    if return_edges:
+    - FWHM_edges (1D np.ndarray): Edges defining the FWHM [left, right].
+    """
+
+    if x is None:
+        x = np.arange(len(signal))
+
+    elif len(signal) != len(x):
+        raise ValueError("Signal and x must have the same length.")
+
+    sorter = np.argsort(x)
+    x = x[sorter]
+    signal = signal[sorter]
+
+    smoothed_signal = smooth_circularly(signal, k=k)
+
+    # check right side of the peak
+    right_idx = get_partway_idx_of_half_max_crossing_on_right(smoothed_signal)
+    left_idx = get_partway_idx_of_half_max_crossing_on_right(smoothed_signal[::-1])
+
+    if max_x is None:
+        max_x = x.max()
+
+    FWHM_edges = np.full(2, np.nan)
+    if np.isnan(right_idx) or np.isnan(left_idx):
+        FWHM = max_x
+
+    elif np.isclose(right_idx, len(x) - 1 - left_idx):
+        FWHM = max_x
+
+    else:
+        right_pos = get_interp_x(x, right_idx, max_x=max_x)
+        left_pos = get_interp_x(x[::-1], left_idx, max_x=max_x)
+
+        if right_pos == left_pos:
+            FWHM = max_x
+        else:
+            FWHM_edges = np.asarray([left_pos, right_pos])
+            if right_pos > left_pos:
+                FWHM = right_pos - left_pos
+            else:
+                FWHM = max_x + (right_pos - left_pos)
+
+    if return_edges:
+        return FWHM, FWHM_edges
+
+    else:
+        return FWHM
+
+
 def pad_throughout(indices, pad_prop=0.1, min_val=None, max_val=None):
     """
     pad_throughout(indices)

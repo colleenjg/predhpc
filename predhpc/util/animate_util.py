@@ -5,6 +5,7 @@ import matplotlib
 from matplotlib import pyplot as plt
 from matplotlib import animation as mpl_animation
 import numpy as np
+import tqdm
 
 from ratinabox import utils as rutils  # type: ignore[import]
 
@@ -371,6 +372,7 @@ def plot_linear_track(
             sub_ax=ax1D[1],
             t_start=t_start,
             t_end=t_end,
+            plot_last_FWHM=(Pyrs.n == 1),
         )
 
         target_Pyr_idx_str = ""
@@ -604,6 +606,7 @@ def animate(
     environment="linear_track",
     savename="animation",
     embed_limit=None,
+    progress_bar=True,
     autosave=None,
     **kwargs,
 ):
@@ -630,6 +633,7 @@ def animate(
     - savename (str, optional): Name of the file to save the animation. Default is
         "animation".
     - embed_limit (int, optional): Limit for embedding the animation. Default is None.
+    - progress_bar (bool, optional): Whether to show a progress bar. Default is True.
     - autosave (bool, optional): Whether to autosave the animation. If None, the
         global autosave setting for ratinabox is used. Default is None.
 
@@ -713,20 +717,22 @@ def animate(
             plt.close()
         return
 
+    frames = int((t_end - t_start) / (dt * speed_up))
+    if progress_bar:
+        frames = tqdm.tqdm(range(frames), position=0, leave=True)
+
     anim = mpl_animation.FuncAnimation(
         fig,
         animate_,
         interval=1000 * dt,
-        frames=int((t_end - t_start) / (dt * speed_up)),
+        frames=frames,
         blit=False,
         fargs=(axes, dt, t_start, speed_up, kwargs),
     )
 
     rutils.save_animation(anim, savename, anim_save_types=["mp4", "gif"], save=autosave)
 
-    stop_time = time.perf_counter()
-    time_min = (stop_time - start_time) / 60
-
-    print(f"Animation took {time_min:.2f} min. to create.")
+    time_str = gen_util.get_duration_str(start_time)
+    print(f"Animation took {time_str} to create.")
 
     return anim

@@ -421,22 +421,21 @@ class TwoCompLayer(object):
 
         return min_firingrate, max_firingrate
 
-    def get_place_cell_centre_of_main_dendrite_input(
-        self, neuron_num: int = 0, src_name: str = "Obj"
+    def get_index_of_main_dendrite_input(
+        self, neuron_idx: int = 0, src_name: str = "Obj"
     ):
         """
-        self.get_place_cell_centre_of_main_dendrite_input()
+        self.get_index_of_main_dendrite_input()
 
-        Get the place cell centre input location for the dendrite of a specified neuron.
+        Get the index of the main input to the dendrite of a specified neuron.
 
         Args:
-        - neuron_num (int, optional): Neuron number. Default is 0.
+        - neuron_idx (int, optional): Neuron index. Default is 0.
         - src_name (str, optional): Name of the input layer
             (must be a place cell-derived layer). Default is "Obj".
 
         Returns:
-        - place_cell_centre (1D np.ndarray): Main dendrite input place cell centre
-            location.
+        - input_idx (int): Input of main dendrite input.
         """
 
         if src_name not in self.DendriteCompartment.inputs.keys():
@@ -447,20 +446,47 @@ class TwoCompLayer(object):
         if not isinstance(input_dict["layer"], riab_neurons.PlaceCells):
             raise ValueError(f"Input layer '{src_name}' is not a PlaceCells layer.")
 
-        if neuron_num > self.n:
+        if neuron_idx > self.n:
             raise ValueError(
-                f"Neuron number {neuron_num} is greater than the number of neurons "
+                f"Neuron index {neuron_idx} is greater than the number of neurons "
                 "in the layer."
             )
 
-        input_idx = np.argmax(input_dict["w"][:, neuron_num])
-        place_cell_centre = input_dict["layer"].place_cell_centres[input_idx]
+        input_idx = np.argmax(input_dict["w"][:, neuron_idx])
+
+        return input_idx
+
+    def get_place_cell_centre_of_main_dendrite_input(
+        self, neuron_idx: int = 0, src_name: str = "Obj"
+    ):
+        """
+        self.get_place_cell_centre_of_main_dendrite_input()
+
+        Get the place cell centre input location for the dendrite of a specified neuron.
+
+        Args:
+        - neuron_idx (int, optional): Neuron index. Default is 0.
+        - src_name (str, optional): Name of the input layer
+            (must be a place cell-derived layer). Default is "Obj".
+
+        Returns:
+        - place_cell_centre (1D np.ndarray): Main dendrite input place cell centre
+            location.
+        """
+
+        input_idx = self.get_index_of_main_dendrite_input(
+            neuron_idx=neuron_idx, src_name=src_name
+        )
+
+        input_layer = self.DendriteCompartment.inputs[src_name]["layer"]
+
+        place_cell_centre = input_layer.place_cell_centres[input_idx]
 
         return place_cell_centre
 
     def get_vectors_to_place_cell_centre_of_main_dendrite_input(
         self,
-        neuron_num: int = 0,
+        neuron_idx: int = 0,
         src_name: str = "Obj",
         polar: bool = False,
         radians: bool = False,
@@ -472,7 +498,7 @@ class TwoCompLayer(object):
         input location for the dendrite of a specified neuron.
 
         Args:
-        - neuron_num (int, optional): Neuron number. Default is 0.
+        - neuron_idx (int, optional): Neuron index. Default is 0.
         - src_name (str, optional): Name of the input layer
             (must be a place cell-derived layer). Default is "Obj".
         - polar (bool, optional): Whether to return vectors in polar coordinates.
@@ -486,7 +512,7 @@ class TwoCompLayer(object):
         """
 
         place_cell_centre = self.get_place_cell_centre_of_main_dendrite_input(
-            neuron_num=neuron_num, src_name=src_name
+            neuron_idx=neuron_idx, src_name=src_name
         )
         pos = np.asarray(self.Agent.history["pos"])
 
@@ -497,7 +523,7 @@ class TwoCompLayer(object):
         return vectors
 
     def get_distances_to_place_cell_centre_of_main_dendrite_input(
-        self, neuron_num: int = 0, src_name: str = "Obj"
+        self, neuron_idx: int = 0, src_name: str = "Obj"
     ):
         """
         self.get_distances_to_place_cell_centre_of_main_dendrite_input()
@@ -506,7 +532,7 @@ class TwoCompLayer(object):
         input location for the dendrite of a specified neuron.
 
         Args:
-        - neuron_num (int, optional): Neuron number. Default is 0.
+        - neuron_idx (int, optional): Neuron index. Default is 0.
         - src_name (str, optional): Name of the input layer
             (must be a place cell-derived layer). Default is "Obj".
 
@@ -516,7 +542,7 @@ class TwoCompLayer(object):
         """
 
         vectors = self.get_vectors_to_place_cell_centre_of_main_dendrite_input(
-            neuron_num, src_name
+            neuron_idx, src_name
         )
 
         distances = np.linalg.norm(vectors, ord=2, axis=1)
@@ -525,7 +551,7 @@ class TwoCompLayer(object):
 
     def get_target_visits(
         self,
-        neuron_num: int = 0,
+        neuron_idx: int = 0,
         target_src_name: str = "Obj",
         min_pts_btw=30,
         min_dist=0.05,
@@ -537,7 +563,7 @@ class TwoCompLayer(object):
         by the place cell centre of the main input to the neuron's dendrite.
 
         Args:
-        - neuron_num (int, optional): Neuron number. Default is 0.
+        - neuron_idx (int, optional): Neuron index. Default is 0.
         - target_src_name (str, optional): Name of the input layer
             (must be a place cell-derived layer). Default is "Obj".
         - min_pts_btw (int, optional): Minimum number of steps between closest steps.
@@ -551,7 +577,7 @@ class TwoCompLayer(object):
         """
 
         distances = self.get_distances_to_place_cell_centre_of_main_dendrite_input(
-            neuron_num=neuron_num, src_name=target_src_name
+            neuron_idx=neuron_idx, src_name=target_src_name
         )
 
         visit_indices = gen_util.get_minima_indices(
@@ -562,7 +588,7 @@ class TwoCompLayer(object):
 
     def get_closest_steps_to_target(
         self,
-        neuron_num=0,
+        neuron_idx=0,
         target_src_name="Obj",
         min_dist=0.1,
         min_steps_btw=20,
@@ -577,7 +603,7 @@ class TwoCompLayer(object):
         Args:
         - target_src_name (str, optional): Name of the input layer
             (must be a place cell-derived layer). Default is "Obj".
-        - neuron_num (int, optional): Neuron number. Default is 0.
+        - neuron_idx (int, optional): Neuron index. Default is 0.
         - min_dist (float, optional): Minimum distance to be considered closest.
             Default is 0.1.
         - min_steps_btw (int, optional): Minimum number of steps between closest steps.
@@ -590,7 +616,7 @@ class TwoCompLayer(object):
         """
 
         distances = self.get_distances_to_place_cell_centre_of_main_dendrite_input(
-            neuron_num, src_name=target_src_name
+            neuron_idx, src_name=target_src_name
         )
         closest_steps = gen_util.get_minima_indices(
             distances, minimum=min_dist, min_pts_btw=min_steps_btw
@@ -641,9 +667,9 @@ class TwoCompLayer(object):
         )
 
         nbr_visits_per_BTSP_target = np.zeros(self.n, dtype=int)
-        for neuron_num in range(self.n):
+        for neuron_idx in range(self.n):
             visit_indices = self.get_target_visits(
-                neuron_num=neuron_num,
+                neuron_idx=neuron_idx,
                 target_src_name=target_src_name,
                 min_pts_btw=min_pts_btw,
                 min_dist=min_dist,
@@ -653,14 +679,14 @@ class TwoCompLayer(object):
                 visit_indices = visit_indices[
                     (visit_indices >= startid) & (visit_indices < endid)
                 ]
-                nbr_visits_per_BTSP_target[neuron_num] = len(visit_indices)
+                nbr_visits_per_BTSP_target[neuron_idx] = len(visit_indices)
 
         return nbr_visits_per_BTSP_target
 
     def match_closest_to_target_steps_to_BTSP_steps(
         self,
         target_src_name="Obj",
-        neuron_num=0,
+        neuron_idx=0,
         max_step_dist=40,
         min_dist=0.1,
         t_start=None,
@@ -674,7 +700,7 @@ class TwoCompLayer(object):
         Args:
         - target_src_name (str, optional): Name of the input layer
             (must be a place cell-derived layer). Default is "Obj".
-        - neuron_num (int, optional): Neuron number. Default is 0.
+        - neuron_idx (int, optional): Neuron index. Default is 0.
         - max_step_dist (int, optional): Maximum distance between steps to be considered
             a match. Default is 40.
         - min_dist (float, optional): Minimum distance to be considered closest.
@@ -692,9 +718,9 @@ class TwoCompLayer(object):
                 "all_BTSP_steps": all BTSP steps, whether close to target or not
         """
 
-        if neuron_num >= self.n:
+        if neuron_idx >= self.n:
             raise ValueError(
-                f"Neuron number ({neuron_num}) must be smaller than number of "
+                f"Neuron index ({neuron_idx}) must be smaller than number of "
                 f"neurons ({self.n})."
             )
 
@@ -702,9 +728,9 @@ class TwoCompLayer(object):
             t_start=t_start, t_end=t_end
         )
 
-        BTSP_steps = self.SomaCompartment.get_BTSP_step_dict()[neuron_num]
+        BTSP_steps = self.SomaCompartment.get_BTSP_step_dict()[neuron_idx]
         closest_steps = self.get_closest_steps_to_target(
-            neuron_num, target_src_name=target_src_name, min_dist=min_dist
+            neuron_idx, target_src_name=target_src_name, min_dist=min_dist
         )
 
         keys = [
@@ -1012,8 +1038,10 @@ class TwoCompLayer(object):
         part_run: float = 0.2,
         merge: bool = True,
         plot_occ: bool = True,
+        shared_range: bool = True,
         vmin: float = 0,
         vmax: float | None = None,
+        mark_runs: bool = False,
         plot_colorbars: bool = True,
         autosave: bool | None = None,
     ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
@@ -1038,8 +1066,12 @@ class TwoCompLayer(object):
         - merge (bool, optional): Whether to merge the firing rates of the neurons.
             Default is True.
         - plot_occ (bool, optional): Whether to plot the occupancy. Default is True.
+        - shared_range (bool, optional): Whether to use a shared range for the
+            colormap across all subplots. Default is True.
         - vmin (float, optional): Minimum value for the colormap. Default is 0.
         - vmax (float, optional): Maximum value for the colormap. Default is None.
+        - mark_runs (bool, optional): Whether to mark the runs on the plot.
+            Default is False.
         - plot_colorbars (bool, optional): Whether to plot colorbars. Default is True.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
             global autosave setting for ratinabox is used. Default is None.
@@ -1072,6 +1104,7 @@ class TwoCompLayer(object):
         if plot_lateral and self.mutual_inhibition_weight is not None:
             titles.append("Lateral inhib.")
 
+        adjust_range = shared_range and (vmin is None or vmax is None)
         for c, comp in enumerate(compartments):
             comp.plot_binned_rates(
                 t_start=t_start,
@@ -1084,11 +1117,30 @@ class TwoCompLayer(object):
                 plot_occ=plot_occ,
                 vmin=vmin,
                 vmax=vmax,
+                mark_runs=mark_runs,
                 autosave=False,
             )
+            if adjust_range:
+                for sub_ax in np.asarray(axes)[c, : -int(plot_occ)]:
+                    if sub_ax.images:
+                        vmin = min(vmin or np.inf, sub_ax.images[0].get_array().min())
+                        vmax = max(vmax or -np.inf, sub_ax.images[0].get_array().max())
 
             for i in chosen_neurons:
                 np.asarray(axes)[c][i].set_title(f"{titles[c]} (#{i})")
+
+        if adjust_range:
+            last = len(chosen_neurons) - 1
+            for sub_ax in np.asarray(axes)[:, : last + 1].ravel():
+                if sub_ax.images:
+                    sub_ax.images[0].set_clim(vmin, vmax)
+
+            if plot_colorbars:
+                num_skip = len(compartments) * (1 + int(plot_occ))
+                caxes = sub_ax.figure.get_axes()[num_skip:]
+                for i in range(0, len(caxes), 1 + int(plot_occ)):
+                    cax = caxes[i]
+                    cax.yaxis.set_label_position("left")  # corrects bug
 
         for ax1D in np.asarray(axes)[:-1]:
             for sub_ax in ax1D:
@@ -1113,6 +1165,7 @@ class TwoCompLayer(object):
         plot_lateral: bool = False,
         single_x_axis: bool = True,
         norm_by: str | None = None,
+        in_min: bool = True,
         autosave: bool | None = None,
         **kwargs,
     ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
@@ -1140,6 +1193,8 @@ class TwoCompLayer(object):
         - single_x_axis (bool, optional): Whether to plot x axis spine and ticks only
             for the last subplot, instead of all of them. Default is True.
         - norm_by (str, optional): Normalisation method for rate maps. Default is None.
+        - in_min (bool, optional): Whether to plot the time in minutes instead of
+            seconds. Default is True.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
         global autosave setting for ratinabox is used. Default is None.
 
@@ -1212,6 +1267,7 @@ class TwoCompLayer(object):
                 sub_ax=use_sub_ax,
                 color=color,
                 norm_by=use_norm_by,
+                in_min=in_min,
                 autosave=False,
                 **kwargs,
             )
@@ -1220,9 +1276,7 @@ class TwoCompLayer(object):
 
         if separate_axes:
             if single_x_axis:
-                for s, sub_ax in enumerate(ax1D[:-1]):
-                    sub_ax.xaxis.set_visible(False)
-                    sub_ax.spines["bottom"].set_visible(False)
+                plot_util.clear_bottom(ax1D[:-1])
 
             for s, sub_ax in enumerate(ax1D):
                 sub_ax.set_title(separate_titles[s])
@@ -1248,7 +1302,7 @@ class TwoCompLayer(object):
 
     def plot_distances_to_target(
         self,
-        neuron_num=0,
+        neuron_idx=0,
         target_src_name="Obj",
         sub_ax=None,
         mark_soma_BTSP=True,
@@ -1257,6 +1311,8 @@ class TwoCompLayer(object):
         min_dist=0.1,
         min_steps_btw=20,
         log_num_closest=False,
+        in_min=True,
+        autosave=None,
     ):
         """
         self.plot_distances_to_target()
@@ -1265,7 +1321,7 @@ class TwoCompLayer(object):
         of the main input to the neuron's dendrite, over time.
 
         Args:
-        - neuron_num (int, optional): Neuron number. Default is 0.
+        - neuron_idx (int, optional): Neuron index. Default is 0.
         - target_src_name (str, optional): Name of the input layer
             (must be a place cell-derived layer). Default is "Obj".
         - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
@@ -1281,24 +1337,30 @@ class TwoCompLayer(object):
             Default is 20.
         - log_num_closest (bool, optional): Whether to print the number of closest
             steps identified. Default is False.
+        - in_min (bool, optional): Whether to plot the time in minutes instead of
+            seconds. Default is True.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the
+            global autosave setting for ratinabox is used. Default is None.
 
         Returns:
         - sub_ax (plt.Axes): Subplot with distances plotted.
         """
 
-        time_min = np.asarray(self.Agent.history["t"]) / 60
+        t = np.asarray(self.Agent.history["t"])
+        if in_min:
+            t = t / 60
         distances = self.get_distances_to_place_cell_centre_of_main_dendrite_input(
-            neuron_num, src_name=target_src_name
+            neuron_idx, src_name=target_src_name
         )
 
         if sub_ax is None:
             _, sub_ax = plt.subplots(figsize=[8, 1.3])
 
-        sub_ax.plot(time_min, distances)
+        sub_ax.plot(t, distances)
 
         if mark_soma_BTSP:
             self.SomaCompartment.add_BTSP_markers_to_plots(
-                sub_ax, chosen_neurons=[neuron_num], timeseries=True
+                sub_ax, chosen_neurons=[neuron_idx], timeseries=True
             )
             plot_util.pad_axis(sub_ax, end="high")
 
@@ -1312,7 +1374,7 @@ class TwoCompLayer(object):
 
         if mark_closest or log_num_closest:
             closest_steps = self.get_closest_steps_to_target(
-                neuron_num=neuron_num,
+                neuron_idx=neuron_idx,
                 target_src_name=target_src_name,
                 min_dist=min_dist,
                 min_steps_btw=min_steps_btw,
@@ -1325,7 +1387,7 @@ class TwoCompLayer(object):
             if mark_closest and len(closest_steps):
                 plot_util.pad_axis(sub_ax, axis="y", end="both", pad_prop=0.2)
                 sub_ax.plot(
-                    time_min[closest_steps],
+                    t[closest_steps],
                     np.zeros_like(closest_steps),
                     lw=0,
                     marker="o",
@@ -1335,7 +1397,12 @@ class TwoCompLayer(object):
 
         sub_ax.spines[["right", "top"]].set_visible(False)
         sub_ax.set_ylabel("Dist. to target")
-        sub_ax.set_xlabel("Time / min.")
+
+        xlabel = "Time (min)" if in_min else "Time (s)"
+        sub_ax.set_xlabel(xlabel)
+
+        fig = sub_ax.figure
+        plot_util.save_figure(fig, f"{self.name}_distances_to_target", save=autosave)  # type: ignore[attr-defined]
 
         return sub_ax
 
@@ -1352,6 +1419,8 @@ class TwoCompLayer(object):
         num_cols=2,
         sharey=True,
         log_num_closest=False,
+        in_min=True,
+        autosave=None,
     ):
         """
         self.plot_distances_to_targets()
@@ -1364,7 +1433,7 @@ class TwoCompLayer(object):
             (must be a place cell-derived layer). Default is "Obj".
         - axes (2D np.ndarray): Array of subplots to plot on (one per neuron).
             Default is None.
-        - neuron_num (int, optional): Neuron number. Default is 0.
+        - neuron_idx (int, optional): Neuron index. Default is 0.
         - mark_soma_BTSP (bool, optional): Whether to mark the soma compartment BTSP
             points. Default is True.
         - mark_teleport (bool, optional): Whether to mark the teleport points.
@@ -1381,6 +1450,10 @@ class TwoCompLayer(object):
             Default is True.
         - log_num_closest (bool, optional): Whether to print the number of closest
             steps identified. Default is False.
+        - in_min (bool, optional): Whether to plot the time in minutes instead of
+            seconds. Default is True.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the
+            global autosave setting for ratinabox is used. Default is None.
 
         Returns:
         - axes (2D np.ndarray): Array of subplots with distances plotted.
@@ -1421,7 +1494,7 @@ class TwoCompLayer(object):
                         use_mark_teleport = mark_teleport
 
                     self.plot_distances_to_target(
-                        neuron_num=i,
+                        neuron_idx=i,
                         target_src_name=target_src_name,
                         sub_ax=sub_ax,
                         mark_soma_BTSP=mark_soma_BTSP,
@@ -1430,6 +1503,8 @@ class TwoCompLayer(object):
                         min_dist=min_dist,
                         min_steps_btw=min_steps_btw,
                         log_num_closest=log_num_closest,
+                        in_min=in_min,
+                        autosave=False,
                     )
                     if use_mark_teleport and c != len(ax2D[0]) - 1:
                         legend = sub_ax.get_legend()
@@ -1445,7 +1520,8 @@ class TwoCompLayer(object):
                 else:
                     sub_ax.set_ylabel("")
                 if r == len(ax2D) - 1:
-                    sub_ax.set_xlabel("Time / min.")
+                    xlabel = "Time (min)" if in_min else "Time (s)"
+                    sub_ax.set_xlabel(xlabel)
                 else:
                     sub_ax.set_xlabel("")
 
@@ -1460,19 +1536,23 @@ class TwoCompLayer(object):
         neuron_str = "all" if num_neurons == self.n else f"first {num_neurons}"
 
         y = 0.885 + (0.005 * ax2D.shape[1])
-        sub_ax.figure.suptitle(f"Distance to target for {neuron_str} neurons.", y=y)
+        fig = sub_ax.figure
+        fig.suptitle(f"Distance to target for {neuron_str} neurons.", y=y)
+
+        plot_util.save_figure(fig, f"{self.name}_distances_to_targets", save=autosave)  # type: ignore[attr-defined]
 
         return axes
 
     def plot_neuron_properties_at_BTSP_and_closest_to_target_steps(
         self,
-        neuron_num=0,
+        neuron_idx=0,
         target_src_name="Obj",
         t_start=None,
         t_end=None,
         axes=None,
         k=5,
         legend=True,
+        autosave=None,
     ):
         """
         self.plot_neuron_properties_at_BTSP_and_closest_to_target_steps()
@@ -1481,7 +1561,7 @@ class TwoCompLayer(object):
         at BTSP and closest to target steps for a neuron.
 
         Args:
-        - neuron_num (int, optional): Neuron number. Default is 0.
+        - neuron_idx (int, optional): Neuron index. Default is 0.
         - target_src_name (str, optional): Name of the input layer
             (must be a place cell-derived layer). Default is "Obj".
         - t_start (int, optional): Start time for plotting. Default is None.
@@ -1492,6 +1572,8 @@ class TwoCompLayer(object):
         smoothing is done. Default is 5.
         - legend (bool, optional): Whether to include a legend in the plots.
             Default is True.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the
+        global autosave setting for ratinabox is used. Default is None.
 
         Returns:
         - axes (2D np.ndarray): Array of subplots with properties plotted.
@@ -1503,19 +1585,19 @@ class TwoCompLayer(object):
             raise ValueError("axes must have length 4.")
 
         distances = self.get_distances_to_place_cell_centre_of_main_dendrite_input(
-            neuron_num, src_name=target_src_name
+            neuron_idx, src_name=target_src_name
         )
         firingrates = np.asarray(self.SomaCompartment.history["firingrate"]).T[
-            neuron_num
+            neuron_idx
         ]
 
         velocities = np.sqrt(np.sum(np.asarray(self.Agent.history["vel"]) ** 2, axis=1))
         angles = self.get_vectors_to_place_cell_centre_of_main_dendrite_input(
-            neuron_num, src_name=target_src_name, polar=True
+            neuron_idx, src_name=target_src_name, polar=True
         )[:, 1]
 
         steps_dict = self.match_closest_to_target_steps_to_BTSP_steps(
-            target_src_name="Obj", neuron_num=neuron_num, t_start=t_start, t_end=t_end
+            target_src_name="Obj", neuron_idx=neuron_idx, t_start=t_start, t_end=t_end
         )
 
         for i, (x_data_type, x_data, sub_ax) in enumerate(
@@ -1550,9 +1632,12 @@ class TwoCompLayer(object):
                         step = t / self.Agent.dt
                         sub_ax.axvline(step, color="k", ls="dashed", lw=1)
 
-        sub_ax.figure.suptitle(
-            f"Properties near BTSP and closest to target steps (#{neuron_num})"
+        fig = sub_ax.figure
+        fig.suptitle(
+            f"Properties near BTSP and closest to target steps (#{neuron_idx})"
         )
+
+        plot_util.save_figure(fig, f"{self.name}_neuron_properties_at_BTSP", save=autosave)  # type: ignore[attr-defined]
 
         return axes
 
@@ -1564,6 +1649,7 @@ class TwoCompLayer(object):
         t_end=None,
         k=5,
         legend=True,
+        autosave=None,
     ):
         """
         self.plot_properties_at_BTSP_and_closest_to_target_steps()
@@ -1582,6 +1668,8 @@ class TwoCompLayer(object):
         smoothing is done. Default is 5.
         - legend (bool, optional): Whether to include a legend in the plots.
             Default is True.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the
+            global autosave setting for ratinabox is used. Default is None.
 
         Returns:
         - axes (2D np.ndarray): Array of subplots with properties plotted.
@@ -1601,19 +1689,22 @@ class TwoCompLayer(object):
             ]
             sorter = np.argsort(num_BTSP)
 
-        for i, neuron_num in enumerate(sorter):
+        for i, neuron_idx in enumerate(sorter):
             self.plot_neuron_properties_at_BTSP_and_closest_to_target_steps(
-                neuron_num=neuron_num,
+                neuron_idx=neuron_idx,
                 target_src_name=target_src_name,
                 t_start=t_start,
                 t_end=t_end,
                 axes=axes[i],
                 k=k,
                 legend=legend,
+                autosave=False,
             )
-            title = f"Neuron {neuron_num}"
+            title = f"Neuron {neuron_idx}"
             if sort_by_num_BTSP:
-                title = f"{title} ({num_BTSP[neuron_num]} BTSP events)"
+                n = num_BTSP[neuron_idx]
+                neuron_str = f"{n} BTSP event" if n == 1 else f"{n} BTSP events"
+                title = f"{title} ({neuron_str})"
             axes[i, 0].set_title(title)
 
         fig.suptitle("Properties near BTSP and closest to target steps", y=0.885)
@@ -1632,6 +1723,8 @@ class TwoCompLayer(object):
         for sub_ax in axes[:, 0]:
             sub_ax.set_ylabel("Dist. from target")
 
+        plot_util.save_figure(sub_ax.figure, f"{self.name}_properties_at_BTSP", save=autosave)  # type: ignore[attr-defined]
+
         return axes
 
     def plot_BTSP_counts_vs_target_visits(
@@ -1642,6 +1735,7 @@ class TwoCompLayer(object):
         applied_only=False,
         t_start=None,
         t_end=None,
+        max_spread=0.1,
         sub_ax=None,
         autosave=None,
     ):
@@ -1661,8 +1755,11 @@ class TwoCompLayer(object):
             applied BTSP events. Default is False.
         - t_start (float, optional): Start time of the plot. Default is None.
         - t_end (float, optional): End time of the plot. Default is None.
+        - max_spread (float, optional): Max spread to apply to duplicate data over y
+            axis. Default is True.
         - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
-        - autosave (bool, optional): Whether to autosave the figure. Default is None.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the
+            global autosave setting for ratinabox is used. Default is None.
 
         Returns:
         - sub_ax (plt.Axes): Subplot with BTSP frequency plotted.
@@ -1680,6 +1777,11 @@ class TwoCompLayer(object):
             applied_only=applied_only, t_start=t_start, t_end=t_end
         )
 
+        if max_spread:
+            BTSP_counts = gen_util.spread_data(
+                nbr_visits_per_target, BTSP_counts, max_spread=max_spread
+            )
+
         if sub_ax is None:
             _, sub_ax = plt.subplots(figsize=(6, 3))
 
@@ -1696,6 +1798,8 @@ class TwoCompLayer(object):
         plot_util.pad_axis(sub_ax, axis="y")
         if sub_ax.get_xlim()[0] > 0:
             sub_ax.set_xlim(0, None)
+        if sub_ax.get_ylim()[0] > 0:
+            sub_ax.set_ylim(0, None)
 
         sub_ax.spines[["right", "top"]].set_visible(False)
         sub_ax.set_xlabel("Number of target visits")

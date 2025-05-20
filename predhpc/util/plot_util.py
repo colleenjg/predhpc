@@ -144,6 +144,23 @@ def remove_redundant_subplot_axis_labels(axes):
                 sub_ax.set_ylabel("")
 
 
+def clear_bottom(ax):
+    """
+    clear_bottom(ax)
+
+    Clear the bottom axis of a subplot.
+
+    Args:
+    - ax (plt.Axes or np.ndarray): Subplot or array of subplots for which to clear
+        bottom axis.
+    """
+
+    for sub_ax in np.asarray(ax).ravel():
+        sub_ax.set_xlabel("")
+        sub_ax.xaxis.set_visible(False)
+        sub_ax.spines["bottom"].set_visible(False)
+
+
 def shape_ax(ax_to_reshape, src_ax=None):
     """
     shape_ax(ax_to_reshape)
@@ -423,6 +440,43 @@ def remove_duplicate_handle_labels(sub_ax: plt.Axes, **legend_kwargs):
     legend_kwargs = complete_legend_kwargs(legend, **legend_kwargs)
 
     sub_ax.legend(handles=handles, labels=labels, **legend_kwargs)
+
+
+def plot_vspan_circular(sub_ax, edges, end_pts=None, **kwargs):
+    """
+    plot_vspan_circular(sub_ax, edges)
+
+    Plot a vertical span for circular data.
+
+    Args:
+    - sub_ax (plt.Axes): Subplot to plot on.
+    - edges (list or np.ndarray): List or array of two elements defining the edges
+        of the vertical span.
+    - end_pts (list or np.ndarray, optional): List or array of two elements defining
+        the end points of the vertical span. If provided, the vertical span will be
+        plotted between the end points and the edges. Default is None.
+
+    Keyword args:
+    - **kwargs: Keyword arguments passed to sub_ax.axvspan().
+    """
+
+    if len(edges) != 2:
+        raise ValueError(
+            "edges must be a list or array of two elements, "
+            f"but got {len(edges)} elements."
+        )
+
+    if np.isclose(edges[0], edges[1]):
+        pass
+    elif edges[1] > edges[0]:
+        sub_ax.axvspan(*edges, **kwargs)
+    else:
+        if end_pts is None:
+            raise RuntimeError("If second edge is below first, must provide end_pts.")
+        for plot_edges in ([end_pts[0], edges[1]], [edges[0], end_pts[1]]):
+            sub_ax.axvspan(*plot_edges, **kwargs)
+            if "label" in kwargs.keys():
+                kwargs.pop("label")
 
 
 def set_violinplot_colors(violin_parts, color="grey"):
@@ -1041,8 +1095,10 @@ def plot_binned_rates(
     binned_rate_means,
     occupancy=None,
     ax=None,
+    shared_range=True,
     vmin=0,
     vmax=None,
+    mark_runs=False,
     plot_colorbars=True,
 ):
     """
@@ -1054,8 +1110,11 @@ def plot_binned_rates(
     - binned_rate_means (3D np.ndarray): Binned firing rates (num_bins, num_runs, num_neurons).
     - occupancy (2D np.ndarray, optional): Occupancy. Default is None.
     - ax (plt.Axes or np.ndarray, optional): Axes to plot on. Default is None.
+    - shared_range (bool, optional): Whether to use a shared color range for all
+        subplots. Default is True.
     - vmin (float, optional): Minimum value. Default is None.
     - vmax (float, optional): Maximum value. Default is None.
+    - mark_runs (bool, optional): Whether to mark runs in the plot. Default is False.
     - plot_colorbars (bool, optional): Whether to plot colorbars. Default is True
 
     Returns:
@@ -1079,8 +1138,12 @@ def plot_binned_rates(
             f"{num_neurons} neurons, if occupancy is{err_str} provided."
         )
 
-    if vmax is None:
-        vmax = np.nanmax(binned_rate_means)
+    if shared_range:
+        if vmin is None:
+            vmin = np.nanmin(binned_rate_means)
+        if vmax is None:
+            vmax = np.nanmax(binned_rate_means)
+
     for i in range(num_neurons):
         im = ax1D[i].imshow(
             binned_rate_means,
@@ -1091,7 +1154,9 @@ def plot_binned_rates(
             vmax=vmax,
         )
         if plot_colorbars:
-            cbar = plt.colorbar(im, ax=ax1D[0], pad=0.15)
+            if shared_range and i < num_neurons - 1:
+                continue
+            cbar = plt.colorbar(im, ax=ax1D[i], pad=0.15)
             cbar.set_label("Firing rate")
             cbar.ax.yaxis.set_label_position("left")
 
@@ -1117,6 +1182,9 @@ def plot_binned_rates(
         sub_ax.spines[["left", "bottom", "top", "right"]].set_visible(False)
         sub_ax.set_xticks([])
         sub_ax.set_yticks([])
+        if mark_runs:
+            for i in range(1, binned_rate_means.shape[0]):
+                sub_ax.axhline(i - 0.5, color="white", lw=0.3, ls="--")
 
     return ax
 
@@ -1150,6 +1218,86 @@ def plot_CC_across_periods(CC, sub_ax=None):
     sub_ax.set_title("Neural correlations across time")
 
     return sub_ax
+
+
+def plot_FWHM(signal, positions=None, plot_smoothed=True, k=1, max_pos=None):
+    """
+    plot_FWHM(signal, positions=None)
+
+    Plot the Full Width at Half Maximum (FWHM) of a signal.
+
+    Args:
+    - signal (1D np.ndarray): Signal to compute FWHM for.
+    - positions (1D np.ndarray, optional): Positions corresponding to the signal.
+        Default is None.
+    - plot_smoothed (bool, optional): Whether to plot the smoothed signal.
+        Default is True.
+    - k (int, optional): Smoothing factor for the signal. Default is 1.
+    - max_pos (float, optional): Maximum position value for circular smoothing.
+        If None, it is inferred from the positions data. Default is None.
+
+    Returns:
+    - sub_ax (plt.Axes): Subplot with the FWHM plotted.
+    """
+
+    if positions is None:
+        positions = np.arange(len(signal))
+
+    FWHM, edges = signal_util.compute_FWHM(signal, x=positions, k=k, return_edges=True)
+
+    _, sub_ax = plt.subplots(figsize=(6, 2.5))
+    sub_ax.plot(positions, signal, color="k")
+    half_max = signal_util.get_half_max(signal)
+    sub_ax.axhline(half_max, color="k", alpha=0.8, label="half max")
+
+    max_pos = max_pos or positions.max()
+
+    use_edges = edges
+    end_pts = [0, max_pos]
+    if np.isclose(edges[0], edges[1]):
+        use_edges = end_pts
+
+    plot_vspan_circular(
+        sub_ax=sub_ax,
+        edges=use_edges,
+        end_pts=end_pts,
+        color="k",
+        alpha=0.2,
+        label=f"FWHM={FWHM:.2f}",
+        lw=0,
+        zorder=-3,
+    )
+
+    if plot_smoothed:
+        smoothed_signal = signal_util.smooth_circularly(signal, k=k)
+        smooth_kwargs = {
+            "color": "k",
+            "alpha": 0.6,
+            "zorder": -5,
+            "ls": "dashed",
+        }
+        sub_ax.plot(positions, smoothed_signal, label="smoothed", **smooth_kwargs)
+        smoothed_half_max = signal_util.get_half_max(signal)
+        sub_ax.axhline(smoothed_half_max, label="smoothed half max", **smooth_kwargs)
+
+    sub_ax.set_xlabel("Position")
+    sub_ax.set_ylabel("Signal value")
+
+    pad_axis(sub_ax, axis="y")
+    if sub_ax.get_ylim()[0] > 0:
+        sub_ax.set_ylim(0, None)
+    xmin, xmax = sub_ax.get_xlim()
+    if xmin > 0:
+        sub_ax.set_xlim(0, None)
+    if xmax < max_pos:
+        sub_ax.set_xlim(None, max_pos)
+
+    sub_ax.set_title("Full Width at Half Maximum (FWHM) computation")
+
+    sub_ax.spines[["top", "right"]].set_visible(False)
+    sub_ax.legend()
+
+    return sub_ax, FWHM, edges
 
 
 def plot_learning_kernel(Is, xs, kernel=None, kernel_xs=None):

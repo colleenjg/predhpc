@@ -569,7 +569,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
 
         if self.is_dummy:
             sub_ax = self.Agent.Environment.plot_environment(
-                sub_ax=sub_ax, autosave=False
+                sub_ax=sub_ax, alpha=0.6, autosave=False
             )
             plot_util.save_figure(sub_ax.figure, f"{self.name}_place_cell_locations", save=autosave)  # type: ignore[attr-defined]
 

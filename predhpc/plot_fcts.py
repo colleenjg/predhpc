@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 def add_time_axis(
     sub_ax,
     dt: float = 0.03,
-    in_minutes: bool = False,
+    in_min: bool = False,
     max_num_minutes: float | int | None = None,
     trajectory_lengths: np.ndarray[tuple[int], np.dtype[np.int64]] | list | None = None,
     **kwargs,
@@ -35,7 +35,7 @@ def add_time_axis(
     Args:
     - sub_ax (plt.Axes): Subplot to create a twin axis from (along x axis).
     - dt (float, optional): Time step. Default is 0.03.
-    - in_minutes (bool, optional): Whether to plot in minutes. Default is False.
+    - in_min (bool, optional): Whether to plot in minutes. Default is False.
     - max_num_minutes (float, optional): Maximum number of minutes to plot.
         Default is None.
     - trajectory_lengths (1D np.ndarray, optional): Trajectory lengths. Default is None.
@@ -55,7 +55,7 @@ def add_time_axis(
     trajectory_dict = plot_util.get_trajectory_dict(trajectory_lengths, **kwargs)
     trajectory_lengths = np.asarray(trajectory_dict["trajectory_lengths"])
 
-    if in_minutes:
+    if in_min:
         dt = dt / 60
         long_str, short_str = "minutes", "min"
         max_time = max_num_minutes
@@ -141,7 +141,7 @@ def add_time_axis(
 
 def plot_trajectory_lengths(
     dt: float | None = None,
-    in_minutes: bool = False,
+    in_min: bool = False,
     max_num_minutes: float | int | None = None,
     trajectory_lengths: np.ndarray[tuple[int], np.dtype[np.int64]] | list | None = None,
     **kwargs,
@@ -153,7 +153,7 @@ def plot_trajectory_lengths(
 
     Args:
     - dt (float, optional): Time step. If None, time axis is not added. Default is None.
-    - in_minutes (bool, optional): Whether to plot time axis in minutes instead of
+    - in_min (bool, optional): Whether to plot time axis in minutes instead of
         seconds. Default is False.
     - max_num_minutes (float, optional): Maximum time in minutes. Default is None.
 
@@ -218,7 +218,7 @@ def plot_trajectory_lengths(
         sub_ax.set_xlim(0 - pad, len(trajectory_lengths) + pad)
 
     if dt is not None:
-        add_time_axis(sub_ax, dt, in_minutes, max_num_minutes, trajectory_lengths)
+        add_time_axis(sub_ax, dt, in_min, max_num_minutes, trajectory_lengths)
 
     return sub_ax, trajectory_lengths
 
@@ -285,6 +285,7 @@ def plot_loss(
     xlim: tuple[float, float] | None = None,
     k_prop_to_loss_length: float = 0.05,
     k_max: int = 10000,
+    in_min: bool = True,
     loss_type: str = "MSE",
     test_p: float | None = None,
 ) -> plt.Axes:
@@ -307,6 +308,7 @@ def plot_loss(
     - k_prop_to_loss_length (float, optional): Smoothing factor, proportional to
         length of loss array. Default is 0.15.
     - k_max (int, optional): Maximum smoothing factor. Default is 10000.
+    - in_min (bool, optional): Whether to plot time in minutes. Default is True.
     - loss_type (str, optional): Type of loss. Default is "MSE".
     - test_p (int, optional): Proportion of time at which the test set starts.
         Default is 0.
@@ -321,6 +323,8 @@ def plot_loss(
         _, sub_ax = plt.subplots(figsize=[6, 4])
 
     startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
+    if in_min:
+        t = t / 60
 
     loss = np.asarray(loss[startid : endid + 1])
 
@@ -404,7 +408,9 @@ def plot_loss(
         raise RuntimeError(f"No loss data to plot from {t[0]}s to {t[-1]}s.")
 
     sub_ax.spines[["top", "right"]].set_visible(False)
-    sub_ax.set_xlabel("Time (s)")
+
+    xlabel = "Time (in min)" if in_min else "Time (in s)"
+    sub_ax.set_xlabel(xlabel)
     sub_ax.set_ylabel(loss_type)
 
     plot_util.pad_axis(sub_ax)
@@ -415,7 +421,7 @@ def plot_loss(
 def plot_oscillation_events(
     oscillation_df,
     firingrates,
-    order_by="neuron_num",
+    order_by="neuron_idx",
     reverse=False,
     max_num=1000,
     num_cols=15,
@@ -431,7 +437,7 @@ def plot_oscillation_events(
     Args:
     - oscillation_df (pd.DataFrame): DataFrame of oscillation events.
     - firingrates (2D np.ndarray): Firing rates.
-    - order_by (str, optional): Column to order by. Default is "neuron_num".
+    - order_by (str, optional): Column to order by. Default is "neuron_idx".
     - reverse (bool, optional): Whether to reverse the order. Default is False.
     - max_num (int, optional): Maximum number of oscillations to plot. Default is 1000.
     - num_cols (int, optional): Number of columns. Default is 15.
@@ -480,7 +486,7 @@ def plot_oscillation_events(
         title = f"First {num_osc}/{num_osc_total} oscillations"
     else:
         title = f"{num_osc} oscillations"
-    num_neurons = len(oscillation_df.loc[indices[:num_osc], "neuron_num"].unique())
+    num_neurons = len(oscillation_df.loc[indices[:num_osc], "neuron_idx"].unique())
     num_neurons_total = firingrates.shape[1]
 
     title = f"{title} (from {num_neurons}/{num_neurons_total} neurons)"
@@ -494,21 +500,21 @@ def plot_oscillation_events(
         "fontsize": 5,
     }
 
-    prev_neuron_num = -1
+    prev_neuron_idx = -1
     for i, row in enumerate(np.arange(num_osc)):
         sub_ax = axes.ravel()[i]
         df_row = oscillation_df.loc[indices[row]]
-        neuron_num = df_row["neuron_num"]
         neuron_idx = df_row["neuron_idx"]
+        neuron_sub_idx = df_row["neuron_sub_idx"]
         start, stop = df_row["start_frame"], df_row["stop_frame"]
 
         sub_ax.plot(firingrates[start:stop, neuron_idx], color=color)
 
-        if order_by[0] == "neuron_num" and neuron_num != prev_neuron_num:
-            num = len(oscillation_df.loc[oscillation_df["neuron_num"] == neuron_num])
-            sub_ax.plot([], [], label=f"#{neuron_num} ({num})")
+        if order_by[0] == "neuron_idx" and neuron_idx != prev_neuron_idx:
+            num = len(oscillation_df.loc[oscillation_df["neuron_idx"] == neuron_idx])
+            sub_ax.plot([], [], label=f"#{neuron_idx} ({num})")
             sub_ax.legend(**legend_kwargs)
-            prev_neuron_num = neuron_num
+            prev_neuron_idx = neuron_idx
 
     for sub_ax in axes.ravel():
         sub_ax.axis("off")
@@ -927,6 +933,7 @@ def plot_timeseries(
     color: str | None = None,
     background_color: str | None = None,
     trace_name: str = "firingrate",
+    in_min: bool = True,
     autosave=None,
     **kwargs,
 ):
@@ -952,6 +959,7 @@ def plot_timeseries(
         Default is None.
     - trace_name (str, optional): The name of the trace to plot.
         Default is "firingrate".
+    - in_min (bool, optional): Whether to plot time in minutes. Default is True.
     - autosave (bool, optional): Whether to autosave the figure. If None, the global
         autosave setting for ratinabox is used. Default is None.
 
@@ -961,6 +969,11 @@ def plot_timeseries(
 
     t = np.asarray(NeuronLayer.history["t"])
     startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
+    if in_min:
+        t = t / 60
+
+    t_start = t[startid]
+    t_end = t[endid]
 
     rate_timeseries = np.asarray(NeuronLayer.history[trace_name][startid : endid + 1])
 
@@ -976,13 +989,15 @@ def plot_timeseries(
 
     if color is None:
         color = NeuronLayer.color  # type: ignore[attr-defined]
+
+    time_str = "Time (s)" if not in_min else "Time (min)"
     if imshow == False:
         firingrates = rate_timeseries.T
         _, sub_ax = rutils.mountain_plot(
-            X=t / 60,
+            X=t,
             NbyX=firingrates,
             color=color,  # type: ignore[assignment]
-            xlabel="Time / min",
+            xlabel=time_str,
             ylabel="Neurons",
             xlim=None,
             fig=fig,
@@ -998,7 +1013,7 @@ def plot_timeseries(
                 :, chosen_neurons
             ]
             for i in range(len(chosen_neurons)):
-                time_when_spiked = t[spike_data[:, i]] / 60
+                time_when_spiked = t[spike_data[:, i]]
                 h = (i + 1 - 0.1) * np.ones_like(time_when_spiked)
                 sub_ax.scatter(
                     time_when_spiked,
@@ -1009,15 +1024,15 @@ def plot_timeseries(
                     linewidth=0,
                 )
 
-        xmin = t[0] / 60 if was_ax else min(t[0] / 60, sub_ax.get_xlim()[0])  # type: ignore[operator]
-        xmax = t[-1] / 60 if was_ax else max(t[-1] / 60, sub_ax.get_xlim()[1])  # type: ignore[operator]
+        xmin = t[0] if was_ax else min(t[0], sub_ax.get_xlim()[0])  # type: ignore[operator]
+        xmax = t[-1] if was_ax else max(t[-1], sub_ax.get_xlim()[1])  # type: ignore[operator]
         sub_ax.set_xlim(xmin, xmax)
         sub_ax.set_xticks([xmin, xmax])
         sub_ax.set_xticklabels([round(xmin, 2), round(xmax, 2)])
         if xlim is not None:
-            sub_ax.set_xlim(right=xlim / 60)  # type: ignore[operator]
-            sub_ax.set_xticks([round(t_start / 60, 2), round(xlim / 60, 2)])  # type: ignore[operator]
-            sub_ax.set_xticklabels([round(t_start / 60, 2), round(xlim / 60, 2)])  # type: ignore[operator]
+            sub_ax.set_xlim(right=xlim)  # type: ignore[operator]
+            sub_ax.set_xticks([round(t_start, 2), round(xlim, 2)])  # type: ignore[operator]
+            sub_ax.set_xticklabels([round(t_start, 2), round(xlim, 2)])  # type: ignore[operator]
 
         if background_color is not None:
             sub_ax.set_facecolor(background_color)
@@ -1040,9 +1055,9 @@ def plot_timeseries(
             extent=(t_start, t_end, 0, 1),  # type: ignore[assignment]
         )
         sub_ax.spines[["right", "top", "left"]].set_visible(False)
-        sub_ax.set_xlabel("Time / min")
+        sub_ax.set_xlabel(time_str)
         sub_ax.set_xticks([t_start, t_end])
-        sub_ax.set_xticklabels([round(t_start / 60, 2), round(t_end / 60, 2)])  # type: ignore[operator]
+        sub_ax.set_xticklabels([round(t_start, 2), round(t_end, 2)])  # type: ignore[operator]
         sub_ax.set_yticks([])
         sub_ax.set_ylabel("Neurons")
 
@@ -1208,11 +1223,71 @@ def plot_1D_rate_map_across_learning(
     return axes
 
 
+def add_1D_place_cell_weights_FWHM(
+    sub_ax,
+    place_weights: np.ndarray[tuple[int, int, int], np.dtype[np.float64]],
+    PCs: "riab_neurons.PlaceCells",
+    time_axis: bool = False,
+    time_shift: float = 0.0,
+    **kwargs,
+):
+    """
+    add_1D_place_cell_weights_FWHM(sub_ax, place_weights, PCs)
+
+    Add the FWHM of the place cell weights to a 1D plot.
+
+    Args:
+    - sub_ax (plt.Axes): Subplot to add the FWHM to.
+    - place_weights (3D np.ndarray): Place cell weights with shape
+        (num_epochs, num_cells, num_PCs).
+    - PCs (riab_neurons.PlaceCells): Place cells of the layer.
+    - time_axis (bool, optional): Whether to plot the x-axis in time. Default is False.
+    - time_shift (float, optional): Time shift to apply to the x-axis if time_axis is
+        True. Default is 0.0.
+
+    Keyword args:
+    - **kwargs: Additional keyword arguments passed to plt.axvspan().
+    """
+
+    if PCs.Agent.Environment.D != 1:
+        raise ValueError("Function is implemented for 1D environments.")
+
+    place_weights = np.asarray(place_weights)
+    if len(place_weights.shape) != 1:
+        raise ValueError("place_weights must be a 1D array.")
+    if len(place_weights) != PCs.n:
+        raise ValueError(
+            f"place_weights must have as many values as the number of place cells."
+        )
+
+    x = PCs.place_cell_centres[:, 0]
+    max_pos = PCs.Agent.Environment.scale
+    unit = "m"
+    if time_axis:
+        speed_mean = PCs.Agent.speed_mean  # m/s
+        x = x / speed_mean - time_shift
+        max_pos = max_pos / speed_mean
+        unit = "s"
+
+    FWHM, edges = signal_util.compute_FWHM(
+        place_weights, x, max_x=max_pos, return_edges=True
+    )
+    label = f"FWHM={FWHM:.2f} {unit}"
+
+    end_pts = [0, max_pos]
+    if np.isclose(edges[0], edges[1]):
+        edges = end_pts
+    plot_util.plot_vspan_circular(
+        sub_ax=sub_ax, edges=edges, end_pts=end_pts, label=label, lw=0, **kwargs
+    )
+
+
 def plot_1D_input_place_cell_weights(
     place_weights: np.ndarray[tuple[int, int, int], np.dtype[np.float64]],
     PCs: "riab_neurons.PlaceCells",
     cmap: str = "crest",
     time_axis: bool = False,
+    plot_last_FWHM: bool = False,
     sub_ax: plt.Axes | None = None,
     autosave: bool | None = None,
 ) -> plt.Axes:
@@ -1226,6 +1301,9 @@ def plot_1D_input_place_cell_weights(
         layer of cells with shape ((num_epochs,) num_cells, num_PCs).
     - PCs (riab_neurons.PlaceCells): Place cells of the layer.
     - cmap (str, optional): Colormap to use. Default is "crest".
+    - time_axis (bool, optional): Whether to plot the x-axis in time. Default is False.
+    - plot_last_FWHM (bool, optional): Whether to plot the last FWHM of the place cells.
+        Default is False.
     - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
         created. Default is None.
     - autosave (bool, optional): Whether to save the figure. Default is None.
@@ -1243,6 +1321,10 @@ def plot_1D_input_place_cell_weights(
         single_sample = False
 
     num_samples, num_cells, _ = place_weights.shape
+    if num_cells > 1 and plot_last_FWHM:
+        raise NotImplementedError(
+            "plot_last_FWHM is not implemented for multiple cells."
+        )
 
     if sub_ax is None:
         figsize = (5, num_cells * 2)
@@ -1259,15 +1341,28 @@ def plot_1D_input_place_cell_weights(
 
     x = PCs.place_cell_centres[:, 0]
     target_pos = PCs.Agent.target_position
+    time_shift = 0
     if time_axis:
         xlabel = "Average time (s)"
         speed_mean = PCs.Agent.speed_mean  # m/s
         x = x / speed_mean
         if target_pos is not None:
-            x = x - target_pos / speed_mean
+            time_shift = target_pos / speed_mean
+            x = x - time_shift
             target_pos = 0
     else:
         xlabel = "Input place cell center / m"
+
+    legend = plot_last_FWHM
+    if single_sample:
+        title = "Input weights"
+    else:
+        if len(colors) > 1:
+            legend = True
+            sub_ax.plot([], color=colors[0], label="first", alpha=0.8)
+            sub_ax.plot([], color=colors[-1], label="last", alpha=0.8)
+
+        title = "Input weights across learning"
 
     spacing = (place_weights.max() - place_weights.min()) * 1.1
     for n in range(num_cells):
@@ -1282,6 +1377,19 @@ def plot_1D_input_place_cell_weights(
                 marker=mpl_markers.MarkerStyle("."),
                 ms=4,
             )
+
+            if plot_last_FWHM and i == len(colors) - 1:
+                add_1D_place_cell_weights_FWHM(
+                    sub_ax,
+                    place_weights[i, n],
+                    PCs,
+                    time_axis=time_axis,
+                    time_shift=time_shift,
+                    color=color,
+                    alpha=0.2,
+                    zorder=-3,
+                )
+
         if offset is not None:
             lw = 2 * 0.8**num_cells
             sub_ax.axhline(offset, color="k", alpha=0.3, lw=lw, ls="dotted", zorder=-12)
@@ -1295,20 +1403,14 @@ def plot_1D_input_place_cell_weights(
             ls="dotted",
             color="k",
         )
-    if single_sample:
-        title = "Input weights"
-    else:
-        if len(colors) > 1:
-            sub_ax.plot([], color=colors[0], label="first", alpha=0.8)
-            sub_ax.plot([], color=colors[-1], label="last", alpha=0.8)
-            sub_ax.legend(ncol=2, frameon=False)
-        title = "Input weights across learning"
 
     sub_ax.set_xlabel(xlabel)
     sub_ax.set_ylabel("Weights")
     sub_ax.spines[["top", "right"]].set_visible(False)
 
     sub_ax.set_title(title)
+    if legend:
+        sub_ax.legend(ncol=2, frameon=False)
 
     # pad the y-axis
     ylims = sub_ax.get_ylim()
@@ -1329,10 +1431,11 @@ def plot_recorded_1D_input_place_cell_weights(
     marker="o",
     t_start=None,
     t_end=None,
+    plot_last_FWHM=False,
     sub_ax=None,
 ):
     """
-    plot_recorded_1D_input_place_cell_weights(weights_t, weights, input_centres)
+    plot_recorded_1D_input_place_cell_weights(weights, input_centres)
 
     Plots the input weights from place cells to a Pyr. soma, across time, for a
     linear track environment.
@@ -1348,6 +1451,8 @@ def plot_recorded_1D_input_place_cell_weights(
     - t_start (float, optional): Start timepoint for which to plot weights.
         Default is None.
     - t_end (float, optional): End timepoint for which to plot weights. Default is None.
+    - plot_last_FWHM (bool, optional): Whether to plot the last FWHM of the weights.
+        Default is False.
     - sub_ax (plt.Axes, optional): Subplot. Default is None.
 
     Returns:
@@ -1410,6 +1515,27 @@ def plot_recorded_1D_input_place_cell_weights(
             **place_weight_kwargs,
         )
 
+    if plot_last_FWHM and num_plotted > 0:
+        FWHM, edges = signal_util.compute_FWHM(
+            prev_weights, input_centres[:, 0], return_edges=True
+        )
+        label = f"FWHM={FWHM:.2f} m"
+
+        end_pts = [0, input_centres[:, 0].max()]
+        if np.isclose(edges[0], edges[1]):
+            edges = end_pts
+        plot_util.plot_vspan_circular(
+            sub_ax=sub_ax,
+            edges=edges,
+            end_pts=end_pts,
+            label=label,
+            lw=0,
+            color=color,
+            alpha=0.2,
+            zorder=-3,
+        )
+        sub_ax.legend(frameon=False, loc="upper right")
+
     sub_ax.set_xlabel("Place field centres")
     sub_ax.set_ylabel(f"Input weights")
     sub_ax.set_ylim(0, sub_ax.get_ylim()[1] * 1.1)
@@ -1419,7 +1545,12 @@ def plot_recorded_1D_input_place_cell_weights(
 
 
 def plot_1D_BTSP_stats(
-    Pyrs, recorded_weights, target_position=None, other_positions=list()
+    Pyrs,
+    recorded_weights,
+    target_position=None,
+    other_positions=list(),
+    in_min=True,
+    plot_last_FWHM=False,
 ):
     """
     plot_1D_BTSP_stats(Pyrs, recorded_weights)
@@ -1430,6 +1561,10 @@ def plot_1D_BTSP_stats(
     - Pyrs (learning_neurons.BTSPLayer): Pyramidal neurons.
     - recorded_weights (dict): Recorded weights from place cells to Pyrs.
     - target_position (float, optional): Target position. Default is None.
+    - other_positions (list, optional): Other positions to plot. Default is empty list.
+    - in_min (bool, optional): Whether to plot time in minutes. Default is True.
+    - plot_last_FWHM (bool, optional): Whether to plot the last FWHM of the place cells.
+        Default is False.
 
     Returns:
     - BTSP_ramp_ax1D (np.ndarray): Array of subplots with BTSP ramp stats plotted.
@@ -1439,28 +1574,26 @@ def plot_1D_BTSP_stats(
     _, BTSP_ramp_ax1D = plt.subplots(3, 1, figsize=(7, 6))
     _, PCs_sub_ax = plt.subplots(figsize=(7, 2))
 
-    if hasattr(Pyrs, "plot_BTSP_ramp"):
-        Pyrs.plot_BTSP_ramp(axes=BTSP_ramp_ax1D)
+    if hasattr(Pyrs, "DendriteCompartment"):
+        Pyrs.SomaCompartment.plot_BTSP_ramp(axes=BTSP_ramp_ax1D, in_min=in_min)
+        BTSP_ramp_ax1D[1].get_lines()[-1].set_label("soma")
+        for i, comp in enumerate([Pyrs.DendriteCompartment, Pyrs.DendriteInhibition]):
+            t = np.asarray(comp.history["t"])
+            if in_min:
+                t = t / 60
+            alpha = 0.7 if i == 0 else 0.5
+            label = "dend" if i == 0 else "inhib."
+            BTSP_ramp_ax1D[1].plot(
+                t,
+                comp.history["firingrate"],
+                lw=1.2,
+                alpha=alpha,
+                color=comp.color,
+                label=label,
+            )
+        BTSP_ramp_ax1D[1].legend(loc="upper right", ncols=2)
     else:
-        Pyrs.SomaCompartment.plot_BTSP_ramp(axes=BTSP_ramp_ax1D)
-        BTSP_ramp_ax1D[1].plot(
-            Pyrs.DendriteCompartment.history["t"],
-            Pyrs.DendriteCompartment.history["firingrate"],
-            lw=1.2,
-            alpha=0.7,
-            zorder=-10,
-            label="dend",
-            color=Pyrs.DendriteCompartment.color,
-        )
-        BTSP_ramp_ax1D[1].plot(
-            Pyrs.DendriteInhibition.history["t"],
-            Pyrs.DendriteInhibition.history["firingrate"],
-            lw=1.2,
-            alpha=0.5,
-            zorder=-10,
-            label="inhib.",
-            color=Pyrs.DendriteInhibition.color,
-        )
+        Pyrs.plot_BTSP_ramp(axes=BTSP_ramp_ax1D, in_min=in_min)
 
     _, _, PCs, _ = ext_util.extract_objects_from_Pyrs(Pyrs)
     plot_recorded_1D_input_place_cell_weights(
@@ -1468,6 +1601,7 @@ def plot_1D_BTSP_stats(
         PCs.place_cell_centres,
         color=PCs.color,
         marker="none",
+        plot_last_FWHM=plot_last_FWHM,
         sub_ax=PCs_sub_ax,
     )
 
@@ -1509,8 +1643,9 @@ def plot_pre_post_responses(Pyrs, Objs, ref_time=0, pre=60, post=None, axes=None
 
     for c, (start, end) in enumerate(col_times):
         Objs.plot_rate_timeseries(t_start=start, t_end=end, sub_ax=axes[0, c])
-        axes[0, c].set_xlabel("")
-        axes[0, c].set_title("Obj input")
+        axes[0, c].set_title("Object input")
+        mark_target_and_reset_points(Objs, sub_ax=axes[0, c])
+
         Pyrs.plot_rate_timeseries(
             separate_axes=True,
             t_start=start,
@@ -1519,9 +1654,7 @@ def plot_pre_post_responses(Pyrs, Objs, ref_time=0, pre=60, post=None, axes=None
             norm_by="shared_max",
         )
 
-        for sub_ax in axes[:, c][:-1]:
-            sub_ax.spines[["bottom"]].set_visible(False)
-            sub_ax.set_xticks([])
+        plot_util.clear_bottom(axes[:, c][:-1])
 
     return axes
 
@@ -1798,6 +1931,7 @@ def plot_1D_spatial_info(
             np.asarray(Pyr_weights),
             PCs,
             sub_ax=ax1D[i],
+            plot_last_FWHM=(Pyrs.n == 1),
             autosave=False,
         )
         i += 1
@@ -1865,7 +1999,7 @@ def plot_1D_time_info(
 
     # Plot trajectories
     Ag.plot_trajectories_across_time(
-        framerate=1 / Ag.dt, sub_ax=ax1D[0], autosave=False
+        framerate=1 / Ag.dt, s=2, sub_ax=ax1D[0], autosave=False
     )
     ax1D[0].set_title("Trajectories")
 
@@ -1932,6 +2066,7 @@ def plot_2D_input_place_cell_weights(
     alpha: float = 0.7,
     lw: float = 0,
     s: float = 75,
+    obj_s: float = 20,
     zorder: int = 1,
     title: str | None = None,
     y: float = 1,
@@ -1967,6 +2102,8 @@ def plot_2D_input_place_cell_weights(
     - alpha (float, optional): Alpha of the marker. Default is 0.7.
     - lw (float, optional): Linewidth of the marker. Default is 0.
     - s (float, optional): Size of scatterplot markers. Default is 75.
+    - obj_s (float, optional): Size of object markers. If None, defaults are used.
+        Default is None.
     - zorder (int, optional): Zorder of the marker. Default is 1.
     - title (str, optional). Figure title. Default is None.
     - y (float, optional): Y position of the title. Default is 1.
@@ -2038,11 +2175,15 @@ def plot_2D_input_place_cell_weights(
             f"place weights ({len(place_weights)})."
         )
 
+    is_tmaze = hasattr(target_neurons.Agent.Environment, "T_ends")
+    obj_s_kwarg = dict()
+    if obj_s is not None:
+        key = "base_s" if is_tmaze else "s"
+        obj_s_kwarg[key] = obj_s
+
     for i in range(len(place_weights)):
         target_neurons.Agent.Environment.plot_environment(
-            sub_ax=ax1D[i],
-            autosave=False,
-            **kwargs,
+            sub_ax=ax1D[i], alpha=0.6, autosave=False, **kwargs, **obj_s_kwarg
         )
 
         ax1D[i].scatter(
@@ -2231,12 +2372,13 @@ def plot_place_cell_inputs_over_time(
     target_num_samples: int = 100,
     max_pos_sec: float = 20,
     num_cols: int = 10,
+    obj_s: float | None = None,
     **kwargs,
 ):
     """
     plot_place_cell_inputs()
 
-    Plot the input place cell weights of a layer.
+    Plot the input place cell weights of a layer in a 2D environment.
 
     Args:
     - target_neurons (riab_neurons.Neurons): Target neurons.
@@ -2250,9 +2392,11 @@ def plot_place_cell_inputs_over_time(
     - max_pos_sec (float, optional): Maximum number of positions to plot, in seconds.
         Default is 2.
     - num_cols (int, optional): Number of columns in the plot. Default is 10.
+    - obj_s (float, optional): Size of the object markers. Default is None.
 
     Keyword args:
-    - **kwargs: Keyword arguments passed to plot_2D_input_place_cell_weights().
+    - **kwargs: Keyword arguments passed to plot_util.init_rate_map_axes() and
+        plot_2D_input_place_cell_weights().
 
     Returns:
     - axes (np.ndarray): Subplot with 1D input place cell weights plotted.
@@ -2291,6 +2435,7 @@ def plot_place_cell_inputs_over_time(
         target_neurons,
         place_weights=data,
         ax=axes,
+        obj_s=obj_s,
         **kwargs,
     )
 
@@ -2385,10 +2530,12 @@ def plot_overlayed_rate_maps(
                     N_neurons * MOUNTAIN_PLOT_SHIFT_MM / 25,
                 )
             )
-        sub_ax = NeuronLayer.Agent.Environment.plot_environment(autosave=False)
+        sub_ax = NeuronLayer.Agent.Environment.plot_environment(
+            alpha=0.6, autosave=False
+        )
     elif replot_env:
         sub_ax = NeuronLayer.Agent.Environment.plot_environment(
-            sub_ax=sub_ax, autosave=False
+            sub_ax=sub_ax, alpha=0.6, autosave=False
         )
 
     if sub_ax is None:
@@ -2498,7 +2645,7 @@ def plot_2D_initial_conditions(Pyrs, num_samples=10, autosave: bool | None = Non
     aggreg_fields, aggreg_ax1D = plt.subplots(1, 3, figsize=(9, 3))
 
     for sub_ax in aggreg_ax1D[:2]:
-        Env.plot_environment(sub_ax=sub_ax, no_legend=True, autosave=False)
+        Env.plot_environment(sub_ax=sub_ax, alpha=0.6, no_legend=True, autosave=False)
     aggreg_ax1D[0].set_title("Environment")
 
     plot_overlayed_rate_maps(
@@ -2516,7 +2663,9 @@ def plot_2D_initial_conditions(Pyrs, num_samples=10, autosave: bool | None = Non
     return fields_axes, aggreg_ax1D
 
 
-def plot_interleaved_openfield_rate_maps(Pyrs, Objs, num_cols=10, size_per=1.4):
+def plot_interleaved_openfield_rate_maps(
+    Pyrs, Objs, num_cols=10, size_per=1.4, obj_s=None, **kwargs
+):
     """
     plot_interleaved_openfield_rate_maps(Pyrs, Objs)
 
@@ -2530,6 +2679,10 @@ def plot_interleaved_openfield_rate_maps(Pyrs, Objs, num_cols=10, size_per=1.4):
     - Objs (object_neurons.ObjectCells): Object neurons.
     - num_cols (int, optional): Number of columns in the plot. Default is 10.
     - size_per (float, optional): Size per subplot. Default is 1.4.
+
+    Keyword args:
+    - **kwargs: Keyword arguments passed to
+        plot_2D_input_place_cell_weights().
 
     Returns:
     - axes (np.ndarray): Array of subplots with interleaved rate maps plotted.
@@ -2548,13 +2701,24 @@ def plot_interleaved_openfield_rate_maps(Pyrs, Objs, num_cols=10, size_per=1.4):
         squeeze=False,
     )
 
-    Objs.plot_rate_map(ax=axes[::2].ravel()[: Objs.n], no_legend=True)
+    is_tmaze = hasattr(Pyrs.Agent.Environment, "T_ends")
+    obj_s_kwarg = dict()
+    no_legend = False if is_tmaze else True
+    if obj_s is not None:
+        key = "base_s" if is_tmaze else "s"
+        obj_s_kwarg[key] = obj_s
+
+    Objs.plot_rate_map(
+        ax=axes[::2].ravel()[: Objs.n], no_legend=no_legend, **obj_s_kwarg
+    )
     plot_2D_input_place_cell_weights(
         Pyrs.SomaCompartment,
         ax=axes[1::2].ravel()[: Objs.n],
         alpha=0.5,
         plot_BTSP_events=True,
-        no_legend=True,
+        no_legend=no_legend,
+        obj_s=obj_s,
+        **kwargs,
     )
 
     # turn off extra subplots
@@ -2645,8 +2809,14 @@ def compare_theoretical_and_true_weights(
     else:
         dim = Pyrs.Agent.Environment.scale / 4 * 3
         _, act_sub_ax = plt.subplots(figsize=(dim, dim))
+
+        is_not_tmaze = not hasattr(Pyrs.Agent.Environment, "T_ends")
         plot_2D_input_place_cell_weights(
-            Pyrs, ax=act_sub_ax, chosen_neurons=[chosen_neuron]
+            Pyrs,
+            ax=act_sub_ax,
+            chosen_neurons=[chosen_neuron],
+            obj_s=10,
+            no_legend=is_not_tmaze,
         )
 
     return norm_theor_axes, no_norm_theor_axes, act_sub_ax

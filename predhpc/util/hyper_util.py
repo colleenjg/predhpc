@@ -2,22 +2,19 @@
 
 import argparse
 from pathlib import Path
-from datetime import datetime
 import itertools
 import multiprocessing
 import pickle as pkl
-import warnings
 from joblib import Parallel, delayed
 
 import numpy as np
 from matplotlib import pyplot as plt
-from scipy.optimize import fsolve
+import pandas as pd
 from scipy.optimize import brentq
 from scipy.interpolate import CubicSpline
-
 from tqdm import tqdm
 
-from predhpc.util import signal_util, ext_util, plot_util, params_util
+from predhpc.util import signal_util, ext_util, plot_util, params_util, gen_util
 
 OUTER_LOSS_WEIGHT = 0.2
 
@@ -29,7 +26,7 @@ TARGET_ROOT_DICT = {
 }
 
 
-def get_save_directory(save_directory=None, kernel=False):
+def get_save_directory(direc=None, kernel=False):
     """
     get_save_directory()
 
@@ -37,36 +34,78 @@ def get_save_directory(save_directory=None, kernel=False):
     results.
 
     Args:
-    - save_directory (str or Path): Directory to save results in. If None, a default
-        directory is used (../results/hyperparameter_search). Default is None.
+    - direc (str or Path): Directory to save results in. If None, a default
+        directory is used (e.g., ../results/hyperparameter_search). Default is None.
     - kernel (bool, optional): Whether the directory is for kernel search results.
         Default is False.
 
     Returns:
-    - save_directory (Path): Directory to save results in.
+    - direc (Path): Directory to save results in.
     """
 
-    if save_directory is None:
+    if direc is None:
         sub_direc = "kernel_search" if kernel else "hyperparameter_search"
-        save_directory = Path("..", "results", sub_direc)
-    save_directory = Path(save_directory)
-    save_directory.mkdir(parents=True, exist_ok=True)
+        direc = Path("..", "results", sub_direc)
+    direc = Path(direc)
+    direc.mkdir(parents=True, exist_ok=True)
 
-    return save_directory
+    return direc
 
 
-def get_date_time_str():
+def replot_from_csvs(replotting_path):
     """
-    get_date_time_str()
+    replot_from_csvs(replotting_path)
 
-    Obtain the current date and time as a string.
+    Replot metrics from CSV files in the specified directory.
+
+    Args:
+    - replotting_path (Path): Path to the directory containing CSV files to replot.
+    """
+
+    replotting_path = Path(replotting_path)
+
+    if replotting_path.is_dir():
+        # get csvs using glob
+        csvs = list(replotting_path.glob("**/*.csv"))
+        replot_str = f"{len(csvs)} csvs"
+    else:
+        csvs = [replotting_path]
+        replot_str = replotting_path
+
+    print(f"Replotting from {replot_str}.")
+    for csv_path in tqdm(csvs):
+        df = pd.read_csv(csv_path)
+        direc = csv_path.parent
+        save_name = csv_path.stem
+        plot_metrics_by_parameters(df, direc=direc, name_str=save_name)
+
+
+def get_search_space(**kwargs):
+    """
+    get_search_space()
+
+    Get search space for hyperparameter search.
+
+    Keyword args:
+    - kwargs (dict): Keyword arguments specifying the search space parameters.
 
     Returns:
-    - date_time_str (str): Current date and time as a string.
+    - search_space (dict): Search space dictionary specifying parameters to search
+        through.
     """
 
-    date_time_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    return date_time_str
+    from ray import tune
+
+    search_space = dict()
+    for parameter, values in kwargs.items():
+        if len(values) == 3 and isinstance(values[-1], int):
+            values = np.linspace(*values)
+        else:
+            values = np.asarray(values)
+
+        search_space[parameter] = tune.grid_search(values)
+
+    return search_space
 
 
 def check_parameters(
@@ -179,10 +218,6 @@ def check_exp(exp, align_pt=None, log=False):
                     f"Target minimum negative value for {side} ({min_neg:.4f}) not "
                     f"reached: {-sub_exp.min():.4f}."
                 )
-
-                import pdb
-
-                pdb.set_trace()
             valid = False
 
     return valid
@@ -262,7 +297,7 @@ def get_metric_plot_vmin_vmax(metric="num_BTSP_events"):
     vmin, vmax = None, None
     if metric.startswith("num"):
         vmin = 1
-    elif "time" in metric:
+    elif "time" in metric or "ramp" in metric:
         vmin = 0
     elif "relative_position" in metric:
         vmin, vmax = -1, 1
@@ -338,7 +373,46 @@ def get_values_coords_and_labels(df, parameters=None):
     return values_dict, coords, param_labels
 
 
-def get_metric_array(df, parameters=None, metric="num_BTSP_events", ascending=True):
+def get_metric_scatter_data(df, parameters=None, metric="num_BTSP_events"):
+    """
+    get_metric_scatter_data(df)
+
+    Obtain data for plotting a metric as a scatter plot, organized by each parameter.
+
+    Args:
+    - df (pd.DataFrame): Dataframe in which hyperparameter search results are recorded.
+    - parameters (list of str, optional): List of parameters to plot the metric by.
+        If None, they are extracted from the dataframe. Default is None.
+    - metric (str, optional): Metric to plot. Must correspond to a dataframe column
+        (column starting with 'metric/'). Default is "num_BTSP_events".
+
+    Returns:
+    - metric_array (1D np.ndarray): Array of metric values.
+    - param_value_dict (dict): Dictionary of parameter values, where the keys are
+        parameter names and the values are arrays of parameter values for each value
+        in metric_array.
+    """
+
+    parameters = get_parameters_from_df(df, parameters=parameters)
+
+    metric_col = f"metric/{metric}"
+    if metric_col not in df.columns:
+        raise ValueError(f"{metric_col} not in dataframe.")
+
+    metric_array = df[metric_col].to_numpy()
+
+    param_value_dict = dict()
+    for parameter in parameters:
+        if parameter not in df.columns:
+            raise ValueError(f"{parameter} not in dataframe.")
+        param_value_dict[parameter.replace("config/", "")] = df[parameter].to_numpy()
+
+    return metric_array, param_value_dict
+
+
+def get_metric_array(
+    df, parameters=None, metric="num_BTSP_events", ascending=True, scatter_data=False
+):
     """
     get_metric_array(df)
 
@@ -351,6 +425,9 @@ def get_metric_array(df, parameters=None, metric="num_BTSP_events", ascending=Tr
     - metric (str, optional): Metric to plot. Default is "num_BTSP_events".
     - ascending (bool, optional): Whether to sort the parameters in ascending order,
         instead of descending order. Default is True.
+    - scatter_data (bool, optional): Whether to return data for a scatter plot
+        instead of a colormap. Only possible if there is only one parameter.
+        Default is False.
 
     Returns:
     - metric_array (2D np.ndarray): Array of metric values, organized by each parameter.
@@ -413,15 +490,24 @@ def plot_metric_by_parameters(
 
     Returns:
     - metric_array (2D np.ndarray): Array of metric values, organized by each parameter.
-    - im (matplotlib.image.AxesImage): Image from the plot.
+    - im (matplotlib.image.AxesImage): Image from the plot. None if a scatter plot is
+        created.
     """
 
-    metric_array, param_labels = get_metric_array(
-        df,
-        parameters=parameters,
-        metric=metric,
-        ascending=ascending,
-    )
+    parameters = get_parameters_from_df(df, parameters=parameters)
+    single_parameter = len(parameters) == 1
+
+    if single_parameter:
+        metric_array, param_dict = get_metric_scatter_data(
+            df, parameters=parameters, metric=metric
+        )
+    else:
+        metric_array, param_labels = get_metric_array(
+            df,
+            parameters=parameters,
+            metric=metric,
+            ascending=ascending,
+        )
 
     # log transform metric, if ratio
     if "ratio" in metric:
@@ -430,40 +516,77 @@ def plot_metric_by_parameters(
     # get title before setting 0s to nan for plotting
     title = get_metric_plot_title(metric, median=np.nanmedian(metric_array))
 
-    if metric.startswith("num"):
-        metric_array[metric_array == 0] = np.nan  # for plotting, only
-
     # start plotting
     if sub_ax is None:
         _, sub_ax = plt.subplots()
 
-    vmin, vmax = get_metric_plot_vmin_vmax(metric)
-    im = sub_ax.imshow(metric_array.T, cmap="viridis", vmin=vmin, vmax=vmax)
-
     sub_ax.set_title(title)
-    sub_ax.figure.colorbar(im, ax=sub_ax, orientation="vertical")
-    sub_ax.set_xlabel(" x\n".join(param_labels[0]))
-    sub_ax.set_xticks([])
-    sub_ax.set_ylabel(" x\n".join(param_labels[1]))
-    sub_ax.set_yticks([])
 
-    # add vertical lines for each repeat
-    num_repeats = get_num_repeats_from_df(df, parameters=parameters)
-    num_x_lines = int(len(metric_array) / num_repeats) + 1
-    for x in np.linspace(0, len(metric_array), num_x_lines)[1:-1]:
-        sub_ax.axvline(x - 0.5, lw=1, color="k")
+    vmin, vmax = get_metric_plot_vmin_vmax(metric)
 
-    # add horizontal lines for each first parameter value
-    first_parameter = get_parameters_from_df(df, parameters=parameters)[0]
-    num_values = len(list(df[first_parameter].unique()))
-    num_y_lines = int(metric_array.shape[1] / num_values) + 1
-    for y in np.linspace(0, metric_array.shape[1], num_y_lines)[1:-1]:
-        sub_ax.axhline(y - 0.5, lw=1, color="k")
+    im = None
+    if len(parameters) == 1:
+        param_keys = list(param_dict.keys())
+        if len(param_keys) != 1:
+            raise RuntimeError(
+                f"Only one parameter expected, but found {len(param_keys)}."
+            )
+        # plot a scatter plot
+        param_key = param_keys[0]
+        param_values = np.asarray(param_dict[param_key])
+        mask = np.isfinite(metric_array)
+
+        if mask.sum():
+            sub_ax.scatter(
+                param_values[mask], metric_array[mask], s=10, c="k", alpha=0.3
+            )
+            if vmin is not None and vmin < metric_array[mask].min():
+                sub_ax.set_ylim(vmin, None)
+            if vmax is not None and vmax > metric_array[mask].max():
+                sub_ax.set_ylim(None, vmax)
+            if vmin is not None or vmax is not None:
+                plot_util.pad_axis(sub_ax, axis="y")
+
+        if param_key == "target_moved":
+            sub_ax.axvline(0, ls="dashed", color="k", zorder=-5)
+
+        param_str = f"{param_key[0].upper()}{param_key[1:].replace('_', ' ')}"
+        sub_ax.set_xlabel(param_str)
+        sub_ax.spines[["top", "right"]].set_visible(False)
+
+    else:
+        if metric.startswith("num"):
+            zero_mask = metric_array == 0
+            metric_array[zero_mask] = np.nan  # for plotting
+
+        im = sub_ax.imshow(metric_array.T, cmap="viridis", vmin=vmin, vmax=vmax)
+
+        sub_ax.figure.colorbar(im, ax=sub_ax, orientation="vertical")
+        sub_ax.set_xlabel(" x\n".join(param_labels[0]))
+        sub_ax.set_xticks([])
+        sub_ax.set_ylabel(" x\n".join(param_labels[1]))
+        sub_ax.set_yticks([])
+
+        # add vertical lines for each repeat
+        num_repeats = get_num_repeats_from_df(df, parameters=parameters)
+        num_x_lines = int(len(metric_array) / num_repeats) + 1
+        for x in np.linspace(0, len(metric_array), num_x_lines)[1:-1]:
+            sub_ax.axvline(x - 0.5, lw=1, color="k")
+
+        # add horizontal lines for each first parameter value
+        first_parameter = get_parameters_from_df(df, parameters=parameters)[0]
+        num_values = len(list(df[first_parameter].unique()))
+        num_y_lines = int(metric_array.shape[1] / num_values) + 1
+        for y in np.linspace(0, metric_array.shape[1], num_y_lines)[1:-1]:
+            sub_ax.axhline(y - 0.5, lw=1, color="k")
+
+        if metric.startswith("num") and zero_mask.sum():
+            metric_array[zero_mask] = 0
 
     return metric_array, im
 
 
-def plot_metrics_by_parameters(df, parameters=None, save_directory=None, name_str=None):
+def plot_metrics_by_parameters(df, parameters=None, direc=None, name_str=None):
     """
     plot_metrics_by_parameters(df)
 
@@ -474,7 +597,7 @@ def plot_metrics_by_parameters(df, parameters=None, save_directory=None, name_st
     - parameters (list of str, optional): List of parameters to plot the metric by.
         If None, they are extracted from the dataframe
         (columns starting with 'config/'). Default is None.
-    - save_directory (str or Path, optional): Directory to save results in. If None,
+    - direc (str or Path, optional): Directory to save results in. If None,
         the current working directory is used. Default is None.
     - name_str (str, optional): Name of the file in which to save the plot.
         Default is None.
@@ -487,7 +610,7 @@ def plot_metrics_by_parameters(df, parameters=None, save_directory=None, name_st
         col.replace("metric/", "") for col in df.columns if col.startswith("metric/")
     ]
 
-    save_directory = get_save_directory(save_directory)
+    direc = get_save_directory(direc)
 
     if name_str is None:
         name_str = "metrics"
@@ -495,12 +618,11 @@ def plot_metrics_by_parameters(df, parameters=None, save_directory=None, name_st
     if len(metrics) == 0:
         raise RuntimeError("No metrics found in dataframe.")
 
-    if len(metrics) < 10:
-        ncols = int(np.ceil(np.sqrt(len(metrics))))
-        nrows = int(np.ceil(len(metrics) / ncols))
+    if len(metrics) < 24:
+        ncols = min(4, len(metrics))
     else:
-        nrows = 4
-        ncols = int(np.ceil(len(metrics) / nrows))
+        ncols = 8
+    nrows = int(np.ceil(len(metrics) / ncols))
 
     fig, axes = plt.subplots(
         nrows,
@@ -514,7 +636,10 @@ def plot_metrics_by_parameters(df, parameters=None, save_directory=None, name_st
             plot_metric_by_parameters(df, sub_ax, parameters, metric=metrics[a])
         else:
             sub_ax.axis("off")
-    fig.savefig(Path(save_directory, f"{name_str}.png"), bbox_inches="tight", dpi=300)
+
+    for suffix in ["png", "svg"]:
+        fig_path = Path(direc, f"{name_str}.{suffix}")
+        fig.savefig(fig_path, bbox_inches="tight", dpi=300)
 
     return axes
 
@@ -522,7 +647,7 @@ def plot_metrics_by_parameters(df, parameters=None, save_directory=None, name_st
 def run_hyperparameter_search(
     objective,
     search_space,
-    save_directory=None,
+    direc=None,
     save_name="hyperparameter_search",
     num_CPUs=4,
     num_repeats=4,
@@ -537,7 +662,7 @@ def run_hyperparameter_search(
     Args:
     - objective (function): Objective function to optimize.
     - search_space (dict): Dictionary of hyperparameters to search over.
-    - save_directory (str or Path, optional): Directory to save results in.
+    - direc (str or Path, optional): Directory to save results in.
         Default is None.
     - save_name (str, optional): Name of the file in which to save hyperparameter
         search results. Default is "hyperparameter_search".
@@ -563,9 +688,12 @@ def run_hyperparameter_search(
     num_combs = 1
     for hyperparam in search_space.values():
         num_combs *= len(hyperparam["grid_search"])
+    repeat_str = "repeat" if num_repeats == 1 else "repeats"
+    CPU_str = "CPU" if num_CPUs == 1 else "CPUs"
     print(
-        f"\nRunning {num_combs} hyperparameter combinations ({num_repeats} repeats => "
-        f"{num_repeats * num_combs} total runs) using {num_CPUs} CPUs.\n"
+        f"\nRunning {num_combs} hyperparameter combinations ({num_repeats} "
+        f"{repeat_str} => {num_repeats * num_combs} total runs) using {num_CPUs} "
+        f"{CPU_str}.\n"
     )
 
     tuner = tune.Tuner(
@@ -582,17 +710,18 @@ def run_hyperparameter_search(
 
     df = results.get_dataframe()
 
-    save_directory = get_save_directory(save_directory)
-    date_time_str = get_date_time_str()
+    direc = get_save_directory(direc)
+    date_time_str = gen_util.get_date_time_str()
 
     save_name = f"{save_name}_{date_time_str}"
-    df.to_csv(Path(save_directory, f"{save_name}.csv"))
+    save_path = Path(direc, f"{save_name}.csv")
+    df.to_csv(save_path)
 
     parameters = list(search_space.keys())
     plot_metrics_by_parameters(
         df,
         parameters,
-        save_directory=save_directory,
+        direc=direc,
         name_str=save_name,
         **plot_kwargs,
     )
@@ -1334,26 +1463,26 @@ def main_kernel():
     }
 
     if args.save:
-        save_dir = get_save_directory(kernel=True)
-        save_dir.mkdir(parents=True, exist_ok=True)
-        date_time_str = get_date_time_str()
+        direc = get_save_directory(kernel=True)
+        direc.mkdir(parents=True, exist_ok=True)
+        date_time_str = gen_util.get_date_time_str()
 
-        print(f"\nSaving results under '{save_dir}' with suffix '{date_time_str}'.")
+        print(f"\nSaving results under '{direc}' with suffix '{date_time_str}'.")
 
         save_name = f"search_{args.space}_{date_time_str}"
         fig = search_axes.ravel()[0].figure
         for suffix in [".png", ".svg"]:
-            save_path = Path(save_dir, f"{save_name}{suffix}")
+            save_path = Path(direc, f"{save_name}{suffix}")
             fig.savefig(save_path, bbox_inches="tight", dpi=300)
 
         save_name = f"kernel_{args.space}_{date_time_str}"
         fig = kernel_sub_ax.figure
         for suffix in [".png", ".svg"]:
-            save_path = Path(save_dir, f"{save_name}{suffix}")
+            save_path = Path(direc, f"{save_name}{suffix}")
             fig.savefig(save_path, bbox_inches="tight", dpi=300)
 
         save_name = f"data_{args.space}_{date_time_str}"
-        with open(Path(save_dir, f"{save_name}.pkl"), "wb") as f:
+        with open(Path(direc, f"{save_name}.pkl"), "wb") as f:
             pkl.dump(full_dict, f)
 
     return (

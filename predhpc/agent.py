@@ -152,9 +152,12 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         self._init_target_df()
 
         if self.Environment.dimensionality == "1D" and self.fixed_direction:
-            if np.sign(self.reset_position - self.start_position) != np.sign(self.speed_mean):  # type: ignore[attr-defined]
+            if self.start_position is None or self.reset_position is None:
+                pass
+            elif np.sign(self.reset_position - self.start_position) != np.sign(self.speed_mean):  # type: ignore[attr-defined]
                 raise ValueError(
-                    "If direction is fixed, speed must have the same sign."
+                    "If direction is fixed, speed sign must align with reset "
+                    "position with respect to start position."
                 )
 
         self._most_recent_target_reached_step = -1
@@ -424,14 +427,16 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             return
 
         # check if velocity matches target direction
-        trajectory_sign = np.sign(self.reset_position - self.start_position)  # type: ignore[has-type]
-        if np.sign(self.velocity) == trajectory_sign:
-            return
+        if self.start_position is not None and self.reset_position is not None:
+            trajectory_sign = np.sign(self.reset_position - self.start_position)  # type: ignore[has-type]
+            if np.sign(self.velocity) == trajectory_sign:
+                return
 
         # check if velocity matches current direction
-        current_sign = np.sign(self.reset_position - self.pos)  # type: ignore[has-type]
-        if np.sign(self.velocity) == current_sign:
-            return
+        if self.reset_position is not None:
+            current_sign = np.sign(self.reset_position - self.pos)  # type: ignore[has-type]
+            if np.sign(self.velocity) == current_sign:
+                return
 
         if dt is None:
             dt = self.dt  # type: ignore[has-type]
@@ -736,7 +741,87 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             self.Environment.add_object(position, "new")
             self._target_object_idx = len(self.Environment.objects["objects"]) - 1
 
+        if self.Environment.D == 1:
+            if self.start_position is None or self.reset_position is None:
+                pass
+            else:
+                before_start = self.target_position < self.start_position
+                after_reset = self.target_position > self.reset_position
+                if before_start or after_reset:
+                    pos_str = (
+                        "before start position"
+                        if before_start
+                        else "after reset position"
+                    )
+                    warnings.warn(
+                        f"Target position is {pos_str} and therefore may not be reached."
+                    )
+
         self.steps_before_checking_for_target = 0
+
+    def move_target_position(self, move=None, move_x=None, move_y=None, prop=False):
+        """
+        self.move_target_position()
+
+        Move the target position by a specified amount.
+
+        Args:
+        - move (float, optional): Amount to move the target position by. Move is
+            applied to all dimensions. Default is None.
+        - move_x (float, optional): Amount to move the target position in the x
+            direction only, if environment is 2D. Default is None.
+        - move_y (float, optional): Amount to move the target position in the y
+            direction only, if environment is 2D. Default is None.
+        - prop (bool, optional): Whether to move the target position by a proportion
+            of the environment extent. Default is False.
+
+        Raises:
+        - RuntimeError: If target position is not set.
+
+        Returns:
+        - new_target_position (1D np.ndarray): New target position.
+        """
+
+        if self.target_position is None:
+            raise RuntimeError(
+                "Cannot move target position, as it is not set. "
+                "Use set_target_position() first."
+            )
+
+        new_target_position = self.target_position.copy()
+
+        if self.Environment.D == 1:
+            if move_x is not None or move_y is not None:
+                raise ValueError(
+                    "In 1D environment, only use 'move', not move_x or move_y."
+                )
+            move_x = move
+        elif move is not None:
+            if move_x is not None or move_y is not None:
+                raise ValueError(
+                    "In 2D environment, if 'move' is provided, it should be alone "
+                    "and not with 'move_x' or 'move_y'."
+                )
+            move_x = move
+            move_y = move
+
+        for i, move in enumerate([move_x, move_y]):
+            if move is None:
+                continue
+            new = new_target_position[i]
+            if move is not None:
+                min_val, max_val = [
+                    fct(self.Environment.extent[int(i * 2) : int(i * 2 + 2)])
+                    for fct in (min, max)
+                ]
+                width = max_val - min_val
+                if prop:
+                    move = move * width
+                new_target_position[i] = (new - min_val + move_x) % width + min_val
+
+        self.set_target_position(new_target_position)
+
+        return new_target_position
 
     def set_all_positions(self):
         """
@@ -909,6 +994,20 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         completed_df = self.trajectory_df.loc[self.trajectory_df["stop_step"].notna()]
 
         return completed_df
+
+    def get_num_completed_trajectories(self):
+        """
+        self.get_num_completed_trajectories()
+
+        Obtain the number of completed trajectories.
+
+        Returns:
+        - num_completed_trajectories (int): Number of trajectories completed.
+        """
+
+        num_completed_trajectories = len(self.get_completed_trajectories_df())
+
+        return num_completed_trajectories
 
     def get_trajectory_lengths_to_date(self):
         """
@@ -1415,6 +1514,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         color="black",
         mark_mean=False,
         mark_median=False,
+        in_min=True,
         sub_ax=None,
         autosave=None,
         **kwargs,
@@ -1437,6 +1537,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         - mark_mean (bool, optional): Whether to mark the mean speed. Default is False.
         - mark_median (bool, optional): Whether to mark the median speed.
             Default is False.
+        - in_min (bool, optional): Whether to plot the time in min. Default is True.
         - sub_ax (plt.Axes, optional): Subplot axis to plot on. Default is None.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
             global autosave setting for ratinabox is used. Default is None.
@@ -1449,6 +1550,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         """
 
         t, _, _ = self.get_plotting_times(t_start=t_start, t_end=t_end)
+        if in_min:
+            t = t / 60
 
         speed = self.get_speed(
             linear=linear,
@@ -1508,7 +1611,9 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             sub_ax.legend()
 
         sub_ax.set_title(f"{title} ({unit}/s)")
-        sub_ax.set_xlabel("Time / s")
+
+        xlabel = "Time (min)" if in_min else "Time (s)"
+        sub_ax.set_xlabel(xlabel)
         plot_util.pad_axis(sub_ax, "y")
 
         sub_ax.spines[["top", "right"]].set_visible(False)
@@ -1622,7 +1727,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             return sub_ax
 
     def plot_trajectories_to_date(
-        self, in_minutes: bool = True, autosave: bool | None = None
+        self, in_min: bool = True, autosave: bool | None = None
     ) -> plt.Axes:
         """
         self.plot_trajectories_to_date()
@@ -1630,7 +1735,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         Plot the trajectory lengths to date.
 
         Args:
-        - in_minutes (bool, optional): Whether to plot time axis in minutes, instead
+        - in_min (bool, optional): Whether to plot time axis in minutes, instead
             of seconds. Default is True.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
         global autosave setting for ratinabox is used. Default is None.
@@ -1641,7 +1746,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         traj_leng_to_date = self.get_trajectory_lengths_to_date()
         sub_ax, _ = plot_fcts.plot_trajectory_lengths(
-            dt=self.dt, trajectory_lengths=traj_leng_to_date, in_minutes=in_minutes  # type: ignore[has-type]
+            dt=self.dt, trajectory_lengths=traj_leng_to_date, in_min=in_min  # type: ignore[has-type]
         )
 
         fig = sub_ax.figure
@@ -1650,7 +1755,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         return sub_ax
 
     def plot_distance_to_target(
-        self, norm=True, flipped=True, sub_ax=None, autosave=None
+        self, norm=True, flipped=True, in_min=True, sub_ax=None, autosave=None
     ):
         """
         self.plot_distance_to_target()
@@ -1661,6 +1766,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         Args:
         - norm (bool, optional): Whether to normalise the distances. Default is True.
         - flipped (bool, optional): Whether to flip the distances. Default is True.
+        - in_min (bool, optional): Whether to plot time axis in minutes. Default is
+            True.
         - sub_ax (plt.Axes, optional): Subplot axis to plot on. Default is None.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
             global autosave setting for ratinabox is used. Default is None.
@@ -1669,7 +1776,9 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         - sub_ax (plt.Axes): Subplot axis with the distances from the target plotted.
         """
 
-        time_in_min = np.asarray(self.history["t"]) / 60
+        t = np.asarray(self.history["t"])
+        if in_min:
+            t = t / 60
 
         distances = self.get_distances_from_target(norm=norm)
 
@@ -1679,7 +1788,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         if flipped:
             distances = -distances
 
-        sub_ax.plot(time_in_min, distances, color="black", alpha=0.6, lw=1)
+        sub_ax.plot(t, distances, color="black", alpha=0.6, lw=1)
 
         if flipped:
             sub_ax.set_ylim(distances.min() * 1.2, sub_ax.get_ylim()[1])
@@ -1687,8 +1796,13 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             sub_ax.set_ylim(sub_ax.get_ylim()[0], distances.max() * 1.2)
 
         sub_ax.set_title("Distance to target")
-        sub_ax.set_xlabel("Time / min")
+
+        xlabel = "Time (min)" if in_min else "Time (s)"
+        sub_ax.set_xlabel(xlabel)
         sub_ax.spines[["left", "top", "right"]].set_visible(False)
+
+        fig = sub_ax.figure
+        plot_util.save_figure(fig, "distance_to_target", save=autosave)
 
         return sub_ax
 
@@ -1704,6 +1818,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         tol_prop_to_speed_dt: float | None = None,
         zoom_prop: float | None = None,
         mark_below_tolerance: bool = False,
+        in_min: bool = True,
         autosave: bool | None = None,
     ) -> plt.Axes:
         """
@@ -1731,6 +1846,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             to zoom plot in on. Default is None.
         - mark_below_tolerance (bool, optional): Whether to mark points below the
             tolerance. Default is False.
+        - in_min (bool, optional): Whether to plot time axis in minutes. Default is
+            True.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
             global autosave setting for ratinabox is used. Default is None.
 
@@ -1740,7 +1857,9 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         t, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
 
-        t = t / 60  # to minutes
+        if in_min:
+            t = t / 60
+
         positions = np.asarray(self.history["pos"])[startid : endid + 1]
 
         if position is None:
@@ -1789,7 +1908,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 "Cannot zoom or mark below the tolerance if a tolerance is not provided."
             )
 
-        sub_ax.set_xlabel("Time / min")
+        time_str = "Time (min)" if in_min else "Time (s)"
+        sub_ax.set_xlabel(time_str)
         sub_ax.set_ylabel(f"Distance to {position_name.replace('_', ' ')} / m")
         sub_ax.spines[["right", "top"]].set_visible(False)
 
@@ -1805,7 +1925,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         base_s=15,
         t_start=None,
         t_end=None,
-        in_minutes=True,
+        in_min=True,
         dim_idx=0,
         raise_error=True,
         **kwargs,
@@ -1822,7 +1942,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         - base_s (int, optional): Base marker size. Default is 15.
         - t_start (float, optional): Start time in seconds. Default is None.
         - t_end (float, optional): End time in seconds. Default is None.
-        - in_minutes (bool, optional): Whether to plot time axis in minutes.
+        - in_min (bool, optional): Whether to plot time axis in minutes.
             Default is True.
         - dim_idx (int, optional): Dimension index. Default is 0.
         - raise_error (bool, optional): Whether to raise an error if no positions
@@ -1841,7 +1961,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         t, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
 
-        if in_minutes:
+        if in_min:
             t = t / 60
 
         if position_name == "start":
@@ -1876,10 +1996,11 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         sub_ax: plt.Axes | None = None,
         alpha: float = 0.6,
         color: str = "k",
-        s: int | float = 5,
+        s: int | float = 3,
         plot_targets: bool = True,
         rasterize_traj: bool = False,
         xlim: float | None = None,
+        in_min: bool = True,
         autosave: bool | None = None,
     ) -> plt.Axes:
         """
@@ -1901,12 +2022,13 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             created. Default is None.
         - alpha (float, optional): Trajectory point transparency. Default is 0.6.
         - color (str, optional): Trajectory point color or colors. Default is 'k'.
-        - s (float, optional): Size of scatterplot markers. Default is 5.
+        - s (float, optional): Size of scatterplot markers. Default is 3.
         - plot_targets (bool, optional): Whether to plot the target. Default is True.
         - rasterize_traj (bool, optional): Whether to rasterize the trajectory scatter
             points, reducing the size of exported vector files. Default is False.
-        - xlim (float, optional): Upper x axis limit to set (in minutes).
-            Default is None.
+        - xlim (float, optional): Upper x axis limit to set. Default is None.
+        - in_min (bool, optional): Whether to plot time axis in minutes. Default is
+            True.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
         global autosave setting for ratinabox is used. Default is None.
 
@@ -1920,7 +2042,9 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         skiprate = max(1, int((1 / framerate) / dt))
 
-        time = t[::skiprate] / 60  # in minutes
+        time = t[::skiprate]
+        if in_min:
+            time = time / 60  # in minutes
         pos = pos[startid : endid + 1][::skiprate]
 
         # get reset step indices
@@ -1953,11 +2077,11 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 self.add_position_across_time_to_plot(
                     sub_ax,
                     position_name=position_name,
-                    base_s=s * 3,
+                    base_s=s * 5,
                     alpha=alpha_pts,
                     t_start=t_start,
                     t_end=t_end,
-                    in_minutes=True,
+                    in_min=True,
                     dim_idx=dim_idx,
                     raise_error=(position_name != "target"),
                 )
@@ -1980,7 +2104,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         if xlim is not None:
             sub_ax.set_xlim(right=xlim)
 
-        sub_ax.set_xlabel("Time / min")
+        xlabel = "Time (min)" if in_min else "Time (s)"
+        sub_ax.set_xlabel(xlabel)
         sub_ax.set_ylabel("Position / m")
         sub_ax.spines[["right", "top"]].set_visible(False)
 
@@ -2247,6 +2372,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         background_color: str | None = None,
         plot_starts: bool = True,
         plot_ends: bool = True,
+        in_min: bool = True,
         autosave: bool | None = None,
         **env_kwargs,
     ) -> plt.Axes:
@@ -2277,6 +2403,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         - plot_starts (False, optional): Whether to plot trajectory starts.
             Default is True.
         - plot_ends (False, optional): Whether to plot trajectory ends. Default is True.
+        - in_min (bool, optional): Whether to plot time axis in minutes, if environment
+            is 1D. Default is True.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
             global autosave setting for ratinabox is used. Default is None.
 
@@ -2291,7 +2419,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         t, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
         pos = np.asarray(self.history["pos"])
 
-        t = t / 60  # minutes
+        if in_min:
+            t = t / 60
 
         if colormap is None:
             colormap = "crest"
@@ -2360,8 +2489,9 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 sub_ax.set_yticks([self.Environment.extent[1]])
                 sub_ax.set_ylim(bottom=0, top=self.Environment.extent[1])
 
-                sub_ax.set_xlabel("Time / min")
-                sub_ax.set_ylabel("Position / m")
+                xlabel = "Time (min)" if in_min else "Time (s)"
+                sub_ax.set_xlabel(xlabel)
+                sub_ax.set_ylabel("Position (m)")
                 sub_ax.spines[["right", "top"]].set_visible(False)
 
                 if background_color is not None:
@@ -2555,7 +2685,30 @@ class TAgent(ResetableAgent):
         self.reset_position = [self.left_reset_position, self.right_reset_position]
 
         # set target position
-        target_arm = self.target_arm  # type: ignore[attr-defined]
+        self.target_position = self.get_target_position_from_arm(self.target_arm)
+        self.Environment.add_object(self.target_position)
+        self._target_object_idx = len(self.Environment.objects["objects"]) - 1
+
+        self.steps_before_checking_for_target = 0
+
+        # set initial position and velocity
+        if self.start_position is not None:
+            self.set_position_and_velocity(position=self.start_position, velocity=0)
+
+    def get_target_position_from_arm(self, target_arm: str = "left"):
+        """
+        self.get_target_position_from_arm()
+
+        Get the target position from the specified arm.
+
+        Args:
+        - target_arm (str, optional): Arm to get the target position from.
+            Must be 'left' or 'right'. Default is 'left'.
+
+        Returns:
+        - target_position (1D np.ndarray): Target position of the agent.
+        """
+
         if target_arm == "left":
             edge = self.Environment.left_T_end
         elif target_arm == "right":
@@ -2568,15 +2721,10 @@ class TAgent(ResetableAgent):
             T_split[i] + (edge[i] - T_split[i]) * self.target_location_prop_to_arm  # type: ignore[operator]
             for i in [0, 1]
         ]
-        self.target_position = self.format_position(target_position)
-        self.Environment.add_object(self.target_position)
-        self._target_object_idx = len(self.Environment.objects["objects"]) - 1
 
-        self.steps_before_checking_for_target = 0
+        target_position = self.format_position(target_position)
 
-        # set initial position and velocity
-        if self.start_position is not None:
-            self.set_position_and_velocity(position=self.start_position, velocity=0)
+        return target_position
 
     def set_target_position(self, position):
         """
@@ -2593,17 +2741,25 @@ class TAgent(ResetableAgent):
         - position (1D np.ndarray): Position to set the target to.
         """
 
-        super().set_target_position(position)
-
-        if self.target_position is None:
+        if position is None:
             self.target_arm = None
             self.target_in_branch = False
         else:
             x, y = self.target_position
             if y < self.Environment.branch_y:
+                if x < self.Environment.stem_left or x > self.Environment.stem_right:
+                    raise ValueError("Position is outside of the T-maze stem.")
+                elif y < 0:
+                    raise ValueError("Position is below the T-maze.")
+                super().set_target_position(position)
                 self.target_arm = None
                 self.target_in_branch = False
             else:
+                if x < 0 or x > self.Environment.get_scale_x():
+                    raise ValueError("Position is outside of the T-maze arms.")
+                elif y > self.Environment.get_scale_y():
+                    raise ValueError("Position is above T-maze.")
+                super().set_target_position(position)
                 self.target_in_branch = True
                 if x > self.Environment.stem_right:
                     self.target_arm = "right"
@@ -2611,6 +2767,111 @@ class TAgent(ResetableAgent):
                     self.target_arm = "left"
                 else:
                     self.target_arm = None
+
+    def move_target_position(self, move, backward=False, prop=False):
+        """
+        self.move_target_position()
+
+        Move the target position by a specified amount.
+
+        Args:
+        - move (float, optional): Amount to move the target position by. Move is
+            applied to all dimensions. Default is None.
+        - backward (bool, optional): Whether to move the target position backwards
+            along the T-maze instead of forward. Default is False.
+        - prop (bool, optional): Whether to move the target position by a proportion
+            of the environment extent. Default is False.
+
+        Raises:
+        - RuntimeError: If target position is not set.
+
+        Returns:
+        - new_target_position (1D np.ndarray): New target position.
+        """
+
+        if self.target_arm is not None:
+            self.prev_target_arm = self.target_arm
+
+        if self.target_position is None:
+            raise RuntimeError(
+                "Cannot move target position, as it is not set. "
+                "Use set_target_position() first."
+            )
+
+        if prop:
+            move = move * self.Environment.scale
+
+        new_target_position = self.target_position.copy()
+
+        mid_pt_x, mid_pt_y = self.Environment.T_split
+
+        if backward:
+            if new_target_position[0] == mid_pt_x:
+                if new_target_position[1] - move >= self.start_position[1]:
+                    new_target_position[1] = new_target_position[1] - move
+                elif self.prev_target_arm == "left":
+                    new_target_position = self.left_reset_position.copy()
+                elif self.prev_target_arm == "right":
+                    new_target_position = self.right_reset_position.copy()
+                else:
+                    new_target_position = self.Environment.T_split.copy()
+            else:
+                wrong_arm = False
+                if self.target_arm == "left" or self.prev_target_arm == "left":
+                    if new_target_position[0] > mid_pt_x:
+                        wrong_arm = True
+                    else:
+                        new_target_position[0] = min(
+                            mid_pt_x, new_target_position[0] + move
+                        )
+                elif self.target_arm == "right" or self.prev_target_arm == "right":
+                    if new_target_position[0] < mid_pt_x:
+                        wrong_arm = True
+                    else:
+                        new_target_position[0] = max(
+                            mid_pt_x, new_target_position[0] - move
+                        )
+                else:
+                    raise RuntimeError(
+                        "self.target_arm and/or self.prev_target_arm value(s) not "
+                        "recognized."
+                    )
+                if wrong_arm:
+                    raise RuntimeError(
+                        "Cannot move target position backwards, as it is not on the "
+                        "correct arm. Use set_target_position() first."
+                    )
+        else:
+            if new_target_position[1] >= mid_pt_y:
+                if self.target_arm == "left" or self.prev_target_arm == "left":
+                    left_edge = self.left_reset_position[0]
+                    if new_target_position[0] > left_edge:
+                        new_target_position[0] = max(
+                            left_edge, new_target_position[0] - move
+                        )
+                    else:
+                        new_target_position = self.start_position.copy()
+                elif self.target_arm == "right" or self.prev_target_arm == "right":
+                    right_edge = self.right_reset_position[0]
+                    if new_target_position[0] < right_edge:
+                        new_target_position[0] = min(
+                            right_edge, new_target_position[0] + move
+                        )
+                    else:
+                        new_target_position = self.start_position.copy()
+                elif self.target_arm is None and self.prev_target_arm is None:
+                    new_target_position = self.start_position.copy()
+                else:
+                    raise RuntimeError(
+                        "self.target_arm and/or self.prev_target_arm value(s) not "
+                        "recognized."
+                    )
+            else:
+                new_target_position[1] = min(mid_pt_y, new_target_position[1] + move)
+
+        self.set_target_position(new_target_position)
+
+        return new_target_position
 
     def set_current_trajectory_arm(self, arm: str = "random"):
         """
@@ -2871,9 +3132,9 @@ class OpenFieldAgent(ResetableAgent):
         if not isinstance(Env, env.OpenField):
             raise TypeError("Env must be an OpenField object.")
 
-        super().__init__(Env, self.params)
-
         self.allow_teleportation()
+
+        super().__init__(Env, self.params)
 
     @property
     def teleportation_allowed(self) -> bool:
@@ -3137,6 +3398,33 @@ class OpenFieldAgent(ResetableAgent):
 
         self._teleportation_allowed = teleportation
 
+    def set_reward_factor(self, reward_factor=None):
+        """
+        self.set_reward_factor()
+
+        Set the reward factor for the agent.
+
+        Args:
+        - reward_factor (float, optional): The reward factor value to set. Default is None.
+        """
+
+        if reward_factor is not None:
+            self.reward_factor = reward_factor
+
+    def set_no_target_factor(self, no_target_factor=None):
+        """
+        self.set_no_target_factor()
+
+        Set the no target factor for the agent.
+
+        Args:
+        - no_target_factor (float, optional): The no target factor value to set.
+        Default is None.
+        """
+
+        if no_target_factor is not None:
+            self.no_target_factor = no_target_factor
+
     def set_all_positions(self, first_setting: bool = True, target: str | None = None):
         """
         self.set_all_positions()
@@ -3211,8 +3499,10 @@ class OpenFieldAgent(ResetableAgent):
         Returns:
         - target_probability_df (pd.DataFrame): Dataframe with target probabilities.
         """
+
+        exclude_str = "_out" if self.teleportation_allowed else "teleport"
         target_probability_df = self.Environment.object_df.loc[
-            ~self.Environment.object_df["object_type_name"].str.contains("teleport")
+            ~self.Environment.object_df["object_type_name"].str.contains(exclude_str)
         ].copy()  # makes a copy
 
         target_probability_df.insert(0, "object_df_idx", target_probability_df.index)
@@ -3908,6 +4198,7 @@ class OpenFieldAgent(ResetableAgent):
         t_start: float | None = None,
         t_end: float | None = None,
         timeseries: bool = False,
+        in_min: bool = True,
         plot_lines: bool = True,
         legend: bool = True,
     ):
@@ -3922,17 +4213,23 @@ class OpenFieldAgent(ResetableAgent):
         - t_start (float, optional): Start time of the plot. Default is None.
         - t_end (float, optional): End time. Default is None.
         - timeseries (bool, optional): Whether the plot is timeseries. Default is False.
+        - in_min (bool, optional): Whether the timeseries is in minutes.
+            Default is True.
         - plot_lines (bool, optional): Whether to plot lines for teleportation events,
             if timeseries is True. Default is True.
         - legend (bool, optional): Whether to add a legend. Default is True.
         """
 
-        t, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
+        t, startid, _ = self.get_plotting_times(t_start=t_start, t_end=t_end)
+        if in_min:
+            t = t / 60
 
         step_nums = self.teleportation_df["step_num"].to_numpy() - startid
         object_in_type_nums = self.teleportation_df["in_object_type_num"].to_numpy()
 
         ax1D = np.asarray(ax).ravel()
+
+        env_plot_params = self.Environment.get_object_type_num_to_plot_params_dict()
 
         for sub_ax in ax1D:
             plotted = list()
@@ -3947,13 +4244,13 @@ class OpenFieldAgent(ResetableAgent):
                 if step_num >= len(t):
                     continue
                 elif step_num < 0:
+                    if timeseries:
+                        continue
                     alpha = 0.6
                 else:
                     alpha = 1.0
 
-                plot_params = copy.deepcopy(
-                    self.Environment.object_type_num_to_plot_params_dict[obj_num]
-                )
+                plot_params = copy.deepcopy(env_plot_params[obj_num])
                 name = plot_params.pop("name")
                 if legend and name not in plotted:
                     label = name.replace("_", " ").replace(" in", "")
@@ -3962,9 +4259,7 @@ class OpenFieldAgent(ResetableAgent):
                     label = None
 
                 if timeseries:
-                    if step_num < 0:
-                        continue
-                    x_pos = t[step_num] / 60
+                    x_pos = t[step_num]
                     pos = [x_pos, y_pos]
                     plot_params["s"] /= 2
                     if plot_lines:
@@ -4003,7 +4298,7 @@ class OpenFieldAgent(ResetableAgent):
 
         Args:
         - sub_ax (plt.Axes): Subplot to add target to.
-        - t (float, optional): The current time step. Default is None.
+        - t (float, optional): The current time step, in seconds. Default is None.
         """
 
         all_t = np.asarray(self.history["t"])
@@ -4213,6 +4508,7 @@ class OpenFieldAgent(ResetableAgent):
         t_end: float | None = None,
         sub_ax: plt.Axes | None = None,
         no_legend: bool = False,
+        in_min: bool = True,
         autosave: bool | None = None,
     ) -> plt.Axes:
         """
@@ -4226,6 +4522,7 @@ class OpenFieldAgent(ResetableAgent):
         - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
             created. Default is None.
         - no_legend (bool, optional): Whether to remove the legend. Default is False.
+        - in_min (bool, optional): Whether to plot time in minutes. Default is True.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
         global autosave setting for ratinabox is used. Default is None.
 
@@ -4237,6 +4534,8 @@ class OpenFieldAgent(ResetableAgent):
             _, sub_ax = plt.subplots(figsize=(8, 3))
 
         t, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
+        if in_min:
+            t = t / 60
 
         pos = np.asarray(self.history["pos"])
         t_start, t_end = t[0], t[-1]
@@ -4250,6 +4549,8 @@ class OpenFieldAgent(ResetableAgent):
         reset_times = self.get_reset_times()
         for reset_time in reset_times:
             if reset_time >= t_start and reset_time <= t_end:
+                if in_min:
+                    reset_time = reset_time / 60
                 sub_ax.axvline(
                     reset_time, color="black", ls="dashed", alpha=0.2, zorder=-1
                 )
@@ -4260,10 +4561,16 @@ class OpenFieldAgent(ResetableAgent):
 
         sub_ax.set_title("Position over time")
         sub_ax.set_ylabel("Position")
-        sub_ax.set_xlabel("Time (s)")
+
+        xlabel = "Time (min)" if in_min else "Time (s)"
+        sub_ax.set_xlabel(xlabel)
 
         sub_ax.spines[["right", "top"]].set_visible(False)
         sub_ax.legend(loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
+
+        env_plot_params_dict = (
+            self.Environment.get_object_type_num_to_plot_params_dict()
+        )
 
         # plot teleportation points as vertical dashed lines
         for idx in self.teleportation_df.index:
@@ -4272,15 +4579,11 @@ class OpenFieldAgent(ResetableAgent):
                 continue
 
             object_type = self.teleportation_df.loc[idx, "in_object_type_num"]
-            color = self.Environment.object_type_num_to_plot_params_dict[object_type][
-                "color"
-            ]
+            color = env_plot_params_dict[object_type]["color"]
             sub_ax.axvline(t[step], color=color, ls="dashed", alpha=0.8, zorder=-1)
 
         # plot target objects
-        object_type_num_to_plot_params_dict = copy.deepcopy(
-            self.Environment.object_type_num_to_plot_params_dict
-        )
+        env_plot_params_dict_copy = copy.deepcopy(env_plot_params_dict)
 
         r = 0
         reset_times = np.append(reset_times, t[-1])
@@ -4289,7 +4592,7 @@ class OpenFieldAgent(ResetableAgent):
             if row["object_type_name"] == "no_target":
                 continue
 
-            plot_params = object_type_num_to_plot_params_dict[row["object_type_num"]]
+            plot_params = env_plot_params_dict_copy[row["object_type_num"]]
             label = None
             if "name" in plot_params:
                 label = plot_params.pop("name")
@@ -4312,6 +4615,9 @@ class OpenFieldAgent(ResetableAgent):
             if target_reached_time < t_start or target_reached_time > t_end:
                 continue
 
+            if in_min:
+                target_reached_time = target_reached_time / 60
+
             sub_ax.plot(
                 [target_reached_time] * 2,
                 [row["position_x"], row["position_y"]],
@@ -4330,6 +4636,10 @@ class OpenFieldAgent(ResetableAgent):
             legend.remove()
 
         # expand x limits a bit
+        if in_min:
+            t_start = t_start / 60
+            t_end = t_end / 60
+
         pad = (t_end - t_start) * 0.02
         sub_ax.set_xlim(t_start - pad, t_end + pad)
         plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.04)
@@ -4419,6 +4729,7 @@ class OpenFieldAgent(ResetableAgent):
             size_fact=size_fact,
             fps=fps,
             speed_up=speed_up,
+            progress_bar=True,
             autosave=False,
             **kwargs,
         )
@@ -4427,9 +4738,7 @@ class OpenFieldAgent(ResetableAgent):
             anim, savename, save=autosave, anim_save_types=anim_save_types
         )
 
-        stop_time = time.perf_counter()
-        time_min = (stop_time - start_time) / 60
-
-        print(f"Animation took {time_min:.2f} min. to create.")
+        time_str = gen_util.get_duration_str(start_time)
+        print(f"Animation took {time_str} to create.")
 
         return anim

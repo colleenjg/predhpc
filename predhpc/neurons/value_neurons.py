@@ -2,6 +2,7 @@ import copy
 
 import numpy as np
 
+from predhpc.util import plot_util
 from predhpc.neurons import riab_neurons
 
 
@@ -145,7 +146,9 @@ class SimpleValueNeuron(riab_neurons.PlaceCells):
 
             return gradV
 
-    def plot_local_gradient(self, evaluate_at="agent", pos=None, ax=None, **kwargs):
+    def plot_local_gradient(
+        self, evaluate_at="agent", pos=None, ax=None, autosave=None, **kwargs
+    ):
         """
         self.plot_local_gradient()
 
@@ -159,6 +162,8 @@ class SimpleValueNeuron(riab_neurons.PlaceCells):
             Default is None.
         - ax (np.ndarray or plt.Axes, optional): Subplot or array of subplots to plot
             on (one per plotted ROI, if environment is 2D). Default is None.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the
+            global autosave setting for ratinabox is used. Default is None.
 
         Keyword args:
         - **kwargs: Keyword arguments to pass to self.get_local_gradient().
@@ -192,5 +197,7 @@ class SimpleValueNeuron(riab_neurons.PlaceCells):
                 ls="dotted",
                 zorder=12,
             )
+
+        plot_util.save_figure(sub_ax.figure, f"{self.name}_local_gradient", save=autosave)  # type: ignore[attr-defined]
 
         return ax

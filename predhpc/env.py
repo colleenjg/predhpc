@@ -6,6 +6,7 @@ import warnings
 import numpy as np
 from matplotlib import pyplot as plt  # type: ignore[import]
 from matplotlib import figure as mpl_figure  # type: ignore[import]
+from matplotlib import colormaps as mpl_cmap  # type: ignore[import]
 import pandas as pd  # type: ignore[import]
 
 from ratinabox import Environment as riabEnv  # type: ignore[import]
@@ -93,7 +94,16 @@ class Environment(riabEnv, ext_util.ParamsManagerMixin):
 
         return figsize
 
-    def plot_environment(self, fig=None, ax=None, return_env_fig=False, **kwargs):
+    def plot_environment(
+        self,
+        fig=None,
+        ax=None,
+        return_env_fig=False,
+        s=10,
+        alpha=0.8,
+        plot_objects=True,
+        **kwargs,
+    ):
         """
         self.plot_environment()
 
@@ -107,6 +117,9 @@ class Environment(riabEnv, ext_util.ParamsManagerMixin):
             Default is None.
         - return_env_fig (bool, optional): Whether to return the figure
             (for compatibility). Default is False.
+        - s (float, optional): Size for the plotted objects. Default is 10.
+        - alpha (float, optional): Alpha value for the plotted objects. Default is 0.8.
+        - plot_objects (bool, optional): Whether to plot the objects. Default is True.
 
         Keyword args:
         - **kwargs: Keyword arguments passed to ratinabox.Environment.plot_environment().
@@ -120,7 +133,25 @@ class Environment(riabEnv, ext_util.ParamsManagerMixin):
 
         kwargs = plot_util.organize_fig_ax_kwargs(fig=fig, ax=ax, **kwargs)
 
-        fig, sub_ax = super().plot_environment(**kwargs)
+        fig, sub_ax = super().plot_environment(plot_objects=False, **kwargs)
+
+        if plot_objects:
+            object_cmap = mpl_cmap[self.object_colormap]
+            for i, object in enumerate(self.objects["objects"]):
+                object_color = object_cmap(
+                    self.objects["object_types"][i] / (self.n_object_types - 1 + 1e-8)
+                )
+                sub_ax.scatter(
+                    object[0],
+                    0,
+                    facecolor=[0, 0, 0, 0],
+                    edgecolors=object_color,
+                    s=s,
+                    zorder=2,
+                    marker="o",
+                    alpha=alpha,
+                )
+
         if return_env_fig:
             return fig, sub_ax
         else:
@@ -524,6 +555,8 @@ class TEnv(Environment):
         sub_ax: plt.Axes | None = None,
         return_env_fig: bool = False,
         no_legend: bool = False,
+        base_s: float = 15,
+        alpha: float = 0.8,
         autosave: bool | None = None,
         **kwargs,
     ) -> plt.Axes:
@@ -541,6 +574,8 @@ class TEnv(Environment):
         - return_env_fig (bool, optional): Whether to return the figure
             (for compatibility). Default is False.
         - no_legend (bool, optional): Whether to plot the legend. Default is False.
+        - base_s (float, optional): Base size for the plotted objects. Default is 15.
+        - alpha (float, optional): Alpha value for the plotted objects. Default is 0.8.
         - autosave (bool, optional): Whether to save the figure. Default is None.
 
         Keyword args:
@@ -557,19 +592,25 @@ class TEnv(Environment):
 
         sub_ax = super().plot_environment(autosave=False, plot_objects=False, **kwargs)
 
-        start_kwargs = plot_util.get_plot_marker_kwargs("start")
-        sub_ax.scatter(*self.T_start, zorder=5, label="start", **start_kwargs)
+        start_kwargs = plot_util.get_plot_marker_kwargs("start", base_s=base_s)
+        sub_ax.scatter(
+            *self.T_start, zorder=5, label="start", alpha=alpha, **start_kwargs
+        )
 
         if len(self.objects):
-            target_kwargs = plot_util.get_plot_marker_kwargs("target")
+            target_kwargs = plot_util.get_plot_marker_kwargs("target", base_s=base_s)
             for object_coords in self.objects["objects"]:
                 sub_ax.scatter(
-                    *object_coords, zorder=5, label="target", **target_kwargs
+                    *object_coords,
+                    zorder=5,
+                    label="target",
+                    alpha=alpha,
+                    **target_kwargs,
                 )
 
-        reset_kwargs = plot_util.get_plot_marker_kwargs("reset")
+        reset_kwargs = plot_util.get_plot_marker_kwargs("reset", base_s=base_s)
         for T_end in [self.left_T_end, self.right_T_end]:
-            sub_ax.scatter(*T_end, zorder=5, label="reset", **reset_kwargs)
+            sub_ax.scatter(*T_end, zorder=5, label="reset", alpha=alpha, **reset_kwargs)
 
         sub_ax.legend(loc="lower right", frameon=False)
 
@@ -612,10 +653,11 @@ class OpenField(Environment):
         • self.object_df
         • self.object_type_num_to_name_dict
         • self.object_type_name_to_num_dict
-        • self.object_type_num_to_plot_params_dict
         • self.teleport_pairs_dict
 
     List of methods (in addition to Environment methods):
+        • self.get_object_type_num_to_plot_params_dict
+        • self.get_area()
         • self.check_if_walls_ends_too_close()
         • self.get_teleport_coords()
         • self.get_teleport_pair_orientation()
@@ -736,6 +778,30 @@ class OpenField(Environment):
 
         return self._object_df
 
+    def _get_object_type_num(self, object_type_name="reward") -> int:
+        """
+        self._get_object_type_num()
+
+        Obtain the type number for the provided object name. If the name is not in the
+        existing dictionary num to name dictionary, it will be added.
+
+        Returns:
+        - object_type_num (int): Object type number.
+        """
+
+        if object_type_name in self.object_type_name_to_num_dict.keys():
+            object_type_num = self.object_type_name_to_num_dict[object_type_name]
+
+        else:
+            object_type_nums = list(self.object_type_num_to_name_dict.keys())
+            if len(object_type_nums):
+                object_type_num = np.max(object_type_nums) + 1
+            else:
+                object_type_num = 0
+            self._object_type_num_to_name_dict[object_type_num] = object_type_name
+
+        return object_type_num
+
     @property
     def object_type_num_to_name_dict(self) -> dict[int, str]:
         """
@@ -749,18 +815,7 @@ class OpenField(Environment):
         """
 
         if not hasattr(self, "_object_type_num_to_name_dict"):
-            object_type_num_to_name_dict = {
-                0: "reward",
-                1: "novel",
-            }
-
-            for n in range(self.num_teleport_pairs):
-                object_type_nums = self._get_new_teleport_pair_object_type_nums(
-                    first=np.max(list(object_type_num_to_name_dict.keys())) + 1
-                )
-                for direction, i in object_type_nums.items():
-                    object_type_num_to_name_dict[i] = f"teleport_{n}_{direction}"
-            self._object_type_num_to_name_dict = object_type_num_to_name_dict
+            self._object_type_num_to_name_dict = dict()
 
         return self._object_type_num_to_name_dict
 
@@ -781,74 +836,6 @@ class OpenField(Environment):
         }
 
         return object_type_name_to_num_dict
-
-    @property
-    def object_type_num_to_plot_params_dict(self) -> dict[int, dict[str, Any]]:
-        """
-        self.object_type_num_to_plot_params_dict
-
-        Dictionary for getting plotting parameters from object type number.
-
-        Returns:
-        - object_type_num_to_plot_params_dict (dict): Dictionary with keys and values:
-            - object type number (int): dictionary with keys and values (dict):
-                - "name" (str): object type name
-                - "marker" (str): marker for the object
-                - "color" (str): color for the object
-                - "s" (int): size for the object
-                - "zorder" (int): zorder for the object
-        """
-
-        if not hasattr(self, "_object_type_num_to_plot_params_dict"):
-            teleport_nums = [
-                val.replace("teleport_", "").replace("in_", "")
-                for val in self.object_type_num_to_name_dict.values()
-                if val.startswith("teleport") and "_in" in val
-            ]
-            teleport_vals = np.linspace(0.5, 1, len(teleport_nums))
-            teleport_colors = plt.get_cmap("Oranges")(teleport_vals)  # type: ignore[callable]
-
-            object_type_num_to_plot_params_dict = dict()
-            for num, name in self.object_type_num_to_name_dict.items():
-                if name == "reward":
-                    object_type_num_to_plot_params_dict[num] = {
-                        "name": name,
-                        "marker": "o",
-                        "color": "blue",
-                        "s": 20,
-                        "zorder": 5,
-                    }
-                elif name == "novel":
-                    object_type_num_to_plot_params_dict[num] = {
-                        "name": name,
-                        "marker": "o",
-                        "color": "green",
-                        "s": 20,
-                        "zorder": 5,
-                    }
-                elif name.startswith("teleport"):
-                    direc = "in" if "_in" in name else "out"
-                    teleport_num = int(
-                        name.replace("teleport_", "").replace(f"_{direc}", "")
-                    )
-                    color = teleport_colors[teleport_num]
-                    object_type_num_to_plot_params_dict[num] = {
-                        "name": name,
-                        "marker": self.get_teleport_plotting_marker(
-                            teleport_num, direction=direc
-                        ),
-                        "color": color,
-                        "s": 20,
-                        "zorder": 5,
-                    }
-                else:
-                    raise ValueError(f"Unknown object type name: {name}")
-
-            self._object_type_num_to_plot_params_dict = (
-                object_type_num_to_plot_params_dict
-            )
-
-        return self._object_type_num_to_plot_params_dict
 
     @property
     def teleport_pairs_dict(self) -> dict[int, dict[str, tuple[int, list[float]]]]:
@@ -902,53 +889,72 @@ class OpenField(Environment):
 
         return self._teleport_pairs_dict
 
-    def _get_new_teleport_pair_object_type_nums(
-        self, first: int | None = None
-    ) -> dict[str, int]:
+    def get_object_type_num_to_plot_params_dict(
+        self, s=20
+    ) -> dict[int, dict[str, Any]]:
         """
-        self._get_new_teleport_pair_object_type_nums()
+        self.get_object_type_num_to_plot_params_dict()
 
-        Obtain object type numbers for a new teleportation pair.
+        Obtains plotting parameters from object type number.
 
         Args:
-        - first (int): First object type number to use. If None, use the next
-            available number based on the object type number to name dictionary.
-            Default is None.
+        - s (int, optional): Size for the object. Default is 20.
 
         Returns:
-        - object_type_nums (dict): Dictionary with keys and values:
-            - "in" (int): object type number for teleport in object
-            - "out" (int): object type number for teleport out object
+        - object_type_num_to_plot_params_dict (dict): Dictionary with keys and values:
+            - object type number (int): dictionary with keys and values (dict):
+                - "name" (str): object type name
+                - "marker" (str): marker for the object
+                - "color" (str): color for the object
+                - "s" (int): size for the object
+                - "zorder" (int): zorder for the object
         """
 
-        if first is None:
-            first = np.max(list(self.object_type_num_to_name_dict.keys())) + 1
-
-        first = int(first)  # type: ignore[assignment]
-
-        object_type_nums = {
-            "in": first,
-            "out": first + 1,
-        }
-
-        return object_type_nums
-
-    def _reset_object_type_dicts(self):
-        """
-        self._reset_object_type_dicts()
-
-        Reset the object type dictionary attributes.
-        """
-
-        dict_attr_names = [
-            "_object_type_num_to_name_dict",
-            "_object_type_num_to_plot_params_dict",
-            "_teleport_pairs_dict",
+        teleport_nums = [
+            val.replace("teleport_", "").replace("in_", "")
+            for val in self.object_type_num_to_name_dict.values()
+            if val.startswith("teleport") and "_in" in val
         ]
+        teleport_vals = np.linspace(0.5, 1, len(teleport_nums))
+        teleport_colors = plt.get_cmap("Oranges")(teleport_vals)  # type: ignore[callable]
 
-        for dict_attr_name in dict_attr_names:
-            if hasattr(self, dict_attr_name):
-                delattr(self, dict_attr_name)
+        object_type_num_to_plot_params_dict = dict()
+        for num, name in self.object_type_num_to_name_dict.items():
+            if name == "reward":
+                object_type_num_to_plot_params_dict[num] = {
+                    "name": name,
+                    "marker": "o",
+                    "color": "blue",
+                    "s": s,
+                    "zorder": 5,
+                }
+            elif name == "novel":
+                object_type_num_to_plot_params_dict[num] = {
+                    "name": name,
+                    "marker": "o",
+                    "color": "green",
+                    "s": s,
+                    "zorder": 5,
+                }
+            elif name.startswith("teleport"):
+                direc = "in" if "_in" in name else "out"
+                teleport_num = int(
+                    name.replace("teleport_", "").replace(f"_{direc}", "")
+                )
+                color = teleport_colors[teleport_num]
+                object_type_num_to_plot_params_dict[num] = {
+                    "name": name,
+                    "marker": self.get_teleport_plotting_marker(
+                        teleport_num, direction=direc
+                    ),
+                    "color": color,
+                    "s": s,
+                    "zorder": 5,
+                }
+            else:
+                raise ValueError(f"Unknown object type name: {name}")
+
+        return object_type_num_to_plot_params_dict
 
     def get_area(self):
         """
@@ -1326,13 +1332,19 @@ class OpenField(Environment):
         Args:
         - object (1D np.ndarray, optional): Object coordinates [x, y].
             If None, object coordinates are sampled. Default is None.
-        - object_type (str or int, optional): Object type. Default is "new".
+        - object_type_name (str or int, optional): Object type. Default is "new".
         """
 
         if object is None:
             object = self.sample_coords()
 
-        super().add_object(object, type=object_type)  # type: ignore[arg-type]
+        if object_type == "new" or isinstance(object_type, int):
+            raise RuntimeError(
+                "For the OpenField, object type should be a string, but not 'new'."
+            )
+
+        object_type_num = self._get_object_type_num(object_type_name=object_type)
+        super().add_object(object, type=object_type_num)  # type: ignore[arg-type]
 
         # add to object dataframe
         sub_df = self.object_df[self.object_df["object_type_num"] == object_type]
@@ -1341,18 +1353,16 @@ class OpenField(Environment):
         else:
             idx_within_type = sub_df["idx_within_type"].max() + 1
 
-        object_type_name = self.object_type_num_to_name_dict[int(object_type)]
-
         new_object = {
-            "object_type_num": object_type,
-            "object_type_name": object_type_name,
+            "object_type_num": object_type_num,
+            "object_type_name": object_type,
             "idx_within_type": idx_within_type,
             "position_x": object[0],
             "position_y": object[1],
         }
 
-        if "teleport" in object_type_name:
-            _, teleport_pair_num, teleport_direction = object_type_name.split("_")
+        if "teleport" in object_type:
+            _, teleport_pair_num, teleport_direction = object_type.split("_")
             new_object["teleport_pair_num"] = int(teleport_pair_num)
             new_object["teleport_direction"] = teleport_direction
 
@@ -1374,8 +1384,6 @@ class OpenField(Environment):
             If None, coordinates are sampled. Default is None.
         """
 
-        reward_type = self.object_type_name_to_num_dict["reward"]
-
         if coords is not None:
             num = len(coords)
 
@@ -1385,10 +1393,7 @@ class OpenField(Environment):
             else:
                 coord = np.asarray(coords[n], dtype=np.float64).reshape(2)
                 self.check_if_position_is_in_environment(coord)
-            self.add_object(coord, object_type=reward_type)
-
-        if num > 0:
-            self._reset_object_type_dicts()
+            self.add_object(coord, object_type="reward")
 
     def add_novel_objects(
         self,
@@ -1406,8 +1411,6 @@ class OpenField(Environment):
             If None, coordinates are sampled. Default is None.
         """
 
-        novel_type = self.object_type_name_to_num_dict["novel"]
-
         if coords is not None:
             num = len(coords)
 
@@ -1418,10 +1421,7 @@ class OpenField(Environment):
                 coord = np.asarray(coords[n], dtype=np.float64).reshape(2)
                 self.check_if_position_is_in_environment(coord)
 
-            self.add_object(coord, object_type=novel_type)
-
-        if num > 0:
-            self._reset_object_type_dicts()
+            self.add_object(coord, object_type="novel")
 
     def add_teleport_pairs(self, num: int = 1, coord_pairs=None):
         """
@@ -1471,17 +1471,16 @@ class OpenField(Environment):
             return coord_pair
 
         for n in range(num):
-            object_type_nums = self._get_new_teleport_pair_object_type_nums()
+            i = self.num_teleport_pairs
             self.num_teleport_pairs += 1
-            self._reset_object_type_dicts()  # within loop, so that teleportation pair object types are not reused
             if coord_pairs is not None:
                 coord_pair = format_teleport_pair(coord_pairs[n])
-            for o, object_type_num in enumerate(object_type_nums.values()):
+            for o, direction in enumerate(["in", "out"]):
                 if coord_pairs is None:
                     coords = self.sample_coords()
                 else:
                     coords = coord_pair[o]
-                self.add_object(coords, object_type=object_type_num)
+                self.add_object(coords, object_type=f"teleport_{i}_{direction}")
 
     def add_walls(self, num: int = 1, max_attempts: int = 1000):
         """
@@ -1564,6 +1563,8 @@ class OpenField(Environment):
         sub_ax: plt.Axes | None = None,
         plot_objects: bool = True,
         size_fact: float = 2.5,
+        alpha: float = 0.8,
+        s: float = 20,
         no_legend: bool = False,
         return_env_fig: bool = False,
         autosave: bool | None = None,
@@ -1584,6 +1585,8 @@ class OpenField(Environment):
             Default is True.
         - size_fact (float, optional): Factor to multiply environment width by to
             determine figure size. Default is 2.5.
+        - alpha (float, optional): Alpha value for plotting objects. Default is 0.8.
+        - s (float, optional): Size of objects. Default is 20.
         - no_legend (bool, optional): Whether to remove legend from plot.
             Default is False.
         - return_env_fig (bool, optional): Whether to return the figure
@@ -1609,8 +1612,8 @@ class OpenField(Environment):
         sub_ax = super().plot_environment(autosave=False, plot_objects=False, **kwargs)
 
         if plot_objects:
-            object_type_num_to_plot_params_dict = copy.deepcopy(
-                self.object_type_num_to_plot_params_dict
+            object_type_num_to_plot_params_dict = (
+                self.get_object_type_num_to_plot_params_dict(s=s)
             )
             for coords, object_type in zip(
                 self.objects["objects"], self.objects["object_types"]
@@ -1621,6 +1624,7 @@ class OpenField(Environment):
                 sub_ax.scatter(
                     *coords,
                     **object_type_num_to_plot_params_dict[object_type],
+                    alpha=alpha,
                     label=label,
                 )
 

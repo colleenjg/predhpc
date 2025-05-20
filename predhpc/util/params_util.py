@@ -10,13 +10,15 @@ SCALE_TMAZE = 4.0
 SCALE = 2.0
 DT = 0.03
 
+WAIT_LINEAR = int(16 / DT)  # 16 sec
+
 REL_TARGET_POS = 3 / 5
 MOVE_CLOSE = 0.2
 MOVE_MID = 0.7
 MOVE_FAR = 2.0
 
 SPEED_MEAN_LINEAR = 0.25  # m/s
-SPEED_STD = SPEED_MEAN_LINEAR / 8
+SPEED_STD = 0.05  # m/s
 SPEED_MEAN_2D = 0.28  # m/s (mean tends to be undershot)
 
 PC_SIGMA = 0.1  # x2 for width at 50% of peak, x4 for 10% of peak
@@ -77,6 +79,25 @@ def check_environment(environment="linear"):
         )
 
     return environment
+
+
+def get_target_position(environment="linear", scale=SCALE_LINEAR):
+    """
+    get_target_position()
+
+    Get target position.
+
+    Returns:
+    - target_position (1D np.ndarray): Target position.
+    """
+
+    if environment == "linear":
+        target_position = np.asarray([scale * REL_TARGET_POS])
+    else:
+        raise NotImplementedError(
+            "Function only implemented for the linear environment."
+        )
+    return target_position
 
 
 def get_activation_function(activation_function=None):
@@ -242,7 +263,7 @@ def get_agent_params(dt=DT, scale=None, environment="linear", **kwargs):
         agent_params["reset_position"] = scale - dt
         agent_params["target_position"] = scale - dt * 8
         agent_params["fixed_direction"] = True
-        agent_params["wait_at_end"] = int(16 / dt)  # 16 sec
+        agent_params["wait_at_end"] = WAIT_LINEAR
         agent_params["wait_between_targets"] = 30
         agent_params["target_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_LINEAR
         agent_params["reset_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_LINEAR
@@ -459,10 +480,10 @@ def get_Pyr_params(
             "soma_BTSP_induction_threshold": 8,  # sustained required for BTSP
             "soma_BTSP_plateau_length": 0.12,  # plateau length required for BTSP
             "inhibit_weight": 1.0,  # strength of dendritic inhibition from soma
-            "inhibit_input_filter_tau": 0.25,
+            "inhibit_input_filter_tau": 0.3,
             "inhibit_input_trend_tau": None,
             "mutual_inhibition_weight": None,
-            "lateral_tau": 0.25,
+            "lateral_tau": 0.3,
         }
 
         BTSP_filter_param_dict = get_default_BTSP_filter_param_dict()

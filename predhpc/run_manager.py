@@ -17,6 +17,21 @@ from predhpc.neurons import (
 from predhpc.util import ext_util, gen_util, plot_util, params_util
 
 
+class AdjustMaxTraj:
+    def __init__(self, learner, finish_trajectory=True):
+        self.learner = learner
+        self.finish_trajectory = finish_trajectory
+        self.original_max_num_traj = learner.max_num_traj
+
+    def __enter__(self):
+        if self.original_max_num_traj is not None:
+            self.learner.max_num_traj = self.original_max_num_traj - 1
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if self.original_max_num_traj is not None:
+            self.learner.max_num_traj = self.original_max_num_traj
+
+
 class Learner:
     """
     Learner
@@ -34,8 +49,8 @@ class Learner:
         record_weights_at_BTSP=True,
         use_Hebbian=False,
         weight_recording_freq=100,
-        num_target_reaches=None,
-        num_trajectories=None,
+        max_num_target_reaches=None,
+        max_num_traj=None,
     ):
         """
         Learner()
@@ -57,9 +72,9 @@ class Learner:
             False.
         - weight_recording_freq (int, optional): Frequency at which to record weights
             if Hebbian learning is active. Default is 100.
-        - num_target_reaches (int, optional): Target number of rewards to reach.
+        - max_num_target_reaches (int, optional): Maximum number of target reaches.
             Default is None.
-        - num_trajectories (int, optional): Number of trajectories to complete.
+        - max_num_traj (int, optional): Maximum number of trajectories to complete.
             Default is None.
         """
 
@@ -72,8 +87,8 @@ class Learner:
         self.use_Hebbian = use_Hebbian
         self.weight_recording_freq = weight_recording_freq
 
-        self.num_target_reaches = num_target_reaches
-        self.num_trajectories = num_trajectories
+        self.max_num_target_reaches = max_num_target_reaches
+        self.max_num_traj = max_num_traj
 
         self.set_init_attributes(BTSP_on=BTSP_on, reverse_linear=reverse_linear)
 
@@ -111,7 +126,7 @@ class Learner:
         # Agent info
         self.step = -1
         self.agent_start_step = self.get_agent_step()
-        self.num_prev_traj_compl = len(self.Agent.get_completed_trajectories_df())
+        self.num_prev_traj_compl = self.Agent.get_num_completed_trajectories()
         self.num_prev_target_reaches = len(self.Agent.get_reached_target_df())
         self.traj_restarted = False
         self.early_stop_in_n = -1
@@ -141,6 +156,7 @@ class Learner:
         self.BTSP_stopped = False
         self.num_BTSP_prev = len(self.Pyrs_for_weights.history["BTSP_events"])
         self.steps_BTSP_triggered = list()
+        self.BTSP_neurons = list()
 
         # weight recording
         self.weights = [self.Pyrs_for_weights.inputs["PCs"]["w"].copy()]
@@ -244,6 +260,7 @@ class Learner:
         num_BTSP = len(self.Pyrs_for_weights.history["BTSP_events"])
         if num_BTSP > len(self.steps_BTSP_triggered) + self.num_BTSP_prev:
             self.steps_BTSP_triggered.append(self.get_agent_step() - 1)
+            self.BTSP_neurons.append(self.Pyrs_for_weights.history["BTSP_targets"][-1])
 
         # check for BTSP on current update
         if self.two_compartment or self.one_comp_internal:
@@ -318,16 +335,16 @@ class Learner:
         """
 
         if self.early_stop_in_n < 0:
-            if self.num_target_reaches is not None:
-                num_target_reaches = (
+            if self.max_num_target_reaches is not None:
+                max_num_target_reaches = (
                     len(self.Agent.get_reached_target_df())
                     - self.num_prev_target_reaches
                 )
-                if num_target_reaches >= self.num_target_reaches:
+                if max_num_target_reaches >= self.max_num_target_reaches:
                     self.early_stop_in_n = 20
-            elif self.num_trajectories is not None:
-                total_traj_compl = len(self.Agent.get_completed_trajectories_df())
-                if total_traj_compl - self.num_prev_traj_compl >= self.num_trajectories:
+            elif self.max_num_traj is not None:
+                total_traj_compl = self.Agent.get_num_completed_trajectories()
+                if total_traj_compl - self.num_prev_traj_compl >= self.max_num_traj:
                     self.early_stop_in_n = 20
         else:
             if self.early_stop_in_n == 0:
@@ -368,20 +385,21 @@ class Learner:
             len(self.Agent.get_reached_target_df()) - self.num_prev_target_reaches
         )
         if (
-            self.num_target_reaches is None
-            or act_target_reaches >= self.num_target_reaches
+            self.max_num_target_reaches is None
+            or act_target_reaches >= self.max_num_target_reaches
         ):
             print(f"Reached target {act_target_reaches} times.")
         else:
             print(
                 f"Only reached target {act_target_reaches} times "
-                f"(target: {self.num_target_reaches})."
+                f"(target: {self.max_num_target_reaches})."
             )
 
         self.Agent.log_trajectory_stats_to_date()
         self.Agent.log_trajectory_stats_to_date(log_as_time=False)
 
         steps_BTSP_triggered = np.asarray(self.steps_BTSP_triggered)
+
         if self.check_BTSP_enabled():
             if len(steps_BTSP_triggered) == 0:
                 BTSP_stat_str = ""
@@ -393,9 +411,14 @@ class Learner:
                     f"and {steps_BTSP_triggered.max()}, inclusively"
                 )
             stop_BTSP = self.stop_BTSP or self.step
+            event_str = "event" if len(steps_BTSP_triggered) == 1 else "events"
+            neuron_str = ""
+            if self.Pyrs_for_weights.n > 1 and len(steps_BTSP_triggered):
+                n = len(np.unique(np.concatenate(self.BTSP_neurons)))
+                neuron_str = f" in {n} neuron" if n == 1 else f" in {n} neurons"
             print(
-                f"{len(steps_BTSP_triggered)} BTSP events triggered (allowed from steps "
-                f"{self.start_BTSP + self.agent_start_step} to "
+                f"{len(steps_BTSP_triggered)} BTSP {event_str} triggered{neuron_str} "
+                f"(allowed from steps {self.start_BTSP + self.agent_start_step} to "
                 f"{stop_BTSP + self.agent_start_step}){BTSP_stat_str}."
             )
         else:
@@ -463,7 +486,32 @@ class Learner:
                 "BTSP events triggered even though BTSP was never enabled."
             )
 
+        if self.early_stop_in_n != -1:
+            self.early_stop_in_n = -1  # reset early stop counter
+
         return
+
+    def get_most_BTSP_neurons(self):
+        """
+        self.get_most_BTSP_neurons()
+
+        Get the neurons with the most BTSP events.
+
+        Returns:
+        - most_BTSP_neuron_idxs (1D array): Indices of the neurons with the most BTSP
+            events.
+        """
+
+        idxs, counts = np.unique(np.concatenate(self.BTSP_neurons), return_counts=True)
+
+        if len(idxs):
+            most_BTSP_neuron_idxs = np.sort(idxs[counts == counts.max()])
+        else:
+            most_BTSP_neuron_idxs = np.arange(self.Pyrs_for_weights.n)
+
+        num_BTSP = counts.max()
+
+        return most_BTSP_neuron_idxs, num_BTSP
 
     def get_recorded_weights(self):
         """
@@ -676,17 +724,31 @@ def run_learner(
     - learner (Learner): Learner object.
     - updater (object or dict, optional): Object or dictionary for updating
         agent position. Default is dict().
-    - max_num_steps (int, optional): Maximum number of steps to run. Default is 10000.
+    - max_num_steps (int, optional): Maximum number of steps to run. Will constrain
+        other stopping conditions (number of target reaches or trajectories). Pass None
+        to avoid constraining these by number of steps, and learning will only stop
+        when one of those conditions are reached, if provided. Default is 10000.
     - finish_trajectory (bool, optional): Whether to finish the last trajectory.
         Default is False.
     - no_logs (bool, optional): Whether to disable logging. Default is False.
     """
 
-    for _ in tqdm(range(max_num_steps), disable=no_logs):
-        stop = learner.update(updater=updater, no_logs=no_logs)
+    with AdjustMaxTraj(learner, finish_trajectory=finish_trajectory):
+        if max_num_steps is None:
 
-        if stop:
-            break
+            def infinite_generator():
+                while True:
+                    yield
+
+            generator = infinite_generator()
+        else:
+            generator = range(max_num_steps)
+
+        for _ in tqdm(generator, disable=no_logs):
+            stop = learner.update(updater=updater, no_logs=no_logs)
+
+            if stop:
+                break
 
     if finish_trajectory:
         finish_learn_trajectory(learner)
@@ -698,8 +760,8 @@ def run_learner(
 
 def learn(
     Pyrs_or_learner,
-    num_target_reaches=None,
-    num_trajectories=None,
+    max_num_target_reaches=None,
+    max_num_traj=None,
     max_num_steps=10000,
     finish_trajectory=False,
     record_weights_at_BTSP=True,
@@ -719,11 +781,14 @@ def learn(
     Args:
     - Pyrs_or_learner (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer or Learner):
         Pyr. neuron layer or learner.
-    - num_target_reaches (int, optional): Target number of rewards to reach.
+    - max_num_target_reaches (int or None, optional): Maximum number of target reaches.
         Default is None.
-    - num_trajectories (int, optional): Number of trajectories to complete. Default is 1.
+    - max_num_traj (int or None, optional): Maximum number of trajectories to complete.
         Default is None.
-    - max_num_steps (int, optional): Maximum number of steps to run. Default is 10000.
+    - max_num_steps (int or None, optional): Maximum number of steps to run. Will constrain
+        other stopping conditions (number of target reaches or trajectories). Pass None
+        to avoid constraining these by number of steps, and learning will only stop
+        when one of those conditions are reached, if provided. Default is 10000.
     - finish_trajectory (bool, optional): Whether to finish the last trajectory.
         Default is False.
     - record_weights_at_BTSP (bool, optional): Whether to record weights at BTSP events.
@@ -751,6 +816,8 @@ def learn(
 
     if isinstance(Pyrs_or_learner, Learner):
         learner = Pyrs_or_learner
+        learner.max_num_target_reaches = max_num_target_reaches
+        learner.max_num_traj = max_num_traj
     else:
         learner = Learner(
             Pyrs_or_learner,
@@ -760,8 +827,8 @@ def learn(
             record_weights_at_BTSP=record_weights_at_BTSP,
             use_Hebbian=use_Hebbian,
             weight_recording_freq=weight_recording_freq,
-            num_target_reaches=num_target_reaches,
-            num_trajectories=num_trajectories,
+            max_num_target_reaches=max_num_target_reaches,
+            max_num_traj=max_num_traj,
         )
 
     run_learner(
@@ -782,7 +849,7 @@ def learn_openfield_BTSP(
     Pyrs_or_learner: (
         learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | Learner | None
     ) = None,
-    max_num_steps: int = 10000,
+    max_num_steps: int | None = 10000,
     finish_trajectory: bool = False,
     record_weights_at_BTSP: bool = True,
     weight_recording_freq: int = 100,
@@ -801,7 +868,11 @@ def learn_openfield_BTSP(
     Args:
     - Pyrs_or_learner (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer or Learner):
         Pyr. neuron layer or learner.
-    - max_num_steps (int, optional): Maximum number of steps to run. Default is 10000.
+    - max_num_steps (int or None, optional): Maximum number of steps to run. Will
+        constrain other stopping conditions (number of target reaches or trajectories).
+        Pass None to avoid constraining these by number of steps, and learning will
+        only stop when one of those conditions are reached, if provided.
+        Default is 10000.
     - finish_trajectory (bool, optional): Whether to finish the last trajectory.
         Default is False.
     - record_weights_at_BTSP (bool, optional): Whether to record weights at BTSP events.
@@ -953,8 +1024,9 @@ def learn_T_maze_BTSP(
     Pyrs_or_learner: (
         learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | Learner | None
     ) = None,
-    num_target_reaches: int = 200,
-    max_num_steps: int = 10000,
+    max_num_target_reaches: int = 200,
+    max_num_traj: int | None = None,
+    max_num_steps: int | None = 10000,
     finish_trajectory: bool = True,
     record_weights_at_BTSP: bool = True,
     weight_recording_freq: int = 100,
@@ -974,9 +1046,14 @@ def learn_T_maze_BTSP(
     Args:
     - Pyrs_or_learner (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer or Learner):
         Pyr. neuron layer or learner.
-    - num_target_reaches (int, optional): Target number of rewards to reach.
+    - max_num_target_reaches (int or None, optional): Maximum number of target reaches.
         Default is 200.
-    - max_num_steps (int, optional): Maximum number of steps to run. Default is 10000.
+    - max_num_traj (int or None, optional): Maximum number of trajectories to complete.
+        Default is None.
+    - max_num_steps (int or None, optional): Maximum number of steps to run. Will constrain
+        other stopping conditions (number of target reaches or trajectories). Pass None
+        to avoid constraining these by number of steps, and learning will only stop
+        when one of those conditions are reached, if provided. Default is 10000.
     - finish_trajectory (bool, optional): Whether to finish the last trajectory.
         Default is True.
     - record_weights_at_BTSP (bool, optional): Whether to record weights at BTSP events.
@@ -1032,7 +1109,8 @@ def learn_T_maze_BTSP(
 
     learner = learn(
         Pyrs_or_learner,
-        num_target_reaches=num_target_reaches,
+        max_num_target_reaches=max_num_target_reaches,
+        max_num_traj=max_num_traj,
         max_num_steps=max_num_steps,
         finish_trajectory=finish_trajectory,
         record_weights_at_BTSP=record_weights_at_BTSP,
@@ -1066,9 +1144,9 @@ def learn_1D_BTSP(
     Pyrs_or_learner: (
         learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | Learner | None
     ) = None,
-    num_target_reaches: int = 10,
-    num_trajectories: int | None = None,
-    max_num_steps: int = 5000,
+    max_num_target_reaches: int = 10,
+    max_num_traj: int | None = None,
+    max_num_steps: int | None = 5000,
     finish_trajectory: bool = True,
     record_weights_at_BTSP: bool = True,
     weight_recording_freq: int = 100,
@@ -1089,12 +1167,14 @@ def learn_1D_BTSP(
     Args:
     - Pyrs_or_learner (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer, Learner, optional):
         Pyr. neurons. If None, will be initialized. Default is None.
-    - num_target_reaches (int, optional): Target number of rewards to reach.
-        Default is 200.
-    - num_trajectories (int, optional): Number of trajectories to complete.
-        Default is 1.
-    - max_num_steps (int, optional): Maximum number of steps to run.
-        Default is 5000.
+    - max_num_target_reaches (int or None, optional): Maximum number of target reaches.
+        Default is 10.
+    - max_num_traj (int or None, optional): Maximum number of trajectories to complete.
+        Default is None.
+    - max_num_steps (int or None, optional): Maximum number of steps to run. Will constrain
+        other stopping conditions (number of target reaches or trajectories). Pass None
+        to avoid constraining these by number of steps, and learning will only stop
+        when one of those conditions are reached, if provided. Default is 5000.
     - finish_trajectory (bool, optional): Whether to finish the last trajectory.
         Default is True.
     - record_weights_at_BTSP (bool, optional): Whether to record weights at BTSP events.
@@ -1146,8 +1226,8 @@ def learn_1D_BTSP(
 
     learner = learn(
         Pyrs_or_learner,
-        num_target_reaches=num_target_reaches,
-        num_trajectories=num_trajectories,
+        max_num_target_reaches=max_num_target_reaches,
+        max_num_traj=max_num_traj,
         max_num_steps=max_num_steps,
         finish_trajectory=finish_trajectory,
         record_weights_at_BTSP=record_weights_at_BTSP,
