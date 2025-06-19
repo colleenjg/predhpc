@@ -749,12 +749,13 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 after_reset = self.target_position > self.reset_position
                 if before_start or after_reset:
                     pos_str = (
-                        "before start position"
+                        f"before start position ({self.start_position})"
                         if before_start
-                        else "after reset position"
+                        else f"after reset position ({self.reset_position})"
                     )
                     warnings.warn(
-                        f"Target position is {pos_str} and therefore may not be reached."
+                        f"Target position ({self.target_position}) is {pos_str} and "
+                        "therefore may not be reached."
                     )
 
         self.steps_before_checking_for_target = 0
@@ -1655,7 +1656,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
             sub_ax.hist(position, bins=nbins, color="black", alpha=0.6, zorder=0)
             sub_ax.set_ylabel("Occupancy (frames)")
-            plot_util.pad_axis(sub_ax, "y", pad_prop=0.05, end="low")
+            plot_util.pad_axis(sub_ax, "y", pad_prop=0.05, prop_high=0)
 
         else:
             if sub_ax is None:
@@ -1918,6 +1919,96 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         return sub_ax
 
+    def get_position(
+        self,
+        position_name: str = "start",
+        dim_idx: int | None = None,
+        raise_error: bool = True,
+    ) -> float | None:
+        """
+        Get a specific position of the agent.
+
+        Args:
+        - position_name (str, optional): Position name to get.
+            Must be 'start', 'reset' or 'target'. Default is 'start'.
+        - dim_idx (int, optional): Dimension index. Default is None.
+        - raise_error (bool, optional): Whether to raise an error if no position
+            is found for the specified position name. Default is True.
+
+        Returns:
+        - position (float | 1D np.ndarray | None): The requested position value.
+        """
+
+        if position_name == "start":
+            position = self.start_position
+        elif position_name == "reset":
+            position = self.reset_position
+        elif position_name == "target":
+            position = self.target_position
+        else:
+            raise NotImplementedError(
+                "Position name must be 'start', 'reset' or 'target', "
+                f"but got {position_name}."
+            )
+
+        if position is None:
+            if raise_error:
+                raise ValueError(f"{position_name} is set to None.")
+            return None
+
+        if dim_idx is not None:
+            position = position[dim_idx]
+
+        return position
+
+    def add_positions_spatially_to_plot(
+        self,
+        sub_ax,
+        position_name="start",
+        base_s=15,
+        y_1D=0,
+        pos_fact=1,
+        pos_shift=0,
+        raise_error=True,
+        **kwargs,
+    ):
+        """
+        self.add_position_across_time_to_plot()
+
+        Add a position to a subplot across time.
+
+        Args:
+        - sub_ax (plt.Axes): Subplot to plot on.
+        - position_name (str, optional): Position name to plot.
+            Must be 'start', 'reset' or 'target'. Default is 'start'.
+        - base_s (int, optional): Base marker size. Default is 15.
+        - y_1D (float, optional): Y position to plot at if environment is 1D.
+            Default is 0.
+        - pos_fact (float, optional): Value by which to multiply positions.
+            Default is 1.
+        - pos_shift (float, optional): Value by which to shift positions (after
+            multiplication, if applicable). Default is 0.
+        - raise_error (bool, optional): Whether to raise an error if no positions
+            are found for the specified position name. Default is True.
+
+        Keyword args:
+        - **kwargs: Additional keyword arguments passed to plt.scatter().
+        """
+
+        dim_idx = 0 if self.Environment.D == 1 else None
+        pos = self.get_position(position_name, dim_idx=dim_idx, raise_error=raise_error)
+
+        if pos is None:
+            return
+
+        pos = pos * pos_fact + pos_shift
+        if self.Environment.D == 1:
+            pos = np.asarray([pos, y_1D])
+
+        plot_kwargs = plot_util.get_plot_marker_kwargs(position_name, base_s=base_s)
+        plot_kwargs.update(kwargs)
+        sub_ax.scatter(*pos, **plot_kwargs)
+
     def add_position_across_time_to_plot(
         self,
         sub_ax,
@@ -1952,6 +2043,13 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         - **kwargs: Additional keyword arguments passed to plt.scatter().
         """
 
+        y = self.get_position(
+            position_name=position_name, dim_idx=dim_idx, raise_error=raise_error
+        )
+
+        if y is None:
+            return
+
         indices = self.get_reached_position_steps(position_name)
         if len(indices) == 0:
             if raise_error:
@@ -1964,25 +2062,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         if in_min:
             t = t / 60
 
-        if position_name == "start":
-            position = self.start_position
-        elif position_name == "reset":
-            position = self.reset_position
-        elif position_name == "target":
-            position = self.target_position
-        else:
-            raise NotImplementedError(
-                "Position name must be 'start', 'reset' or 'target', "
-                f"but got {position_name}."
-            )
-
-        if position is None:
-            if raise_error:
-                raise ValueError(f"{position_name} is set to None.")
-            return
-
         xs = [t[x] for x in indices if x >= startid and x < endid]
-        ys = [position[dim_idx]] * len(xs)
+        ys = [y] * len(xs)
 
         plot_kwargs = plot_util.get_plot_marker_kwargs(position_name, base_s=base_s)
         plot_kwargs.update(kwargs)
@@ -1996,7 +2077,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         sub_ax: plt.Axes | None = None,
         alpha: float = 0.6,
         color: str = "k",
-        s: int | float = 3,
+        s: int | float | None = None,
+        base_s: int | float | None = None,
         plot_targets: bool = True,
         rasterize_traj: bool = False,
         xlim: float | None = None,
@@ -2022,7 +2104,10 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             created. Default is None.
         - alpha (float, optional): Trajectory point transparency. Default is 0.6.
         - color (str, optional): Trajectory point color or colors. Default is 'k'.
-        - s (float, optional): Size of scatterplot markers. Default is 3.
+        - s (float, optional): Size of scatterplot markers. If None, defaults are used.
+            Default is None.
+        - base_s (float, optional): Base size of scatterplot markers for objects in
+            environment. If None, defaults are used. Default is None.
         - plot_targets (bool, optional): Whether to plot the target. Default is True.
         - rasterize_traj (bool, optional): Whether to rasterize the trajectory scatter
             points, reducing the size of exported vector files. Default is False.
@@ -2060,7 +2145,12 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         if plot_targets:
             positions_to_plot.append("target")
 
-        alpha /= self.Environment.D
+        if s is None:
+            s = 1 if self.Environment.D == 1 else 3
+        if base_s is None:
+            base_s = s * 10 / self.Environment.D
+
+        alpha = alpha / self.Environment.D
         alpha_pts = 0.9 / self.Environment.D
         for dim_idx in range(self.Environment.D):
             sub_ax.scatter(
@@ -2077,7 +2167,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 self.add_position_across_time_to_plot(
                     sub_ax,
                     position_name=position_name,
-                    base_s=s * 5,
+                    base_s=base_s,
                     alpha=alpha_pts,
                     t_start=t_start,
                     t_end=t_end,
@@ -2349,6 +2439,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 sub_ax=sub_ax,
                 alpha=alpha,
                 color=colors,
+                s=0.02,
+                base_s=10,
                 plot_targets=plot_target,
                 xlim=xlim,
                 autosave=False,

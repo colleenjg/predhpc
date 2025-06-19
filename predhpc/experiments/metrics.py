@@ -74,6 +74,11 @@ def get_PC_weight_peak_relative_position(Pyrs, target_position=None):
         if target_position is None:
             target_position = Pyrs.Agent.target_position[0]
         peak_rel_pos = PC_centres[peak_idx] - target_position
+        scale = Pyrs.Agent.Environment.scale
+        if peak_rel_pos < -scale / 2:
+            peak_rel_pos += scale
+        elif peak_rel_pos > scale / 2:
+            peak_rel_pos -= scale
 
     return peak_rel_pos
 

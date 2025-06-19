@@ -751,7 +751,7 @@ def run_learner(
                 break
 
     if finish_trajectory:
-        finish_learn_trajectory(learner)
+        finish_learn_trajectory(learner, no_logs=no_logs)
 
     learner.wrap_up(no_logs=no_logs)
 

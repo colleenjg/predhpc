@@ -1683,7 +1683,7 @@ class HebbianLayer(LearnLayer):
             sub_ax.set_xlim(right=full_t[-1])
 
         plot_util.pad_axis(sub_ax, axis="x", pad_prop=0.05)
-        plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.5, end="high")
+        plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.5, prop_high=1.0)
 
         if mark_BTSP:
             self.add_BTSP_markers_to_plots(
@@ -1694,7 +1694,7 @@ class HebbianLayer(LearnLayer):
                 timeseries=True,
                 in_min=in_min,
             )
-            plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.05, end="high")
+            plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.05, prop_high=1.0)
 
         sub_ax.axhline(1, color="k", lw=1, ls="--", alpha=0.3)
 
@@ -3372,7 +3372,7 @@ class BTSPLayer(HebbianLayer):
         sub_ax.spines[["right"]].set_visible(False)
         sub_ax.set_ylabel("BTSP events")
         sub_ax.set_xlabel(xlabel)
-        plot_util.pad_axis(sub_ax, axis="y", end="high")
+        plot_util.pad_axis(sub_ax, axis="y", prop_high=1.0)
 
         twin_sub_ax = sub_ax.twiny()
 
@@ -3440,7 +3440,7 @@ class BTSPLayer(HebbianLayer):
         sub_ax.set_ylabel("Number of peaks")
         sub_ax.set_xlabel("BTSP ramp peaks")
         sub_ax.legend()
-        plot_util.pad_axis(sub_ax, axis="y", end="high")
+        plot_util.pad_axis(sub_ax, axis="y", prop_high=1.0)
 
         fig = sub_ax.figure
         plot_util.save_figure(fig, f"{self.name}_BTSP_ramp_peaks", save=autosave)  # type: ignore[attr-defined]
@@ -3599,7 +3599,7 @@ class BTSPLayer(HebbianLayer):
 
         sub_ax.axvline(0, color="k", ls="dashed")
         sub_ax.spines[["right", "top"]].set_visible(False)
-        plot_util.pad_axis(sub_ax, axis="y", end="both")
+        plot_util.pad_axis(sub_ax, axis="y")
 
         plot_util.save_figure(sub_ax.figure, f"{self.name}_{save_label}", save=autosave)  # type: ignore[attr-defined]
 
@@ -3830,7 +3830,7 @@ class BTSPLayer(HebbianLayer):
             for sub_ax in ax.ravel()[len(chosen_neurons) :]:
                 sub_ax.axis("off")
 
-        plot_util.pad_axis(sub_ax, axis="y", end="high")
+        plot_util.pad_axis(sub_ax, axis="y", prop_high=1.0)
 
         if split:
             fig.suptitle("BTSP responses", y=0.96)
@@ -4000,7 +4000,7 @@ class BTSPLayer(HebbianLayer):
         ax1D[0].set_ylabel("Prop. of BTSP\nthreshold reached")
         ax1D[0].spines[["top", "right"]].set_visible(False)
         ax1D[0].axhline(1, ls="dashed")
-        plot_util.pad_axis(ax1D[0], axis="y", end="high")
+        plot_util.pad_axis(ax1D[0], axis="y", prop_high=1.0)
 
         ax1D[1].plot(t, firingrate, lw=1.2, color=self.color)
         ax1D[1].axhline(self.BTSP_induction_threshold, ls="dashed", color=self.color)

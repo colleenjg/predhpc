@@ -538,7 +538,7 @@ def plot_metric_by_parameters(
 
         if mask.sum():
             sub_ax.scatter(
-                param_values[mask], metric_array[mask], s=10, c="k", alpha=0.3
+                param_values[mask], metric_array[mask], s=20, c="k", alpha=0.3
             )
             if vmin is not None and vmin < metric_array[mask].min():
                 sub_ax.set_ylim(vmin, None)

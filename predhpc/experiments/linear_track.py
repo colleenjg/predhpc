@@ -2,7 +2,6 @@
 
 import argparse
 from pathlib import Path
-from pprint import pprint
 import time
 
 from predhpc import run_manager
@@ -50,11 +49,9 @@ def get_search_space(search_space="speed_PF"):
     if isinstance(search_space, str):
         if search_space == "speed_PF":
             # in to out, col to row
-            search_kwargs = {"speed_mean": [0.05, 0.4, 21]}
+            search_kwargs = {"speed_mean": [0.05, 0.4, 29]}
         elif search_space == "target_moved":
-            search_kwargs = {
-                "target_moved": [-params_util.MOVE_FAR, params_util.MOVE_FAR, 41]
-            }
+            search_kwargs = {"target_moved": [-3.6, 2.4, 61]}
         else:
             raise ValueError(
                 f"search_space must be 'speed_PF' or 'target_moved', but is {search_space}."
@@ -67,7 +64,7 @@ def get_search_space(search_space="speed_PF"):
     return search_space
 
 
-def get_kwargs(experiment="speed_PF"):
+def get_kwargs(experiment="speed_PF", speed_std=0):
     """
     get_kwargs()
 
@@ -84,13 +81,16 @@ def get_kwargs(experiment="speed_PF"):
     if experiment in ["speed_PF", "target_moved"]:
         kwargs = {
             "wait_at_end": 0,
-            "speed_std": 0,
+            "speed_std": speed_std,
             "max_num_steps": None,
             "max_num_traj": 5,
             "max_num_target_reaches": None,
             "num_repeats": 4,
             "save_name": f"linear_{experiment}",
         }
+
+        if speed_std != 0:
+            kwargs["save_name"] = f"{kwargs['save_name']}_std_{speed_std}"
     else:
         raise ValueError(
             f"experiment must be 'speed_PF' or 'target_moved', but is {experiment}"
@@ -327,7 +327,7 @@ def run_linear_experiment_grid(
     - debug (bool, optional): Whether to run in debug mode. Default is False.
 
     Keyword args:
-    - **kwargs (dict): Keyword arguments passed to get_Pyrs().
+    - **Pyr_kwargs (dict): Keyword arguments passed to get_Pyrs().
     """
 
     def objective(config):
@@ -382,6 +382,7 @@ def get_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--experiment", default="speed_PF")
+    parser.add_argument("--speed_std", default=0, type=float)
     parser.add_argument("--direc", type=Path, default=None)
     parser.add_argument("--num_CPUs", type=int, default=2)
     parser.add_argument("--debug", action="store_true")
@@ -410,7 +411,7 @@ def main():
         start_time = time.perf_counter()
 
         search_space = get_search_space(search_space=args.experiment)
-        kwargs = get_kwargs(experiment=args.experiment)
+        kwargs = get_kwargs(experiment=args.experiment, speed_std=args.speed_std)
         direc = get_save_directory(direc=args.direc)
 
         linear_track.run_linear_experiment_grid(

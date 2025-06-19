@@ -311,7 +311,7 @@ def get_plot_shape(n: int, target_num_col: int = 10) -> tuple[int, int]:
     return shape
 
 
-def pad_axis(sub_ax, axis="y", pad_prop=0.1, end="both"):
+def pad_axis(sub_ax, axis="y", pad_prop=0.1, prop_high=0.5):
     """
     pad_axis(sub_ax)
 
@@ -322,18 +322,20 @@ def pad_axis(sub_ax, axis="y", pad_prop=0.1, end="both"):
     - axis (str, optional): Subplot to pad. Defaut is "y".
     - pad_prop (float, optional): Proportion of the axis range to pad by.
         Default is 0.1.
-    - end (str, optional): End to pad ("both", "low" or "high"). Defaut is "both".
+    - prop_high (float, optional): Proportion of the pad to use for high end.
+        Default is 0.5.
     """
 
     if axis not in ["x", "y", "both"]:
         raise ValueError(f"Subplot {axis} is not recognized.")
-    if end not in ["both", "low", "high"]:
-        raise ValueError(f"End {end} is not recognized.")
 
     if axis == "both":
         axes = ["x", "y"]
     else:
         axes = [axis]
+
+    if prop_high < 0 or prop_high > 1:
+        raise ValueError(f"prop_high must be between 0 and 1, but got {prop_high}.")
 
     for axis in axes:
         if axis == "x":
@@ -345,15 +347,113 @@ def pad_axis(sub_ax, axis="y", pad_prop=0.1, end="both"):
 
         pad = (max_val - min_val) * pad_prop
 
-        if end == "both":
-            min_val -= pad / 2
-            max_val += pad / 2
-        elif end == "low":
-            min_val -= pad
-        elif end == "high":
-            max_val += pad
+        min_val -= pad * (1 - prop_high)
+        max_val += pad * prop_high
 
         set_fct(min_val, max_val)
+
+
+def set_alternating_ticks(sub_ax, ticks, round_dec=None, axis="x", start_idx=None):
+    """
+    set_alternating_ticks(sub_ax, ticks)
+
+    Add alternating ticks with alternating labels to an axis.
+
+    Args:
+    - ax (plt.Axes): Axes to add the ticks to.
+    - ticks (list): List of tick positions.
+    - round_dec (int, optional): Number of decimal places to round the tick labels to.
+        Default is None.
+    - axis (str, optional): Axis to add the ticks to ("x" or "y"). Default is "x".
+    - start_idx (int, optional): Starting index for the alternating ticks. If None,
+        it is inferred from the data. Default is None.
+
+    Returns:
+    - labels (list): List of tick labels.
+    """
+
+    labels = [t for t in ticks]
+    if round_dec is not None:
+        labels = [np.around(t, round_dec) for t in ticks]
+        if round_dec == 0:
+            labels = [int(t) for t in labels]
+
+    zeros = np.asarray(labels) == 0
+    if start_idx is None:
+        if zeros.any():
+            start_idx = np.where(zeros)[0][0] % 2
+        else:
+            start_idx = 0
+
+    if axis == "x":
+        sub_ax.set_xticks(ticks)
+        sub_ax.set_xticklabels(labels)
+        ticklabels = sub_ax.get_xticklabels()
+    elif axis == "y":
+        sub_ax.set_yticks(ticks)
+        sub_ax.set_yticklabels(labels)
+        ticklabels = sub_ax.get_yticklabels()
+    else:
+        raise ValueError(f"Axis {axis} is not recognized. Use 'x' or 'y'.")
+
+    for i, label in enumerate(ticklabels):
+        if i % 2 != start_idx:
+            label.set_visible(False)
+
+    return labels
+
+
+def expand_ticks(
+    sub_ax, axis="x", num_ticks=5, alternating=True, round_dec=None, start_idx=None
+):
+    """
+    expand_ticks(sub_ax)
+
+    Expand the ticks of an axis to a specified number of ticks.
+
+    Args:
+    - sub_ax (plt.Axes): Subplot for which to expand the ticks.
+    - axis (str, optional): Axis to expand ticks for ("x" or "y"). Default is "x".
+    - num_ticks (int, optional): Number of ticks to expand to. Default is 5.
+    - alternating (bool, optional): Whether to use alternating ticks. Default is True.
+    - round_dec (int, optional): Number of decimal places to round the tick labels to.
+        Default is None.
+    - start_idx (int, optional): Starting index for the alternating ticks. If None,
+        it is inferred from the data. Default is None.
+
+    Returns:
+    - xticks (list): List of tick positions after expansion.
+    """
+
+    if axis == "x":
+        ticks = sub_ax.get_xticks()
+        lims = sub_ax.get_xlim()
+        set_fct = sub_ax.set_xticks
+    elif axis == "y":
+        ticks = sub_ax.get_yticks()
+        lims = sub_ax.get_ylim()
+        set_fct = sub_ax.set_yticks
+    else:
+        raise ValueError(f"Axis {axis} is not recognized. Use 'x' or 'y'.")
+
+    ticks = [t for t in ticks if lims[0] <= t <= lims[1]]
+    tick_min, tick_max = np.asarray(ticks).min(), np.asarray(ticks).max()
+    if round_dec is not None:
+        fact = 10**round_dec
+        tick_min = np.floor(tick_min * fact) / fact
+        tick_max = np.ceil(tick_max * fact) / fact
+
+    ticks = np.linspace(tick_min, tick_max, num_ticks)
+    set_fct(ticks)
+
+    if alternating:
+        set_alternating_ticks(
+            sub_ax, ticks, round_dec=round_dec, axis=axis, start_idx=start_idx
+        )
+    else:
+        set_fct(ticks)
+
+    return ticks
 
 
 def convert_to_rgb(hex_color):
@@ -915,22 +1015,22 @@ def get_plot_marker_kwargs(position_name: str = "reset", base_s: float = 15) -> 
     """
 
     if position_name == "start":
-        color = "gold"
+        color = "#FDE53B"  # gold
         marker = mpl_markers.MarkerStyle("^")
         s = base_s
 
     elif position_name == "reset":
-        color = "red"
+        color = "#E5292D"  # red
         marker = mpl_markers.MarkerStyle("x")
         s = base_s * 1.2
 
     elif position_name == "target":
-        color = "blue"
+        color = "#3C539B"  # blue
         marker = mpl_markers.MarkerStyle("o")
         s = base_s * 1.3
 
     elif position_name == "agent":
-        color = "black"
+        color = "#2B2B2B"  # dark grey
         marker = mpl_markers.MarkerStyle("d")
         s = base_s * 1.3
 
@@ -1156,7 +1256,7 @@ def plot_binned_rates(
         if plot_colorbars:
             if shared_range and i < num_neurons - 1:
                 continue
-            cbar = plt.colorbar(im, ax=ax1D[i], pad=0.15)
+            cbar = plt.colorbar(im, ax=ax1D[i], pad=0.15, aspect=12)
             cbar.set_label("Firing rate")
             cbar.ax.yaxis.set_label_position("left")
 
@@ -1184,7 +1284,7 @@ def plot_binned_rates(
         sub_ax.set_yticks([])
         if mark_runs:
             for i in range(1, binned_rate_means.shape[0]):
-                sub_ax.axhline(i - 0.5, color="white", lw=0.3, ls="--")
+                sub_ax.axhline(i - 0.5, color="white", lw=0.35, ls=(0, (6, 3)))
 
     return ax
 
@@ -1519,7 +1619,9 @@ def plot_summed_exp_kernel(
     plot_unsmoothed=False,
     target_root_dict=None,
     color="k",
+    lw=None,
     xlims=[-10, 10],
+    minimalist=False,
     sub_ax=None,
     **kwargs,
 ):
@@ -1547,7 +1649,10 @@ def plot_summed_exp_kernel(
     - target_root_dict (dict, optional): Dictionary with target root positions for
         plotting. Default is None.
     - color (str, optional): Line color. Default is "k".
+    - lw (float, optional): Line width. If None, default is used. Default is None.
     - xlims (list, optional): X-axis limits. Default is [-10, 10].
+    - minimalist (bool, optional): Whether to use a minimalist style for the plot.
+        Default is False.
     - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
 
     Keyword args:
@@ -1582,7 +1687,8 @@ def plot_summed_exp_kernel(
     time = dt * (np.arange(len(summed_exp_kernel)) - align_pt)
 
     if sub_ax is None:
-        _, sub_ax = plt.subplots(figsize=(7, 3))
+        figsize = (5, 1.8) if minimalist else (7, 3)
+        _, sub_ax = plt.subplots(figsize=figsize)
 
     data_to_plot = [summed_exp_kernel]
     linestyles = [None]
@@ -1590,20 +1696,37 @@ def plot_summed_exp_kernel(
         data_to_plot.append(unsmoothed)
         linestyles.append("dashed")
 
+    lw_kwargs = {"lw": lw} if lw is not None else dict()
     for ls, data in zip(linestyles[::-1], data_to_plot[::-1]):
+        label = None
         if ls is None:
             alpha = 1.0
             min_vals = data[:align_pt].min(), data[align_pt:].min()
             near_zero = max([data[0], data[-1]])
             AUC_perc_pos = np.sum(data[data > 0]) / np.absolute(data).sum() * 100
-            label = (
-                f"min vals: {min_vals[0]:.4f}, {min_vals[1]:.4f}\n"
-                f"near zero: {near_zero:.4f}\nAUC pos: {AUC_perc_pos:.2f}%"
-            )
+            if not minimalist:
+                label = (
+                    f"min vals: {min_vals[0]:.4f}, {min_vals[1]:.4f}\n"
+                    f"near zero: {near_zero:.4f}\nAUC pos: {AUC_perc_pos:.2f}%"
+                )
         else:  # unsmoothed
-            alpha, label = 0.6, None
-        sub_ax.plot(time, data, color=color, label=label, ls=ls, alpha=alpha)
-    sub_ax.legend()
+            alpha = 0.6
+        sub_ax.plot(
+            time, data, color=color, label=label, ls=ls, alpha=alpha, **lw_kwargs
+        )
+
+        if minimalist:
+            zero_line = np.zeros_like(data)
+            for i, alpha in enumerate([0.5, 0.25]):
+                mask = data >= 0 if i == 0 else data <= 0
+                sub_ax.fill_between(
+                    time[mask],
+                    zero_line[mask],
+                    data[mask],
+                    color=color,
+                    alpha=alpha,
+                    lw=0,
+                )
 
     if target_root_dict is not None:
         leads = ["pre", "post"]
@@ -1623,14 +1746,24 @@ def plot_summed_exp_kernel(
             ]
             sub_ax.axvspan(*neg_edges, color="blue", alpha=0.2, lw=0)
 
+    pad_axis(sub_ax, axis="y", pad_prop=0.05)
+
+    if minimalist:
+        ls_h = (0, (4.5, 1.5))
+        ls_v = (0, (2, 1.5))
+        sub_ax.spines[["left"]].set_visible(False)
+        sub_ax.set_yticks([])
+    else:
+        ls_h, ls_v = "dashed", "dashed"
+        sub_ax.set_ylabel("Kernel value")
+        sub_ax.legend()
+
     sub_ax.set_xlim(*xlims)
-    sub_ax.axhline(0, color="k", ls="dashed")
-    sub_ax.axvline(0, color="k", ls="dashed")
+    sub_ax.axhline(0, color="k", ls=ls_h, alpha=0.6, **lw_kwargs)
+    sub_ax.axvline(0, color="k", ls=ls_v, alpha=0.6, **lw_kwargs)
     sub_ax.set_xlabel("Time (s)")
-    sub_ax.set_ylabel("Kernel value")
 
     sub_ax.spines[["top", "right"]].set_visible(False)
-    pad_axis(sub_ax, axis="y", pad_prop=0.05)
 
     return sub_ax, summed_exp_kernel, align_pt
 

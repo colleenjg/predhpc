@@ -1070,6 +1070,7 @@ def plot_timeseries(
 def plot_1D_reset_environment(
     Ag: "ResetableAgent",
     title: str = "Environment",
+    minimalist: bool = False,
     sub_ax: plt.Axes | None = None,
     autosave: bool | None = None,
 ) -> plt.Axes:
@@ -1082,6 +1083,8 @@ def plot_1D_reset_environment(
     - Ag (Agent): Agent for which to plot the environment, with reset and
         start points marked.
     - title (str, optional): Title of the plot. Default is "Environment".
+    - minimalist (bool, optional): Whether to create minimalist reset environment plot.
+        Default is False.
     - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
         created. Default is None.
     - autosave (bool, optional): Whether to save the figure. Default is None.
@@ -1099,6 +1102,9 @@ def plot_1D_reset_environment(
     for label in plotting_dict.keys():
         plotting_dict[label]["kwargs"] = plot_util.get_plot_marker_kwargs(label)
 
+    if minimalist and sub_ax is None:
+        _, sub_ax = plt.subplots(figsize=(4, 0.7))
+
     sub_ax = Ag.Environment.plot_environment(
         sub_ax=sub_ax, plot_objects=False, autosave=False
     )
@@ -1106,9 +1112,12 @@ def plot_1D_reset_environment(
     if sub_ax is None:
         raise RuntimeError("sub_ax is None.")
 
+    edges = list()
     for label, sub_dict in plotting_dict.items():
         if sub_dict["data"] is None:
             continue
+        if minimalist and label in ["start", "reset"]:
+            edges.append(sub_dict["data"][0])
         sub_ax.scatter(
             sub_dict["data"],
             0,
@@ -1118,6 +1127,15 @@ def plot_1D_reset_environment(
         )
     sub_ax.legend(ncol=len(plotting_dict), frameon=False)
     sub_ax.set_title(title)
+
+    if len(edges) == 2:
+        sub_ax.spines["bottom"].set_bounds(sorted(edges))
+        plot_util.pad_axis(sub_ax, axis="x", pad_prop=0.05)
+
+    if minimalist:
+        sub_ax.set_xticks([])
+        sub_ax.set_xlabel("")
+        sub_ax.spines["bottom"].set_linewidth(1.5)
 
     fig = sub_ax.figure
     plot_util.save_figure(fig, "1D_reset_environment", save=autosave)
@@ -1432,6 +1450,7 @@ def plot_recorded_1D_input_place_cell_weights(
     t_start=None,
     t_end=None,
     plot_last_FWHM=False,
+    no_legend=False,
     sub_ax=None,
 ):
     """
@@ -1453,6 +1472,7 @@ def plot_recorded_1D_input_place_cell_weights(
     - t_end (float, optional): End timepoint for which to plot weights. Default is None.
     - plot_last_FWHM (bool, optional): Whether to plot the last FWHM of the weights.
         Default is False.
+    - no_legend (bool, optional): Whether to not plot the legend. Default is False.
     - sub_ax (plt.Axes, optional): Subplot. Default is None.
 
     Returns:
@@ -1534,7 +1554,8 @@ def plot_recorded_1D_input_place_cell_weights(
             alpha=0.2,
             zorder=-3,
         )
-        sub_ax.legend(frameon=False, loc="upper right")
+        if not no_legend:
+            sub_ax.legend(frameon=False, loc="upper right")
 
     sub_ax.set_xlabel("Place field centres")
     sub_ax.set_ylabel(f"Input weights")
@@ -1957,8 +1978,12 @@ def plot_1D_spatial_info(
 
 def plot_1D_time_info(
     Pyrs: "learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer",
-    Pyrs_norm_by: str | float | None = None,
+    Pyrs_spikes: bool = True,
+    Pyr_kwargs: dict[str, Any] = dict(),
+    height_ratios: list[float] | None = None,
+    figsize: tuple[float, float] | None = None,
     autosave: bool | None = None,
+    **gridspec_kw,
 ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
     """
     plot_1D_time_info(Pyrs)
@@ -1970,10 +1995,19 @@ def plot_1D_time_info(
 
     Args:
     - Pyrs (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer): Pyr. neurons.
-    - Pyrs_norm_by (str, optional): Normalization method for rate maps. If None,
-        default is used. Default is None.
+    - Pyrs_spikes (bool, optional): Whether to plot spikes in the Pyr. rate timeseries.
+        Default is True.
+    - Pyr_kwargs (dict, optional): Additional keyword arguments for the Pyr.
+        rate timeseries. Default is an empty dict.
+    - height_ratios (list[float], optional): Height ratios for the subplots. If None,
+        default ratios are used. Default is None.
+    - figsize (tuple[float, float], optional): Figure size. If None, default size is
+        used. Default is None.
     - autosave (bool, optional): Whether to autosave the figure. If None, the global
         autosave setting for ratinabox is used. Default is None.
+
+    Keyword Args:
+    - **gridspec_kw: Additional keyword arguments for the gridspec.
 
     Returns:
     - axes (2D np.ndarray): Array of subplots with 1D time info plotted,
@@ -1983,11 +2017,30 @@ def plot_1D_time_info(
     _, Ag, PCs, Objs = ext_util.extract_objects_from_Pyrs(Pyrs)
 
     # 3 or 4 plots
-    height_ratios = [1.5, 1, 1.1**Pyrs.n]
-    if Objs is not None:
-        height_ratios.insert(1, 0.6)
-    gridspec_kw = {"height_ratios": height_ratios}
-    figsize = plot_util.get_figsize(sum(height_ratios), squat_height=True)
+    if height_ratios is None:
+        height_ratios = [1.5, 1, 1.1**Pyrs.n]
+        if Objs is not None:
+            height_ratios.insert(1, 0.6)
+
+    num_Pyr_ax = 1
+    mark_all = True
+    ax_key = "sub_ax"
+    if hasattr(Pyrs, "DendriteCompartment"):
+        ax_key = "ax"
+        if "separate_axes" in Pyr_kwargs.keys() and Pyr_kwargs["separate_axes"]:
+            plot_lateral = "plot_lateral" in Pyr_kwargs and Pyr_kwargs["plot_lateral"]
+            mark_all = False
+            num_Pyr_ax = len(Pyrs.get_compartments("all", incl_lateral=plot_lateral))
+
+    num_plots = 2 + num_Pyr_ax + int(Objs is not None)
+    if len(height_ratios) != num_plots:
+        raise ValueError(
+            f"Expected {num_plots} height_ratios, but got {len(height_ratios)}."
+        )
+
+    gridspec_kw["height_ratios"] = height_ratios
+    if figsize is None:
+        figsize = plot_util.get_figsize(sum(height_ratios), squat_height=True)
     fig, axes = plt.subplots(
         nrows=len(height_ratios),
         figsize=figsize,
@@ -1999,7 +2052,7 @@ def plot_1D_time_info(
 
     # Plot trajectories
     Ag.plot_trajectories_across_time(
-        framerate=1 / Ag.dt, s=2, sub_ax=ax1D[0], autosave=False
+        framerate=1 / Ag.dt, s=0.02, base_s=10, sub_ax=ax1D[0], autosave=False
     )
     ax1D[0].set_title("Trajectories")
 
@@ -2012,6 +2065,7 @@ def plot_1D_time_info(
             sub_ax=ax1D[1],
             autosave=False,
         )
+        plot_util.pad_axis(ax1D[1], axis="y", pad_prop=0.15, prop_high=1.0)
         ax1D[1].set_title("Object cell rate timeseries")
         i = 2
 
@@ -2023,27 +2077,29 @@ def plot_1D_time_info(
         autosave=False,
         shade_kwargs={"rasterized": True},  # svg too big, othersize
     )
+    plot_util.pad_axis(ax1D[i], axis="y", pad_prop=0.15, prop_high=0.6)
     ax1D[i].set_title("Place cell rate timeseries")
 
     # Plot Pyr. rate timeseries
-    kwargs = dict()
-    if Pyrs_norm_by is not None:
-        kwargs["norm_by"] = Pyrs_norm_by
+    Pyr_kwargs[ax_key] = ax1D[i + 1 :]
+
     Pyrs.plot_rate_timeseries(
         chosen_neurons="all",
-        spikes=True,
-        sub_ax=ax1D[i + 1],
+        spikes=Pyrs_spikes,
         shift=-10,
         overlap=1,
         autosave=False,
-        **kwargs,
+        **Pyr_kwargs,
     )
     ax1D[i + 1].set_title("Pyr. rate timeseries")
 
     for i, sub_ax in enumerate(ax1D):
-        mark_target_and_reset_points(Pyrs, sub_ax=sub_ax)
+        if mark_all or i < len(ax1D) - num_Pyr_ax:
+            mark_target_and_reset_points(Pyrs, sub_ax=sub_ax)
         if i != len(ax1D) - 1:
             sub_ax.set_xlabel("")
+            sub_ax.spines["bottom"].set_visible(False)
+            sub_ax.tick_params(axis="x", bottom=False)
 
     plot_util.pad_axis(ax1D[0], "x", pad_prop=0.03)
 
@@ -2804,7 +2860,7 @@ def compare_theoretical_and_true_weights(
         act_sub_ax.set_title("Actual weights vs theoretical weights")
         act_sub_ax.legend()
         act_sub_ax.autoscale(axis="y")
-        plot_util.pad_axis(act_sub_ax, axis="y", end="high")
+        plot_util.pad_axis(act_sub_ax, axis="y", prop_high=1.0)
 
     else:
         dim = Pyrs.Agent.Environment.scale / 4 * 3

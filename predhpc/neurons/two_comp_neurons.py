@@ -818,6 +818,7 @@ class TwoCompLayer(object):
         dend_color=None,
         inhibit_color=None,
         lateral_color=None,
+        **kwargs,
     ):
         """
         self.add_compartment_legend()
@@ -836,6 +837,9 @@ class TwoCompLayer(object):
             Default is None.
         - lateral_color (str, optional): Color for lateral inhibition compartment.
             Default is None.
+
+        Keyword args:
+        - **kwargs: Additional keyword arguments passed to plt.legend().
         """
 
         if compartment not in ["soma", "dend", "both", "inhibit", "all"]:
@@ -857,7 +861,7 @@ class TwoCompLayer(object):
             color = lateral_color or self.LateralInhibition.color
             sub_ax.plot([], [], color=color, label="lat. inh.")
 
-        sub_ax.legend(loc=loc)
+        sub_ax.legend(loc=loc, **kwargs)
 
     def plot_rate_map(
         self,
@@ -1121,10 +1125,16 @@ class TwoCompLayer(object):
                 autosave=False,
             )
             if adjust_range:
-                for sub_ax in np.asarray(axes)[c, : -int(plot_occ)]:
+                for sub_ax in np.asarray(axes)[c, : self.n]:
                     if sub_ax.images:
-                        vmin = min(vmin or np.inf, sub_ax.images[0].get_array().min())
-                        vmax = max(vmax or -np.inf, sub_ax.images[0].get_array().max())
+                        vmin = min(
+                            np.inf if vmin is None else vmin,
+                            sub_ax.images[0].get_array().min(),
+                        )
+                        vmax = max(
+                            -np.inf if vmax is None else vmax,
+                            sub_ax.images[0].get_array().max(),
+                        )
 
             for i in chosen_neurons:
                 np.asarray(axes)[c][i].set_title(f"{titles[c]} (#{i})")
@@ -1166,6 +1176,7 @@ class TwoCompLayer(object):
         single_x_axis: bool = True,
         norm_by: str | None = None,
         in_min: bool = True,
+        no_legend: bool = False,
         autosave: bool | None = None,
         **kwargs,
     ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
@@ -1195,6 +1206,7 @@ class TwoCompLayer(object):
         - norm_by (str, optional): Normalisation method for rate maps. Default is None.
         - in_min (bool, optional): Whether to plot the time in minutes instead of
             seconds. Default is True.
+        - no_legend (bool, optional): Whether to remove the legend. Default is False.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
         global autosave setting for ratinabox is used. Default is None.
 
@@ -1285,15 +1297,16 @@ class TwoCompLayer(object):
                     sub_ax.set_xlabel("")
             fig = np.asarray(ax).ravel()[0].figure
         else:
-            self.add_compartment_legend(
-                sub_ax,
-                compartment="all",
-                plot_lateral=plot_lateral,
-                soma_color=soma_color,
-                dend_color=dend_color,
-                inhibit_color=inhibit_color,
-                lateral_color=lateral_color,
-            )
+            if not no_legend:
+                self.add_compartment_legend(
+                    sub_ax,
+                    compartment="all",
+                    plot_lateral=plot_lateral,
+                    soma_color=soma_color,
+                    dend_color=dend_color,
+                    inhibit_color=inhibit_color,
+                    lateral_color=lateral_color,
+                )
             fig = sub_ax.figure
 
         plot_util.save_figure(fig, f"{self.name}_firingrate", save=autosave)  # type: ignore[attr-defined]
@@ -1362,10 +1375,10 @@ class TwoCompLayer(object):
             self.SomaCompartment.add_BTSP_markers_to_plots(
                 sub_ax, chosen_neurons=[neuron_idx], timeseries=True
             )
-            plot_util.pad_axis(sub_ax, end="high")
+            plot_util.pad_axis(sub_ax, prop_high=1.0)
 
         if mark_teleport:
-            plot_util.pad_axis(sub_ax, end="high", pad_prop=0.1)
+            plot_util.pad_axis(sub_ax, pad_prop=0.1, prop_high=1.0)
             self.Agent.add_teleportation_markers_to_plots(sub_ax, timeseries=True)
 
             legend = sub_ax.get_legend()
@@ -1385,7 +1398,7 @@ class TwoCompLayer(object):
             )
 
             if mark_closest and len(closest_steps):
-                plot_util.pad_axis(sub_ax, axis="y", end="both", pad_prop=0.2)
+                plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.2)
                 sub_ax.plot(
                     t[closest_steps],
                     np.zeros_like(closest_steps),
