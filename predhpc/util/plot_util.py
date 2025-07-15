@@ -1110,6 +1110,38 @@ def get_closest_step_marker_kwargs(step_type="steps_before", plot_line=False):
     return marker_kwargs
 
 
+def get_greater_condition_for_fill_between(data, threshold=0):
+    """
+    get_greater_condition_for_fill_between(data)
+
+    Obtain a condition for filling between two lines based on a threshold.
+
+    Args:
+    - data (1D np.ndarray): Data to compare against the threshold.
+    - threshold (float, optional): Threshold to compare against. Default is 0.
+
+    Returns:
+    - condition (1D np.ndarray): Boolean array indicating where the data is greater
+        than the threshold for use for fill between plotting.
+    """
+
+    diff = data - threshold
+    condition = diff > 0
+
+    change_idxs = np.where(np.diff(diff >= 0))[0]
+    for change_idx in change_idxs:
+        if condition[change_idx] and np.abs(diff[change_idx]) >= np.abs(
+            diff[change_idx + 1]
+        ):
+            condition[change_idx + 1] = condition[change_idx]
+        elif condition[change_idx + 1] and np.abs(diff[change_idx]) < np.abs(
+            diff[change_idx + 1]
+        ):
+            condition[change_idx] = condition[change_idx + 1]
+
+    return condition
+
+
 def plot_rate_correlations(firingrates, sub_ax=None, cut_off_thr=None):
     """
     plot_rate_correlations(firingrates)
@@ -1200,6 +1232,7 @@ def plot_binned_rates(
     vmax=None,
     mark_runs=False,
     plot_colorbars=True,
+    cbar_aspect=12,
 ):
     """
     plot_binned_rates(binned_rate_means)
@@ -1215,7 +1248,8 @@ def plot_binned_rates(
     - vmin (float, optional): Minimum value. Default is None.
     - vmax (float, optional): Maximum value. Default is None.
     - mark_runs (bool, optional): Whether to mark runs in the plot. Default is False.
-    - plot_colorbars (bool, optional): Whether to plot colorbars. Default is True
+    - plot_colorbars (bool, optional): Whether to plot colorbars. Default is True.
+    - cbar_aspect (int, optional): Aspect ratio of the colorbar. Default is 12.
 
     Returns:
     - ax (plt.Axes or np.ndarray): Subplot or array of subplots with the binned firing
@@ -1256,7 +1290,7 @@ def plot_binned_rates(
         if plot_colorbars:
             if shared_range and i < num_neurons - 1:
                 continue
-            cbar = plt.colorbar(im, ax=ax1D[i], pad=0.15, aspect=12)
+            cbar = plt.colorbar(im, ax=ax1D[i], pad=0.15, aspect=cbar_aspect)
             cbar.set_label("Firing rate")
             cbar.ax.yaxis.set_label_position("left")
 

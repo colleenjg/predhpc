@@ -13,6 +13,7 @@ from predhpc.neurons import (
     learning_neurons,
     two_comp_neurons,
     object_neurons,
+    value_neurons,
 )
 from predhpc.util import ext_util, gen_util, plot_util, params_util
 
@@ -30,6 +31,49 @@ class AdjustMaxTraj:
     def __exit__(self, exc_type, exc_value, traceback):
         if self.original_max_num_traj is not None:
             self.learner.max_num_traj = self.original_max_num_traj
+
+
+class VNUpdater:
+
+    def __init__(
+        self,
+        Agent,
+        thresh_gradV=0.2,
+        drift_vel_fact=3,
+        drift_to_random_strength_ratio=0.2,
+    ):
+        self.Agent = Agent
+
+        rewards = Agent.Environment.get_object_locations("reward")
+        if len(rewards) != 1:
+            raise ValueError(
+                "VNUpdater requires exactly one reward object in the environment."
+            )
+
+        VN_params = params_util.get_VN_params(peak=rewards[0])
+        VN = value_neurons.SimpleValueNeuron(Agent, params=VN_params)
+
+        self.VN = VN
+        self.thresh_gradV = thresh_gradV
+        self.drift_vel_fact = drift_vel_fact
+        self.drift_to_random_strength_ratio = drift_to_random_strength_ratio
+
+    def get_update_kwargs(self):
+        self.VN.update()
+        drift_velocity = None
+        if (
+            self.Agent.target_position is not None
+            and (self.Agent.target_position == self.VN.peak).all()
+        ):
+            gradV = self.VN.get_local_gradient(thresh_gradV=self.thresh_gradV)
+            if gradV is not None:
+                drift_velocity = self.drift_vel_fact * self.Agent.speed_mean * gradV
+        update_kwargs = {
+            "drift_velocity": drift_velocity,
+            "drift_to_random_strength_ratio": self.drift_to_random_strength_ratio,
+        }
+
+        return update_kwargs
 
 
 class Learner:
@@ -588,7 +632,7 @@ def init_env_objects(
     elif environment == "tmaze":
         Env = env.TEnv(params=env_params)
         Ag = agent.TAgent(Env, params=agent_params)
-    elif environment == "openfield":
+    elif environment in ["openfield", "openfield_corridor"]:
         Env = env.OpenField(params=env_params)
         Ag = agent.OpenFieldAgent(Env, params=agent_params)
     else:
@@ -663,7 +707,7 @@ def init_env_objects(
         Pyrs.set_BTSP_learn()
 
     if plot:
-        if environment in ["tmaze", "openfield"]:
+        if environment in ["tmaze", "openfield", "openfield_corridor"]:
             fields_axes, aggreg_ax1D = plot_fcts.plot_2D_initial_conditions(
                 Pyrs, autosave=autosave
             )
@@ -855,6 +899,7 @@ def learn_openfield_BTSP(
     weight_recording_freq: int = 100,
     use_Hebbian: bool = False,
     num_end_without_BTSP: int = 0,
+    corridor: bool = False,
     updater: dict[str, Any] | None = None,
     no_logs: bool = False,
     autosave: bool | None = None,
@@ -883,6 +928,8 @@ def learn_openfield_BTSP(
     - num_end_without_BTSP (int, optional): Number of final steps to run without BTSP
         learning. Default is 0.
         is True.
+    - corridor (bool, optional): Whether to use the openfield corridor environment.
+        Default is False.
     - updater (object or dict, optional): Object or dictionary for updating
         agent position. Default is None.
     - no_logs (bool, optional): Whether to disable logging. Default is False.
@@ -896,25 +943,33 @@ def learn_openfield_BTSP(
     """
 
     if Pyrs_or_learner is None:
+        environment = "openfield_corridor" if corridor else "openfield"
         Pyrs_or_learner = init_env_objects(
-            environment="openfield",
+            environment=environment,
             autosave=autosave,
             plot=False,
             **init_kwargs,
         )
+
+    if isinstance(Pyrs_or_learner, Learner):
+        Pyrs = Pyrs_or_learner.Pyrs
     else:
-        if isinstance(Pyrs_or_learner, Learner):
-            Pyrs = Pyrs_or_learner.Pyrs
-        else:
-            Pyrs = Pyrs_or_learner
-        if not isinstance(Pyrs.Agent.Environment, env.OpenField):
-            raise ValueError("Pyrs must be an openfield environment.")
+        Pyrs = Pyrs_or_learner
+    if not isinstance(Pyrs.Agent.Environment, env.OpenField):
+        raise ValueError("Pyrs must be an openfield environment.")
 
     if updater is None:
-        updater = {
-            "speed_fact": 3,
-            "drift_to_random_strength_ratio": 1,
-        }
+        if corridor:
+            updater = {
+                "speed_fact": 3,
+                "drift_to_random_strength_ratio": 1,
+            }
+        else:
+            updater = VNUpdater(Pyrs.Agent)
+
+    if corridor:
+        Pyrs.Agent.pos = np.asarray([0.2, 0.8])
+        Pyrs.head_direction = np.asarray([-1, 0])
 
     learner = learn(
         Pyrs_or_learner,
@@ -1006,6 +1061,7 @@ def plot_T_maze(
             replot_env=True,
         )
         title = "Obj. rate map"
+
     ax1D[2].scatter(
         *Ag.target_position,
         marker=".",

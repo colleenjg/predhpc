@@ -1066,6 +1066,38 @@ class OpenField(Environment):
 
         return walls_ends_too_close
 
+    def get_object_locations(self, object_type_name="reward"):
+        """
+        self.get_object_locations()
+
+        Obtain the locations of objects of a given type in the environment.
+
+        Args:
+        - object_type_name (str, optional): Name of the object type to get locations
+            for (e.g., "reward", "novel"). Default is "reward".
+
+        Raises:
+        - ValueError: If no objects of the specified type are found.
+
+        Returns:
+        - object_locations (2D np.ndarray): Locations of the objects of the specified
+            type with shape (n_objects, 2), where n_objects is the number of objects of
+            the specified type.
+        """
+
+        sub_df = self.object_df.loc[
+            self.object_df["object_type_name"] == object_type_name
+        ]
+        if len(sub_df) == 0:
+            raise ValueError(f"No objects of type {object_type_name} found.")
+
+        pos_x = sub_df["position_x"].to_numpy()
+        pos_y = sub_df["position_y"].to_numpy()
+
+        object_locations = np.vstack((pos_x, pos_y)).T
+
+        return object_locations
+
     def get_teleport_coords(self, teleport_pair_num: int = 1, direction="in"):
         """
         self.get_teleport_coords()

@@ -1047,6 +1047,7 @@ class TwoCompLayer(object):
         vmax: float | None = None,
         mark_runs: bool = False,
         plot_colorbars: bool = True,
+        cbar_aspect: int = 12,
         autosave: bool | None = None,
     ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
         """
@@ -1077,6 +1078,7 @@ class TwoCompLayer(object):
         - mark_runs (bool, optional): Whether to mark the runs on the plot.
             Default is False.
         - plot_colorbars (bool, optional): Whether to plot colorbars. Default is True.
+        - cbar_aspect (int, optional): Aspect ratio of the colorbars. Default is 12.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
             global autosave setting for ratinabox is used. Default is None.
 
@@ -1122,6 +1124,8 @@ class TwoCompLayer(object):
                 vmin=vmin,
                 vmax=vmax,
                 mark_runs=mark_runs,
+                plot_colorbars=plot_colorbars,
+                cbar_aspect=cbar_aspect,
                 autosave=False,
             )
             if adjust_range:
@@ -1176,6 +1180,7 @@ class TwoCompLayer(object):
         single_x_axis: bool = True,
         norm_by: str | None = None,
         in_min: bool = True,
+        lw: float = 1.0,
         no_legend: bool = False,
         autosave: bool | None = None,
         **kwargs,
@@ -1206,6 +1211,7 @@ class TwoCompLayer(object):
         - norm_by (str, optional): Normalisation method for rate maps. Default is None.
         - in_min (bool, optional): Whether to plot the time in minutes instead of
             seconds. Default is True.
+        - lw (float, optional): Line width for the timeseries. Default is 1.0.
         - no_legend (bool, optional): Whether to remove the legend. Default is False.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
         global autosave setting for ratinabox is used. Default is None.
@@ -1219,6 +1225,9 @@ class TwoCompLayer(object):
         """
 
         compartments = self.get_compartments("all", incl_lateral=plot_lateral)
+
+        if "linewidth" in kwargs.keys():
+            lw = kwargs.pop("linewidth")
 
         if separate_axes:
             num_rows = len(compartments)
@@ -1280,6 +1289,7 @@ class TwoCompLayer(object):
                 color=color,
                 norm_by=use_norm_by,
                 in_min=in_min,
+                linewidth=lw,
                 autosave=False,
                 **kwargs,
             )
@@ -1292,7 +1302,7 @@ class TwoCompLayer(object):
 
             for s, sub_ax in enumerate(ax1D):
                 sub_ax.set_title(separate_titles[s])
-                plot_fcts.mark_target_and_reset_points(self, sub_ax=sub_ax)
+                plot_fcts.mark_target_and_reset_points(self, sub_ax=sub_ax, lw=lw)
                 if s != len(ax1D) - 1:
                     sub_ax.set_xlabel("")
             fig = np.asarray(ax).ravel()[0].figure

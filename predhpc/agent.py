@@ -2104,8 +2104,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             created. Default is None.
         - alpha (float, optional): Trajectory point transparency. Default is 0.6.
         - color (str, optional): Trajectory point color or colors. Default is 'k'.
-        - s (float, optional): Size of scatterplot markers. If None, defaults are used.
-            Default is None.
+        - s (float, optional): Size of trajectory scatterplot markers. If None,
+            defaults are used. Default is None.
         - base_s (float, optional): Base size of scatterplot markers for objects in
             environment. If None, defaults are used. Default is None.
         - plot_targets (bool, optional): Whether to plot the target. Default is True.

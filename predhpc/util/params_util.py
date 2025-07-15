@@ -70,7 +70,7 @@ def check_environment(environment="linear"):
     """
 
     environment = environment.lower()
-    environments = ["linear", "tmaze", "openfield"]
+    environments = ["linear", "tmaze", "openfield", "openfield_corridor"]
 
     if environment not in environments:
         environment_strs = ", ".join([f"'{env}'" for env in environments])
@@ -178,7 +178,7 @@ def get_env_params(scale=None, environment="linear", **kwargs):
     Args:
     - scale (float, optional): The scale of the environment.
     - environment (str, optional): The environment type
-        (e.g., linear, tmaze, openfield).
+        (e.g., linear, tmaze, openfield, openfield_corridor).
 
     Keyword args:
     - **kwargs: Additional environment parameters to include (can overwrite default
@@ -219,6 +219,28 @@ def get_env_params(scale=None, environment="linear", **kwargs):
             "dx": scale / 100,
         }
 
+    elif environment == "openfield_corridor":
+        scale = scale or SCALE
+
+        locations = {
+            "reward": [0.25, 0.1],
+            "teleport_in_out": [[0.6, 0.5], [0.2, 0.1]],
+            "wall_coords": [[0, 0.2], [0.6, 0.2]],
+        }
+        locations = {key: np.asarray(data) * scale for key, data in locations.items()}
+
+        env_params = {
+            "init_random_reward_obj": 0,
+            "init_random_novel_obj": 0,
+            "init_random_walls": 0,
+            "init_random_teleport_pairs": 0,
+            "walls": [locations["wall_coords"]],
+            "init_reward_obj": [locations["reward"]],
+            "init_teleport_pairs": [locations["teleport_in_out"]],
+            "scale": scale,
+            "dx": scale / 100,
+        }
+
     for key, value in kwargs.items():
         env_params[key] = value
 
@@ -235,7 +257,7 @@ def get_agent_params(dt=DT, scale=None, environment="linear", **kwargs):
     - dt (float, optional): The time step.
     - scale (float, optional): The scale of the environment, used for linear agent.
     - environment (str, optional): The environment type
-        (e.g., linear, tmaze, openfield).
+        (e.g., linear, tmaze, openfield, openfield_corridor).
 
     Keyword args:
     - **kwargs: Additional agent parameters to include (can overwrite default
@@ -276,19 +298,25 @@ def get_agent_params(dt=DT, scale=None, environment="linear", **kwargs):
         agent_params["target_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_2D
         agent_params["reset_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_2D
 
-    elif environment == "openfield":
+    elif environment in ["openfield", "openfield_corridor"]:
         agent_params["speed_mean"] = SPEED_MEAN_2D
         agent_params["thigmotaxis"] = 0.5
         agent_params["num_random_walk_steps"] = 300
         agent_params["always_log_teleportation"] = True
         agent_params["no_target_factor"] = 5
         agent_params["target_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_2D
+        if environment == "openfield_corridor":
+            agent_params["reward_factor"] = 5
+            agent_params["no_target_factor"] = 1
 
     for key, value in kwargs.items():
         agent_params[key] = value
 
     # 2D environments use speed_mean as the Rayleigh sigma, unless speed_std is 0
-    if environment in ["tmaze", "openfield"] and "speed_mean" in agent_params.keys():
+    if (
+        environment in ["tmaze", "openfield", "openfield_corridor"]
+        and "speed_mean" in agent_params.keys()
+    ):
         if "speed_std" in agent_params.keys() and agent_params["speed_std"] == 0:
             pass
         else:
@@ -330,6 +358,11 @@ def get_Obj_params(n=None, environment="linear", vector=False, **kwargs):
         "widths": PC_SIGMA / 2,
         "color": OBJ_COLOR,
     }
+
+    if environment == "openfield_corridor":
+        Obj_params["num_novel"] = 0
+        Obj_params["num_teleport"] = 0
+        Obj_params["num_reward"] = 1
 
     if vector:
         Obj_params["line_of_sight"] = True
@@ -383,7 +416,7 @@ def get_PC_params(n=None, environment="linear", **kwargs):
         PC_params["n"] = int(n)
         PC_params["wall_geometry"] = "line_of_sight"  # due to environment shape
 
-    elif environment == "openfield":
+    elif environment in ["openfield", "openfield_corridor"]:
         n = n or (SCALE * 10) ** 2
         PC_params["n"] = int(n)
         PC_params["wall_geometry"] = "line_of_sight"  # due to environment shape
@@ -392,6 +425,39 @@ def get_PC_params(n=None, environment="linear", **kwargs):
         PC_params[key] = value
 
     return PC_params
+
+
+def get_VN_params(peak, **kwargs):
+    """
+    get_VN_params()
+
+    Obtain default parameters to initialise simple value neuron layer.
+
+    Args:
+    - peak (float or 1D np.ndarray): Peak value location [x, y].
+
+    Keyword args:
+    - **kwargs: Additional VN parameters to include (can overwrite default
+        parameters).
+
+    Returns:
+    - VN_params (dict): VN initialisation parameters.
+    """
+
+    VN_params = {
+        "name": "VN",
+        "n": 1,
+        "peak": np.asarray(peak),
+        "description": "gaussian",
+        "min_fr": 0,
+        "max_fr": 10,
+        "widths": 0.6,
+    }
+
+    for key, value in kwargs.items():
+        VN_params[key] = value
+
+    return VN_params
 
 
 def get_Pyr_params(

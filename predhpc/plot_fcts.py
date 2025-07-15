@@ -227,6 +227,7 @@ def mark_target_and_reset_points(
     Pyrs: "riab_neurons.Neurons",
     sub_ax: plt.Axes,
     restore_xlims: bool = True,
+    lw: float = 1.0,
 ):
     """
     mark_target_and_reset_points(Pyrs, sub_ax)
@@ -237,6 +238,7 @@ def mark_target_and_reset_points(
     - Pyrs (riab_neurons.Neurons): Pyr. layer to plot.
     - sub_ax (plt.Axes): Subplot to add target and reset points to.
     - restore_xlims (bool, optional): Whether to restore x limits. Default is True.
+    - lw (float, optional): Line width of the vertical lines. Default is 1.0.
     """
 
     if restore_xlims:
@@ -264,7 +266,7 @@ def mark_target_and_reset_points(
                 Pyrs.Agent.history["t"][t] / 60,
                 alpha=0.7,
                 zorder=-1,
-                lw=1,
+                lw=lw,
                 ls=ls,
                 color="k",
             )
@@ -1071,6 +1073,7 @@ def plot_1D_reset_environment(
     Ag: "ResetableAgent",
     title: str = "Environment",
     minimalist: bool = False,
+    base_s: float = 15,
     sub_ax: plt.Axes | None = None,
     autosave: bool | None = None,
 ) -> plt.Axes:
@@ -1085,6 +1088,7 @@ def plot_1D_reset_environment(
     - title (str, optional): Title of the plot. Default is "Environment".
     - minimalist (bool, optional): Whether to create minimalist reset environment plot.
         Default is False.
+    - base_s (float, optional): Base size for markers. Default is 15.
     - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
         created. Default is None.
     - autosave (bool, optional): Whether to save the figure. Default is None.
@@ -1100,7 +1104,9 @@ def plot_1D_reset_environment(
     }
 
     for label in plotting_dict.keys():
-        plotting_dict[label]["kwargs"] = plot_util.get_plot_marker_kwargs(label)
+        plotting_dict[label]["kwargs"] = plot_util.get_plot_marker_kwargs(
+            label, base_s=base_s
+        )
 
     if minimalist and sub_ax is None:
         _, sub_ax = plt.subplots(figsize=(4, 0.7))
@@ -1447,6 +1453,8 @@ def plot_recorded_1D_input_place_cell_weights(
     weights_t=None,
     color="k",
     marker="o",
+    ms=2,
+    lw=1.2,
     t_start=None,
     t_end=None,
     plot_last_FWHM=False,
@@ -1467,6 +1475,8 @@ def plot_recorded_1D_input_place_cell_weights(
         length as weights if provided. Default is None.
     - color (str, optional): Color. Default is "k".
     - marker (str, optional): Marker style. Default is "o".
+    - ms (int, optional): Marker size. Default is 2.
+    - lw (float, optional): Line width. Default is 1.2.
     - t_start (float, optional): Start timepoint for which to plot weights.
         Default is None.
     - t_end (float, optional): End timepoint for which to plot weights. Default is None.
@@ -1504,9 +1514,9 @@ def plot_recorded_1D_input_place_cell_weights(
 
     place_weight_kwargs = {
         "color": color,
-        "lw": 1.2,
+        "lw": lw,
         "marker": marker,
-        "ms": 2,
+        "ms": ms,
     }
 
     num_plotted = 0
@@ -1981,6 +1991,9 @@ def plot_1D_time_info(
     Pyrs_spikes: bool = True,
     Pyr_kwargs: dict[str, Any] = dict(),
     height_ratios: list[float] | None = None,
+    lw: float = 1,
+    s: float = 0.02,
+    base_s: float = 10,
     figsize: tuple[float, float] | None = None,
     autosave: bool | None = None,
     **gridspec_kw,
@@ -2001,6 +2014,11 @@ def plot_1D_time_info(
         rate timeseries. Default is an empty dict.
     - height_ratios (list[float], optional): Height ratios for the subplots. If None,
         default ratios are used. Default is None.
+    - lw (float, optional): Line width for the plots. Default is 1.
+    - s (float, optional): Size of agent trajectory scatterplot markers. If None,
+        defaults are used. Default is None.
+    - base_s (float, optional): Base size of scatterplot markers for objects in
+        environment. If None, defaults are used. Default is None.
     - figsize (tuple[float, float], optional): Figure size. If None, default size is
         used. Default is None.
     - autosave (bool, optional): Whether to autosave the figure. If None, the global
@@ -2052,7 +2070,7 @@ def plot_1D_time_info(
 
     # Plot trajectories
     Ag.plot_trajectories_across_time(
-        framerate=1 / Ag.dt, s=0.02, base_s=10, sub_ax=ax1D[0], autosave=False
+        framerate=1 / Ag.dt, s=s, base_s=base_s, sub_ax=ax1D[0], autosave=False
     )
     ax1D[0].set_title("Trajectories")
 
@@ -2063,6 +2081,7 @@ def plot_1D_time_info(
             chosen_neurons="all",
             spikes=False,
             sub_ax=ax1D[1],
+            linewidth=lw,
             autosave=False,
         )
         plot_util.pad_axis(ax1D[1], axis="y", pad_prop=0.15, prop_high=1.0)
@@ -2074,6 +2093,7 @@ def plot_1D_time_info(
         chosen_neurons="all",
         spikes=False,
         sub_ax=ax1D[i],
+        linewidth=lw,
         autosave=False,
         shade_kwargs={"rasterized": True},  # svg too big, othersize
     )
@@ -2088,6 +2108,7 @@ def plot_1D_time_info(
         spikes=Pyrs_spikes,
         shift=-10,
         overlap=1,
+        linewidth=lw,
         autosave=False,
         **Pyr_kwargs,
     )
@@ -2095,7 +2116,7 @@ def plot_1D_time_info(
 
     for i, sub_ax in enumerate(ax1D):
         if mark_all or i < len(ax1D) - num_Pyr_ax:
-            mark_target_and_reset_points(Pyrs, sub_ax=sub_ax)
+            mark_target_and_reset_points(Pyrs, sub_ax=sub_ax, lw=lw)
         if i != len(ax1D) - 1:
             sub_ax.set_xlabel("")
             sub_ax.spines["bottom"].set_visible(False)

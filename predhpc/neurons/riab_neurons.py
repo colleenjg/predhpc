@@ -472,6 +472,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         vmax: float | None = None,
         mark_runs: bool = False,
         plot_colorbars: bool = True,
+        cbar_aspect: int = 12,
         autosave: bool | None = None,
     ) -> plt.Axes | np.ndarray:
         """
@@ -503,6 +504,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         - vmax (float, optional): Maximum value for the colormap. Default is None.
         - mark_runs (bool, optional): Whether to mark runs in the plot. Default is False.
         - plot_colorbars (bool, optional): Whether to plot colorbars. Default is True.
+        - cbar_aspect (int, optional): Aspect ratio of the colorbar. Default is 12.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
             global autosave setting for ratinabox is used. Default is None.
 
@@ -536,6 +538,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
             vmax=vmax,
             mark_runs=mark_runs,
             plot_colorbars=plot_colorbars,
+            cbar_aspect=cbar_aspect,
         )
 
         for i in chosen_neurons:

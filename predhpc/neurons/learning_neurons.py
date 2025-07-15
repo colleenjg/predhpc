@@ -4081,6 +4081,7 @@ class BTSPLayer(HebbianLayer):
         in_min: bool = True,
         in_steps: bool = False,
         color: str | None = None,
+        s: int = 10,
     ):
         """
         self.add_BTSP_markers_to_plots()
@@ -4101,6 +4102,7 @@ class BTSPLayer(HebbianLayer):
         - in_steps (bool, optional): Whether to plot time in steps if timeseries is
             True. If True, takes precedence over in_min. Default is False.
         - color (str, optional): Color of the BTSP markers. Default is None.
+        - s (int, optional): Size of the BTSP markers. Default is 10.
         """
 
         if color is None:
@@ -4167,7 +4169,7 @@ class BTSPLayer(HebbianLayer):
                     color=color,
                     alpha=alpha,
                     marker=mpl_markers.MarkerStyle("x"),
-                    s=10,
+                    s=s,
                 )
 
     def plot_rate_map(
@@ -4178,6 +4180,7 @@ class BTSPLayer(HebbianLayer):
             str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
         ) = "all",
         mark_BTSP: bool = True,
+        BTSP_s: int = 10,
         ax: np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]] | None = None,
         autosave: bool | None = None,
         **kwargs,
@@ -4194,7 +4197,8 @@ class BTSPLayer(HebbianLayer):
         - t_end (float, optional): End time. Default is None.
         - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
             Default is "all".
-        - mark_BTSP (bool, optional): Whether to include BTSP markers
+        - mark_BTSP (bool, optional): Whether to include BTSP markers. Default is True.
+        - BTSP_s (int, optional): Size of the BTSP markers. Default is 10.
         - ax (np.ndarray or plt.Axes): Subplot or array of subplots. Single subplot
             if plotting timeseries or 1D rate map. Otherwise, an array of subplots.
         - autosave (bool, optional): Whether to autosave the figure. If None, the global
@@ -4227,6 +4231,7 @@ class BTSPLayer(HebbianLayer):
                 t_end=t_end,
                 chosen_neurons=chosen_neurons,
                 timeseries=False,
+                s=BTSP_s,
             )
 
         fig = np.asarray(ax).ravel()[0].figure
@@ -4245,6 +4250,7 @@ class BTSPLayer(HebbianLayer):
         xlim: tuple[float, float] | None = None,
         color: str | None = None,
         mark_BTSP: bool = True,
+        BTSP_s: int = 10,
         in_min: bool = True,
         autosave: bool | None = None,
         **kwargs,
@@ -4265,7 +4271,8 @@ class BTSPLayer(HebbianLayer):
             Default is "all".
         - xlim (tuple[float, float], optional): The x limits of the plot. Default is None.
         - color (str, optional): The color of the plot. Default is None.
-        - mark_BTSP (bool, optional): Whether to include BTSP markers
+        - mark_BTSP (bool, optional): Whether to include BTSP markers. Default is True.
+        - BTSP_s (int, optional): Size of the BTSP markers. Default is 10.
         - in_min (bool, optional): Whether to plot time in minutes. Default is True.
         - autosave (bool, optional): Whether to autosave the figure. If None, the global
         autosave setting for ratinabox is used. Default is None.
@@ -4298,6 +4305,7 @@ class BTSPLayer(HebbianLayer):
                 timeseries=True,
                 color=color,
                 in_min=in_min,
+                s=BTSP_s,
             )
 
         if xlim is not None:
