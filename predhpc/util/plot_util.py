@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import Any
 import warnings
@@ -6,6 +7,7 @@ import numpy as np
 from matplotlib import pyplot as plt  # type: ignore[import]
 from matplotlib import markers as mpl_markers
 from matplotlib import colorbar as mpl_cbar
+from matplotlib import font_manager as fm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import seaborn as sns  # type: ignore[import]
 
@@ -18,7 +20,13 @@ plt.rcParams["svg.fonttype"] = "none"
 
 
 def save_figure(
-    fig, name: str = "figure", direc=None, save: bool | None = None, **kwargs
+    fig,
+    name: str = "figure",
+    direc=None,
+    no_timestamp: bool = False,
+    fig_save_types=["png", "svg"],
+    save: bool | None = None,
+    **kwargs,
 ):
     """
     save_figure(fig)
@@ -29,19 +37,38 @@ def save_figure(
     - fig (mpl_figure.Figure): Figure to save.
     - name (str, optional): Name of figure. Default is "figure".
     - direc (str, optional): Directory to save the figure in. Default is None.
+    - no_timestamp (bool, optional): Whether, to save the figure without using the
+        ratinabox utilities to avoid the figure path including a date and timestamp.
+        Default is False.
     - save (bool, optional): If True, saves the figure. If False, does not save the
         figure. If None, the global variable for ratinabox is checked.
         Default is None.
 
     Keyword args:
-    - **kwargs: Additional keyword arguments to pass to rutils.save
+    - **kwargs: Additional keyword arguments to pass to rutils.save or fig.savefig()
     """
 
-    if direc is None:
-        rutils.save_figure(fig, name, save=save, **kwargs)  # type: ignore[arg-type]
+    if no_timestamp:
+        save_kwargs = {"dpi": 300, "bbox_inches": "tight"}
+        save_kwargs.update(kwargs)
+        if direc is None:
+            from ratinabox import figure_directory as riab_figure_directory
+
+            direc = riab_figure_directory
+        fig_path = Path(direc, name)
+        for filetype in fig_save_types:
+            fig.savefig(f"{fig_path}.{filetype}", **save_kwargs)
+        save_types = "  & .".join(fig_save_types)
+        print(f"Figure saved to {os.path.abspath(fig_path)}.{save_types}")
+
     else:
-        with gen_util.TempFigureDirectory(str(Path(direc))):
-            rutils.save_figure(fig, name, save=save, **kwargs)  # type: ignore[arg-type]
+        kwargs["save"] = save
+        kwargs["fig_save_types"] = fig_save_types
+        if direc is None:
+            rutils.save_figure(fig, name, **kwargs)  # type: ignore[arg-type]
+        else:
+            with gen_util.TempFigureDirectory(str(Path(direc))):
+                rutils.save_figure(fig, name, **kwargs)  # type: ignore[arg-type]
 
 
 def stylize_plots_for_notebook(dpi: int = 150):
@@ -56,6 +83,32 @@ def stylize_plots_for_notebook(dpi: int = 150):
     from matplotlib import rcParams as mpl_rcParams
 
     mpl_rcParams["figure.dpi"] = dpi
+
+
+def set_plot_font(font="Arial", font_dir=None):
+    """
+    set_plot_font()
+
+    Sets font for plots.
+
+    Args:
+    - font (str): Font to set for plots. Default is "Arial".
+    - font_dir (str or Path or None): Directory containing fonts to add. Default is
+        None.
+    """
+
+    if font_dir is None:
+        gen_dir = Path(os.environ["HOME"], "Documents")
+        for sub_dir in [Path("fonts"), Path("tools", "fonts")]:
+            if Path(gen_dir, sub_dir).is_dir():
+                font_dir = Path(gen_dir, sub_dir)
+
+    if font_dir is not None:
+        font_files = fm.findSystemFonts(fontpaths=str(font_dir))
+        for font_file in font_files:
+            fm.fontManager.addfont(font_file)
+
+    plt.rcParams["font.family"] = font
 
 
 def get_nrows_ncols(n, num_cols=3):
@@ -835,6 +888,63 @@ def add_colorbars(
     return cbars
 
 
+def get_cmap_extent(axis_vals):
+    """
+    get_cmap_extent(axis_vals)
+
+    Returns extent for a colormap image axis.
+
+    Args:
+    - axis_vals (1D np.ndarray): Ordered values defining an axis of the colormap image.
+
+    Returns:
+    - extent (list): Extent values for an axis of the colormap image.
+    """
+
+    if len(axis_vals) == 1:
+        raise ValueError("At least 2 axis values must be provided.")
+
+    sep = np.diff(axis_vals).mean()
+    extent = [axis_vals.min() - sep / 2, axis_vals.max() + sep / 2]
+    return extent
+
+
+def get_cmap_max(cmap_data, axis=0, indexed=None):
+    """
+    get_cmap_max(cmap_data)
+
+    Identifies values at which a colormap image's maximum values are reached in any
+    axis.
+
+    Args:
+    - cmap_data (2D np.ndarray): Array of colormap values.
+    - axis (int): Axis along which to compute maximum value. Default is 0.
+    - indexed (None): Data corresponding to the axis
+
+    Returns:
+    - max_vals (1D np.ndarray): Array of max values.
+    """
+
+    nans = np.isnan(cmap_data).all(axis=axis)
+
+    if nans.any():
+        cmap_data = np.swapaxes(cmap_data.copy(), axis, -1)
+        cmap_data[nans] = 0
+        cmap_data = np.swapaxes(cmap_data, -1, axis)
+
+    max_vals = np.nanargmax(cmap_data, axis=axis)
+    if indexed is not None:
+        if cmap_data.shape[axis] != len(indexed):
+            raise RuntimeError(
+                f"Length of indexed data ({len(indexed)}) does not match axis "
+                f"{axis} of cmap_data ({cmap_data.shape[axis]})."
+            )
+        max_vals = indexed[max_vals]
+    max_vals[nans] = np.nan
+
+    return max_vals
+
+
 def normalize_cmaps(
     axes: list[plt.Axes],
     round_order: int = 1,
@@ -1318,7 +1428,7 @@ def plot_binned_rates(
         sub_ax.set_yticks([])
         if mark_runs:
             for i in range(1, binned_rate_means.shape[0]):
-                sub_ax.axhline(i - 0.5, color="white", lw=0.35, ls=(0, (6, 3)))
+                sub_ax.axhline(i - 0.5, color="white", lw=0.4, ls=(0, (6, 3)))
 
     return ax
 

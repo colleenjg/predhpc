@@ -1911,7 +1911,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         time_str = "Time (min)" if in_min else "Time (s)"
         sub_ax.set_xlabel(time_str)
-        sub_ax.set_ylabel(f"Distance to {position_name.replace('_', ' ')} / m")
+        sub_ax.set_ylabel(f"Distance to {position_name.replace('_', ' ')} (m)")
         sub_ax.spines[["right", "top"]].set_visible(False)
 
         fig = sub_ax.figure
@@ -2196,7 +2196,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         xlabel = "Time (min)" if in_min else "Time (s)"
         sub_ax.set_xlabel(xlabel)
-        sub_ax.set_ylabel("Position / m")
+        sub_ax.set_ylabel("Position (m)")
         sub_ax.spines[["right", "top"]].set_visible(False)
 
         fig = sub_ax.figure

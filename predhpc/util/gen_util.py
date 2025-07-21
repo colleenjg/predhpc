@@ -1,6 +1,7 @@
 import copy
 from datetime import datetime
 from pathlib import Path
+import random
 import time
 
 import numpy as np
@@ -18,6 +19,100 @@ class TempFigureDirectory:
 
     def __exit__(self, exc_type, exc_value, traceback):
         ratinabox.figure_directory = self.original_figure_directory
+
+
+def seed_all(seed=None):
+    """
+    seed_all()
+
+    Set the random seed for all libraries.
+
+    Args:
+    - seed (int, optional): Random seed. If None, librairies are not seeded.
+        Default is None.
+    """
+
+    if seed is not None:
+        random.seed(seed)
+        np.random.seed(seed)
+
+
+def delete_np_dict(filepath):
+    """
+    delete_np_dict(filepath)
+
+    Delete a saved numpy dictionary file.
+
+    Args:
+    - filepath (str or Path): Path to the numpy dictionary file to delete.
+    """
+
+    filepath = Path(filepath)
+    if filepath.is_file():
+        print(f"Deleting {filepath}.")
+        filepath.unlink()
+
+
+def load_np_dict(filepath):
+    """
+    load_np_dict(filepath)
+
+    Load a dictionary saved  in numpy file.
+
+    Args:
+    - filepath (str or Path): Path to the numpy dictionary file to load.
+
+    Returns:
+    - data_dict (dict): Loaded numpy dictionary.
+    """
+
+    filepath = Path(filepath)
+    data_dict = None
+    if filepath.is_file():
+        print(f"Loading data from {filepath}.")
+        data_dict = np.load(filepath)
+    return data_dict
+
+
+def save_np_dict(filepath, data_dict):
+    """
+    save_np_dict(filepath, data_dict)
+
+    Save a dictionary to a numpy file.
+
+    Args:
+    - filepath (str or Path): Path to the numpy dictionary file to save.
+    - data_dict (dict): Dictionary to save.
+    """
+
+    filepath = Path(filepath)
+    if filepath.is_file():
+        print(f"Overwriting {filepath}.")
+    else:
+        print(f"Saving data to {filepath}.")
+
+    np.savez(filepath, **data_dict)
+
+
+def get_proportion_edges(data, prop=0.5):
+    """
+    get_proportion_edges(data)
+
+    Get the value at a specific proportion of the data's range.
+
+    Args:
+    - data (np.ndarray): 1D array of data.
+    - prop (float, optional): Proportion of the data's range to return.
+        Default is 0.5 (median).
+
+    Returns:
+    - prop_val (float): Value at the specified proportion of the data's range.
+    """
+
+    extent = data.max() - data.min()
+    prop_val = data.min() + extent * prop
+
+    return prop_val
 
 
 def get_duration_str(start_time, log=False):
@@ -151,6 +246,29 @@ def trim_dict(data_dict):
             new_dict[key] = data
 
     return new_dict
+
+
+def get_rounded_linspace(start, end, n, round=9):
+    """
+    get_rounded_linspace(start, end, n)
+
+    Obtain a linearly spaced array of values, rounded to a specified number of decimal
+    places.
+
+    Args:
+    - start (float): Start value.
+    - end (float): End value.
+    - n (int): Number of values to generate.
+    - round (int, optional): Number of decimal places to round to. Default is 9.
+
+    Returns:
+    - values (np.ndarray): Linearly spaced array of values.
+    """
+
+    values = np.linspace(start, end, n)
+    if round is not None:
+        values = np.around(values, round)
+    return values
 
 
 def get_divisors(n: int) -> list[int]:

@@ -901,6 +901,7 @@ def learn_openfield_BTSP(
     num_end_without_BTSP: int = 0,
     corridor: bool = False,
     updater: dict[str, Any] | None = None,
+    teleportation_enabled: bool | None = None,
     no_logs: bool = False,
     autosave: bool | None = None,
     **init_kwargs,
@@ -932,6 +933,8 @@ def learn_openfield_BTSP(
         Default is False.
     - updater (object or dict, optional): Object or dictionary for updating
         agent position. Default is None.
+    - teleportation_enabled (bool, optional): Whether teleportation should be enabled.
+        Default is None.
     - no_logs (bool, optional): Whether to disable logging. Default is False.
     - autosave (bool, optional): Whether to autosave. Default is None.
 
@@ -960,16 +963,19 @@ def learn_openfield_BTSP(
 
     if updater is None:
         if corridor:
+            updater = VNUpdater(Pyrs.Agent)
+        else:
             updater = {
                 "speed_fact": 3,
                 "drift_to_random_strength_ratio": 1,
             }
-        else:
-            updater = VNUpdater(Pyrs.Agent)
 
     if corridor:
-        Pyrs.Agent.pos = np.asarray([0.2, 0.8])
+        Pyrs.Agent.pos = np.asarray([0.2, 0.8])  # start position
         Pyrs.head_direction = np.asarray([-1, 0])
+
+    if teleportation_enabled is not None:
+        Pyrs.Agent.allow_teleportation(teleportation_enabled)
 
     learner = learn(
         Pyrs_or_learner,

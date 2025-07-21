@@ -1375,7 +1375,7 @@ def plot_1D_input_place_cell_weights(
             x = x - time_shift
             target_pos = 0
     else:
-        xlabel = "Input place cell center / m"
+        xlabel = "Input place cell center (m)"
 
     legend = plot_last_FWHM
     if single_sample:
@@ -2662,7 +2662,7 @@ def plot_overlayed_rate_maps(
         if sub_ax is None:
             raise RuntimeError("sub_ax is None.")
 
-        sub_ax.set_xlabel("Position / m")
+        sub_ax.set_xlabel("Position (m)")
         sub_ax.set_ylabel("Neurons")
 
     fig = sub_ax.figure

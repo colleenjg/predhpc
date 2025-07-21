@@ -818,6 +818,7 @@ class TwoCompLayer(object):
         dend_color=None,
         inhibit_color=None,
         lateral_color=None,
+        lw=1.0,
         **kwargs,
     ):
         """
@@ -837,6 +838,7 @@ class TwoCompLayer(object):
             Default is None.
         - lateral_color (str, optional): Color for lateral inhibition compartment.
             Default is None.
+        - lw (float, optional): Line width for the timeseries. Default is 1.0.
 
         Keyword args:
         - **kwargs: Additional keyword arguments passed to plt.legend().
@@ -850,16 +852,16 @@ class TwoCompLayer(object):
 
         if compartment in ["all", "soma"]:
             color = soma_color or self.SomaCompartment.color
-            sub_ax.plot([], [], color=color, label="soma")
+            sub_ax.plot([], [], color=color, lw=lw, label="soma")
         if compartment in ["all", "dend"]:
             color = dend_color or self.DendriteCompartment.color
-            sub_ax.plot([], [], color=color, label="dend")
+            sub_ax.plot([], [], color=color, lw=lw, label="dend")
         if self.inhibit_dend and compartment in ["all", "inhibit"]:
             color = inhibit_color or self.DendriteInhibition.color
-            sub_ax.plot([], [], color=color, label="inhib.")
+            sub_ax.plot([], [], color=color, lw=lw, label="inhib.")
         if plot_lateral and self.mutual_inhibition_weight is not None:
             color = lateral_color or self.LateralInhibition.color
-            sub_ax.plot([], [], color=color, label="lat. inh.")
+            sub_ax.plot([], [], color=color, lw=lw, label="lat. inh.")
 
         sub_ax.legend(loc=loc, **kwargs)
 
@@ -1316,6 +1318,7 @@ class TwoCompLayer(object):
                     dend_color=dend_color,
                     inhibit_color=inhibit_color,
                     lateral_color=lateral_color,
+                    lw=lw,
                 )
             fig = sub_ax.figure
 
