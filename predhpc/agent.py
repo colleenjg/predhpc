@@ -4424,6 +4424,7 @@ class OpenFieldAgent(ResetableAgent):
         self,
         t_end: float | None = None,
         target_alpha: float = 0.7,
+        plot_target: bool = True,
         no_legend: bool = False,
         autosave: bool | None = None,
         **kwargs,
@@ -4437,6 +4438,8 @@ class OpenFieldAgent(ResetableAgent):
         - t_end (float, optional): Time point to plot the trajectory until.
             Default is None.
         - target_alpha (float, optional): Alpha value for the target.
+            Default is 0.7.
+        - plot_target (bool, optional): Whether to plot the target. Default is True.
         - no_legend (bool, optional): Whether to remove the legend. Default is False.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
         global autosave setting for ratinabox is used. Default is None.
@@ -4459,7 +4462,8 @@ class OpenFieldAgent(ResetableAgent):
         if no_legend and legend is not None:
             legend.remove()
 
-        self.add_target_to_plot(sub_ax, t=t_end)
+        if plot_target:
+            self.add_target_to_plot(sub_ax, t=t_end)
 
         fig = sub_ax.figure
         plot_util.save_figure(fig, "trajectory", save=autosave)

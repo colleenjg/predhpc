@@ -1064,7 +1064,7 @@ def plot_T_maze(
             sub_ax=ax1D[2],
             method="max",
             colorbar=False,
-            replot_env=True,
+            plot_env=True,
         )
         title = "Obj. rate map"
 

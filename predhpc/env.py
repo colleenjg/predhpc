@@ -1594,6 +1594,7 @@ class OpenField(Environment):
         fig: mpl_figure.Figure | None = None,
         sub_ax: plt.Axes | None = None,
         plot_objects: bool = True,
+        skip_object_types: list = list(),
         size_fact: float = 2.5,
         alpha: float = 0.8,
         s: float = 20,
@@ -1615,6 +1616,8 @@ class OpenField(Environment):
             created.
         - plot_objects (bool, optional): Whether to plot objects in environment.
             Default is True.
+        - skip_object_types (list, optional): List of object types to skip plotting.
+            Default is an empty list.
         - size_fact (float, optional): Factor to multiply environment width by to
             determine figure size. Default is 2.5.
         - alpha (float, optional): Alpha value for plotting objects. Default is 0.8.
@@ -1647,18 +1650,24 @@ class OpenField(Environment):
             object_type_num_to_plot_params_dict = (
                 self.get_object_type_num_to_plot_params_dict(s=s)
             )
+            labelled = list()
             for coords, object_type in zip(
                 self.objects["objects"], self.objects["object_types"]
             ):
-                label = None
-                if "name" in object_type_num_to_plot_params_dict[object_type].keys():
-                    label = object_type_num_to_plot_params_dict[object_type].pop("name")
+                name = object_type_num_to_plot_params_dict[object_type].pop("name")
+                skip = any([skip_type in name for skip_type in skip_object_types])
+                if skip:
+                    continue
+                label = None if name in labelled else name
+                labelled.append(name)
+
                 sub_ax.scatter(
                     *coords,
                     **object_type_num_to_plot_params_dict[object_type],
                     alpha=alpha,
                     label=label,
                 )
+                object_type_num_to_plot_params_dict[object_type]["name"] = name
 
             sub_ax.legend(loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
 

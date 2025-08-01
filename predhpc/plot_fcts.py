@@ -2556,7 +2556,7 @@ def plot_overlayed_rate_maps(
     sub_ax: plt.Axes | None = None,
     method: str = "max",
     colorbar: bool = True,
-    replot_env: bool = False,
+    plot_env: bool = False,
     autosave: bool | None = None,
     **kwargs,
 ) -> plt.Axes:
@@ -2576,7 +2576,7 @@ def plot_overlayed_rate_maps(
         created. Default is None.
     - method (str, optional): Method for plotting the rate maps. Default is "max".
     - colorbar (bool, optional): Whether to plot the colorbar. Default is True.
-    - replot_env (bool, optional): Whether to plot the environment if axis provided.
+    - plot_env (bool, optional): Whether to plot the environment if axis provided.
         Default is False.
     - autosave (bool, optional): Whether to save the figure. Default is None.
 
@@ -2610,7 +2610,7 @@ def plot_overlayed_rate_maps(
         sub_ax = NeuronLayer.Agent.Environment.plot_environment(
             alpha=0.6, autosave=False
         )
-    elif replot_env:
+    elif plot_env:
         sub_ax = NeuronLayer.Agent.Environment.plot_environment(
             sub_ax=sub_ax, alpha=0.6, autosave=False
         )
