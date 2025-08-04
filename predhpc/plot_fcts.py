@@ -228,6 +228,8 @@ def mark_target_and_reset_points(
     sub_ax: plt.Axes,
     restore_xlims: bool = True,
     lw: float = 1.0,
+    omit_reset: bool = False,
+    min_steps_btw: float = 0.0,
 ):
     """
     mark_target_and_reset_points(Pyrs, sub_ax)
@@ -239,31 +241,34 @@ def mark_target_and_reset_points(
     - sub_ax (plt.Axes): Subplot to add target and reset points to.
     - restore_xlims (bool, optional): Whether to restore x limits. Default is True.
     - lw (float, optional): Line width of the vertical lines. Default is 1.0.
+    - omit_reset (bool, optional): Whether to omit reset points. Default is False.
+    - min_steps_btw (float, optional): Minimum steps between points for plotting.
+        Default is 0.0.
     """
 
     if restore_xlims:
         xlims = sub_ax.get_xlim()
 
-    for end_point, ls in [
+    for position_name, ls in [
         ("reset", "dashed"),
         ("target", "dotted"),
     ]:
-        if end_point == "reset":
-            positions = Pyrs.Agent.trajectory_df["stop_step"].to_numpy()
-        elif end_point == "target":
-            positions = Pyrs.Agent.target_df["reached_step"].to_numpy()
-        else:
-            raise ValueError(f"Unknown end point: {end_point}")
-        positions = positions[np.isfinite(positions)].astype(int)
+        if position_name == "reset" and omit_reset:
+            continue
 
-        for t in positions:
-            if t == len(Pyrs.Agent.history["t"]):
-                if t - 1 in positions:
-                    continue
-                else:
-                    t = t - 1
+        steps = Pyrs.Agent.get_reached_position_steps(
+            position_name=position_name, min_steps_btw=min_steps_btw
+        )
+
+        last_step_idxs = np.where(steps == len(Pyrs.Agent.history["t"]))[0]
+        if len(last_step_idxs):
+            steps[last_step_idxs] -= 1
+            steps = np.unique(steps)
+
+        time_min = Pyrs.Agent.dt * steps / 60
+        for t in time_min:
             sub_ax.axvline(
-                Pyrs.Agent.history["t"][t] / 60,
+                t,
                 alpha=0.7,
                 zorder=-1,
                 lw=lw,
@@ -1023,7 +1028,7 @@ def plot_timeseries(
                     color=(NeuronLayer.color or "C1"),  # type: ignore[attr-defined]
                     alpha=0.5,
                     s=5,
-                    linewidth=0,
+                    lw=0,
                 )
 
         xmin = t[0] if was_ax else min(t[0], sub_ax.get_xlim()[0])  # type: ignore[operator]
@@ -1074,6 +1079,7 @@ def plot_1D_reset_environment(
     title: str = "Environment",
     minimalist: bool = False,
     base_s: float = 15,
+    obj_lw: float = 1,
     sub_ax: plt.Axes | None = None,
     autosave: bool | None = None,
 ) -> plt.Axes:
@@ -1089,6 +1095,7 @@ def plot_1D_reset_environment(
     - minimalist (bool, optional): Whether to create minimalist reset environment plot.
         Default is False.
     - base_s (float, optional): Base size for markers. Default is 15.
+    - obj_lw (float, optional): Line width for objects. Default is 1.
     - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
         created. Default is None.
     - autosave (bool, optional): Whether to save the figure. Default is None.
@@ -1129,6 +1136,7 @@ def plot_1D_reset_environment(
             0,
             zorder=5,
             label=label,
+            lw=obj_lw,
             **sub_dict["kwargs"],
         )
     sub_ax.legend(ncol=len(plotting_dict), frameon=False)
@@ -2070,7 +2078,12 @@ def plot_1D_time_info(
 
     # Plot trajectories
     Ag.plot_trajectories_across_time(
-        framerate=1 / Ag.dt, s=s, base_s=base_s, sub_ax=ax1D[0], autosave=False
+        framerate=1 / Ag.dt,
+        s=s,
+        base_s=base_s,
+        obj_lw=lw,
+        sub_ax=ax1D[0],
+        autosave=False,
     )
     ax1D[0].set_title("Trajectories")
 
@@ -2081,7 +2094,8 @@ def plot_1D_time_info(
             chosen_neurons="all",
             spikes=False,
             sub_ax=ax1D[1],
-            linewidth=lw,
+            lw=lw,
+            norm_by="none",
             autosave=False,
         )
         plot_util.pad_axis(ax1D[1], axis="y", pad_prop=0.15, prop_high=1.0)
@@ -2093,11 +2107,14 @@ def plot_1D_time_info(
         chosen_neurons="all",
         spikes=False,
         sub_ax=ax1D[i],
-        linewidth=lw,
+        lw=lw,
         autosave=False,
+        norm_by=PCs.n / 20,
+        overlap=1,
+        global_shift=-1,
         shade_kwargs={"rasterized": True},  # svg too big, othersize
     )
-    plot_util.pad_axis(ax1D[i], axis="y", pad_prop=0.15, prop_high=0.6)
+    plot_util.pad_axis(ax1D[i], pad_prop=0.1, axis="y")
     ax1D[i].set_title("Place cell rate timeseries")
 
     # Plot Pyr. rate timeseries
@@ -2108,11 +2125,23 @@ def plot_1D_time_info(
         spikes=Pyrs_spikes,
         shift=-10,
         overlap=1,
-        linewidth=lw,
+        lw=lw,
+        norm_by="none",
         autosave=False,
         **Pyr_kwargs,
     )
     ax1D[i + 1].set_title("Pyr. rate timeseries")
+
+    # set y axes so that y axis is comparable across subplots
+    ymin = min([sub_ax.get_ylim()[0] for sub_ax in ax1D[i + 1 :]])
+    for sub_ax in ax1D[i + 1 :]:
+        sub_ax.set_ylim(ymin, None)
+
+    idxs = np.arange(i + 1, len(ax1D))
+    if hasattr(Pyrs, "DendriteCompartment"):
+        idxs = np.insert(idxs, 0, [1])
+    axlist = [ax1D[i] for i in idxs]
+    plot_util.match_y_axis_scales(axlist, [height_ratios[i] for i in idxs])
 
     for i, sub_ax in enumerate(ax1D):
         if mark_all or i < len(ax1D) - num_Pyr_ax:
@@ -2144,10 +2173,13 @@ def plot_2D_input_place_cell_weights(
     lw: float = 0,
     s: float = 75,
     obj_s: float = 20,
+    BTSP_s: float = 10,
+    BTSP_marker: str = "x",
     zorder: int = 1,
     title: str | None = None,
     y: float = 1,
     single_colorbar: bool = False,
+    cbar_side: str = "right",
     plot_BTSP_events: bool = False,
     t_start: float | None = None,
     t_end: float | None = None,
@@ -2181,11 +2213,14 @@ def plot_2D_input_place_cell_weights(
     - s (float, optional): Size of scatterplot markers. Default is 75.
     - obj_s (float, optional): Size of object markers. If None, defaults are used.
         Default is None.
+    - BTSP_s (float, optional): Size of BTSP markers. Default is 10.
+    - BTSP_marker (str, optional): Marker for BTSP events. Default is "x".
     - zorder (int, optional): Zorder of the marker. Default is 1.
     - title (str, optional). Figure title. Default is None.
     - y (float, optional): Y position of the title. Default is 1.
     - single_colorbar (bool, optional): Whether to use a single colorbar. Default is
         False.
+    - cbar_side (str, optional): Side of the colorbar. Default is "right".
     - plot_BTSP_events (bool, optional): Whether to plot the BTSP events.
         Default is False.
     - t_start (float, optional): Start time of the plot. Default is None.
@@ -2260,7 +2295,7 @@ def plot_2D_input_place_cell_weights(
 
     for i in range(len(place_weights)):
         target_neurons.Agent.Environment.plot_environment(
-            sub_ax=ax1D[i], alpha=0.6, autosave=False, **kwargs, **obj_s_kwarg
+            sub_ax=ax1D[i], alpha=0.8, autosave=False, **kwargs, **obj_s_kwarg
         )
 
         ax1D[i].scatter(
@@ -2271,7 +2306,7 @@ def plot_2D_input_place_cell_weights(
             marker=marker,
             s=s,
             alpha=alpha,
-            lw=lw,
+            lw=0,
             zorder=zorder,
             cmap=cmap,
         )
@@ -2287,6 +2322,9 @@ def plot_2D_input_place_cell_weights(
                 "t_start": t_start,
                 "t_end": t_end,
                 "color": color,
+                "s": BTSP_s,
+                "lw": lw,
+                "marker": BTSP_marker,
             }
             if BTSP_per:
                 target_neurons.add_BTSP_markers_to_plots(
@@ -2301,7 +2339,13 @@ def plot_2D_input_place_cell_weights(
     norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
     im = mpl_cm.ScalarMappable(norm=norm, cmap=cmap)
     cbars = plot_util.add_colorbars(
-        ax, im, vmin=vmin, vmax=vmax, label="Weights", end_only=single_colorbar
+        ax,
+        im,
+        vmin=vmin,
+        vmax=vmax,
+        label="Weights",
+        end_only=single_colorbar,
+        side=cbar_side,
     )
 
     v_ticks = [np.around(vmin, 2), np.around(vmax, 2)]

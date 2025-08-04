@@ -387,6 +387,7 @@ class TwoCompLayer(object):
         self,
         t_start: float | None = None,
         t_end: float | None = None,
+        chosen_neurons: str | int | list | np.ndarray = "all",
         compartment: str = "all",
         incl_lateral: bool = False,
     ):
@@ -400,8 +401,12 @@ class TwoCompLayer(object):
             Default is None.
         - t_end (float, optional): Stop time for obtaining firingrate min and max.
             Default is None.
+        - chosen_neurons (str, int, list or np.ndarray, optional): Neurons to consider
+            for min and max firing rates. Default is "all".
         - compartment (str, optional): Which compartment to obtain max for
             ("soma", "dend", "both", "inhibit", "all"). Default is "all".
+        - incl_lateral (bool, optional): Whether to include the lateral inhibition
+            compartment. Default is False.
 
         Returns:
         - min_firingrate (float): Minimum firing rate.
@@ -414,7 +419,7 @@ class TwoCompLayer(object):
         compartments = self.get_compartments(compartment, incl_lateral=incl_lateral)
         for comp in compartments:
             min_rate, max_rate = comp.get_min_max_firingrates(
-                t_start=t_start, t_end=t_end
+                t_start=t_start, t_end=t_end, chosen_neurons=chosen_neurons
             )
             min_firingrate = min(min_firingrate, min_rate)
             max_firingrate = max(max_firingrate, max_rate)
@@ -869,6 +874,7 @@ class TwoCompLayer(object):
         self,
         t_start: float | None = None,
         t_end: float | None = None,
+        chosen_neurons: str | int | list | np.ndarray = "all",
         ax: plt.Axes | np.ndarray | None = None,
         compartment: str | None = None,
         norm_by: str | None = None,
@@ -885,6 +891,8 @@ class TwoCompLayer(object):
         Args:
         - t_start (float, optional): Start time of the plot. Default is None.
         - t_end (float, optional): End time. Default is None.
+        - chosen_neurons (str, int, list or np.ndarray, optional): Neurons to plot.
+            Default is "all" (i.e., all neurons in the layer).
         - ax (np.ndarray or plt.Axes, optional): Subplot or array of subplots to plot
             on (one per plotted ROI, if environment is 2D). Default is None.
         - compartment (str, optional): Which compartment to plot, if environment is
@@ -915,7 +923,10 @@ class TwoCompLayer(object):
 
         if norm_by == "shared_fr_max":
             kwargs["norm_by"] = self.get_min_max_firingrates(
-                t_start=t_start, t_end=t_end, compartment=compartment
+                t_start=t_start,
+                t_end=t_end,
+                chosen_neurons=chosen_neurons,
+                compartment=compartment,
             )[1]
         elif norm_by is not None:
             kwargs["norm_by"] = norm_by
@@ -930,6 +941,7 @@ class TwoCompLayer(object):
             ax_out = comp.plot_rate_map(
                 t_start=t_start,
                 t_end=t_end,
+                chosen_neurons=chosen_neurons,
                 ax=ax,
                 no_legend=True,
                 autosave=autosave,
@@ -1050,6 +1062,7 @@ class TwoCompLayer(object):
         mark_runs: bool = False,
         plot_colorbars: bool = True,
         cbar_aspect: int = 12,
+        cbar_label: str = "Firing rate",
         autosave: bool | None = None,
     ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
         """
@@ -1081,6 +1094,7 @@ class TwoCompLayer(object):
             Default is False.
         - plot_colorbars (bool, optional): Whether to plot colorbars. Default is True.
         - cbar_aspect (int, optional): Aspect ratio of the colorbars. Default is 12.
+        - cbar_label (str, optional): Label for the colorbars. Default is "Firing rate".
         - autosave (bool, optional): Whether to autosave the figure. If None, the
             global autosave setting for ratinabox is used. Default is None.
 
@@ -1128,6 +1142,7 @@ class TwoCompLayer(object):
                 mark_runs=mark_runs,
                 plot_colorbars=plot_colorbars,
                 cbar_aspect=cbar_aspect,
+                cbar_label=cbar_label,
                 autosave=False,
             )
             if adjust_range:
@@ -1172,6 +1187,7 @@ class TwoCompLayer(object):
         self,
         t_start: float | None = None,
         t_end: float | None = None,
+        chosen_neurons: str | int | list | np.ndarray = "all",
         ax: plt.Axes | np.ndarray | None = None,
         soma_color: str | None = None,
         dend_color: str | None = None,
@@ -1183,6 +1199,7 @@ class TwoCompLayer(object):
         norm_by: str | None = None,
         in_min: bool = True,
         lw: float = 1.0,
+        omit_reset: bool = False,
         no_legend: bool = False,
         autosave: bool | None = None,
         **kwargs,
@@ -1196,6 +1213,8 @@ class TwoCompLayer(object):
         Args:
         - t_start (float, optional): Start time of the plot. Default is None.
         - t_end (float, optional): End time. Default is None.
+        - chosen_neurons (str, int, list or np.ndarray, optional): Neurons to plot.
+            Default is "all".
         - ax (1D np.ndarray or plt.Axes, optional): Subplot or 1D array of subplots
             if separate_axes (one per compartment). Default is None.
         - soma_color (str, optional): Color for soma compartment. Default is None.
@@ -1214,6 +1233,8 @@ class TwoCompLayer(object):
         - in_min (bool, optional): Whether to plot the time in minutes instead of
             seconds. Default is True.
         - lw (float, optional): Line width for the timeseries. Default is 1.0.
+        - omit_reset (bool, optional): Whether to omit resetting the points for
+            marking target and reset points. Default is False.
         - no_legend (bool, optional): Whether to remove the legend. Default is False.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
         global autosave setting for ratinabox is used. Default is None.
@@ -1230,6 +1251,9 @@ class TwoCompLayer(object):
 
         if "linewidth" in kwargs.keys():
             lw = kwargs.pop("linewidth")
+
+        if "imshow" in kwargs.keys() and kwargs["imshow"]:
+            raise NotImplementedError("'imshow' option is not implemented.")
 
         if separate_axes:
             num_rows = len(compartments)
@@ -1260,7 +1284,10 @@ class TwoCompLayer(object):
 
         if norm_by == "shared_max":
             norm_by = self.get_min_max_firingrates(
-                t_start=t_start, t_end=t_end, incl_lateral=plot_lateral
+                t_start=t_start,
+                t_end=t_end,
+                incl_lateral=plot_lateral,
+                chosen_neurons=chosen_neurons,
             )[1]
 
         colors = [soma_color, dend_color]
@@ -1279,7 +1306,9 @@ class TwoCompLayer(object):
 
         for c, comp in enumerate(compartments):
             if norm_by == "max_per":
-                use_norm_by = comp.get_min_max_firingrates()[1]
+                use_norm_by = comp.get_min_max_firingrates(
+                    t_start=t_start, t_end=t_end, chosen_neurons=chosen_neurons
+                )[1]
             else:
                 use_norm_by = norm_by
             color = colors[c] or comp.color
@@ -1287,11 +1316,12 @@ class TwoCompLayer(object):
             sub_ax_out = comp.plot_rate_timeseries(
                 t_start=t_start,
                 t_end=t_end,
+                chosen_neurons=chosen_neurons,
                 sub_ax=use_sub_ax,
                 color=color,
                 norm_by=use_norm_by,
                 in_min=in_min,
-                linewidth=lw,
+                lw=lw,
                 autosave=False,
                 **kwargs,
             )
@@ -1304,7 +1334,9 @@ class TwoCompLayer(object):
 
             for s, sub_ax in enumerate(ax1D):
                 sub_ax.set_title(separate_titles[s])
-                plot_fcts.mark_target_and_reset_points(self, sub_ax=sub_ax, lw=lw)
+                plot_fcts.mark_target_and_reset_points(
+                    self, sub_ax=sub_ax, lw=lw, omit_reset=omit_reset
+                )
                 if s != len(ax1D) - 1:
                     sub_ax.set_xlabel("")
             fig = np.asarray(ax).ravel()[0].figure

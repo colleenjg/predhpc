@@ -14,7 +14,7 @@ import seaborn as sns  # type: ignore[import]
 from ratinabox import utils as rutils  # type: ignore[import]
 from ratinabox import stylize_plots as rstylize_plots  # type: ignore[import]
 
-from predhpc.util import gen_util, signal_util
+from predhpc.util import gen_util, params_util, signal_util
 
 plt.rcParams["svg.fonttype"] = "none"
 
@@ -404,6 +404,36 @@ def pad_axis(sub_ax, axis="y", pad_prop=0.1, prop_high=0.5):
         max_val += pad * prop_high
 
         set_fct(min_val, max_val)
+
+
+def match_y_axis_scales(axlist, height_ratios=None):
+    """
+    match_y_axis_scales(axlist)
+
+    Match the y-axis scales of a list of subplots so that data are comparable.
+
+    Args:
+    - axlist (list): List of subplots to match y-axis scales for.
+    - height_ratios (list, optional): List of height ratios for each subplot.
+        Default is None.
+    """
+
+    if height_ratios is None:
+        height_ratios = [1] * len(axlist)
+
+    if len(axlist) != len(height_ratios):
+        raise ValueError("Number of axes does not match number of height ratios.")
+
+    ymins = [sub_ax.get_ylim()[0] for sub_ax in axlist]
+    ymaxs = [sub_ax.get_ylim()[1] for sub_ax in axlist]
+    yranges = [ymax - ymin for ymin, ymax in zip(ymins, ymaxs)]
+
+    rel = max(
+        [yrange / height_ratio for yrange, height_ratio in zip(yranges, height_ratios)]
+    )
+    for i, sub_ax in enumerate(axlist):
+        ymax = ymins[i] + rel * height_ratios[i]
+        sub_ax.set_ylim(ymins[i], ymax)
 
 
 def set_alternating_ticks(sub_ax, ticks, round_dec=None, axis="x", start_idx=None):
@@ -820,6 +850,34 @@ def init_rate_map_axes(
     return axes
 
 
+def add_dummy_colorbar_axis(
+    sub_ax,
+    side="right",
+    size="5%",
+    pad=0.05,
+):
+    """
+    add_dummy_colorbar_axis(sub_ax)
+
+    Add a dummy colorbar axis to a subplot.
+
+    Args:
+    - sub_ax (plt.Axes): Subplot to add the dummy colorbar axis to.
+    - side (str, optional): Side of the axes to add the colorbar to. Default is "right".
+    - size (str, optional): Size of the colorbar. Default is "5%".
+    - pad (float, optional): Padding between the axes and the colorbar. Default is 0.05.
+
+    Returns:
+    - cax (plt.Axes): Colorbar axis.
+    """
+
+    divider = make_axes_locatable(sub_ax)
+    cax = divider.append_axes(side, size=size, pad=pad)
+    cax.axis("off")
+
+    return cax
+
+
 def add_colorbars(
     axes,
     im,
@@ -830,6 +888,9 @@ def add_colorbars(
     round=2,
     length=0,
     outline=False,
+    side="right",
+    size="5%",
+    pad=0.05,
 ):
     """
     add_colorbars(axes, im)
@@ -847,13 +908,16 @@ def add_colorbars(
     - round (int, optional): Number of decimal places to round to. Default is 2.
     - length (int, optional): Length of the colorbar ticks. Default is 0.
     - outline (bool, optional): Whether to show the colorbar outline. Default is False.
+    - side (str, optional): Side of the axes to add the colorbar to. Default is "right".
+    - size (str, optional): Size of the colorbar. Default is "5%".
+    - pad (float, optional): Padding between the axes and the colorbar. Default is 0.05.
 
     Returns:
     - cbars (list): Colorbars.
     """
 
     if label is None:
-        label = "Firing rate / Hz"
+        label = "Firing rate (Hz)"
 
     axes = np.asarray(axes)
     if len(axes.shape) < 2 or end_only:
@@ -871,8 +935,8 @@ def add_colorbars(
 
     cbars = list()
     for divider in dividers:
-        cax = divider.append_axes("right", size="5%", pad=0.05)
-        cbar = plt.colorbar(im, cax=cax)
+        cax = divider.append_axes(side, size=size, pad=pad)
+        cbar = plt.colorbar(im, cax=cax, location=side)
         if length is not None:
             cbar.ax.tick_params(length=length)
         if label is not None:
@@ -1135,7 +1199,7 @@ def get_plot_marker_kwargs(position_name: str = "reset", base_s: float = 15) -> 
         s = base_s * 1.2
 
     elif position_name == "target":
-        color = "#3C539B"  # blue
+        color = params_util.TARGET_COLOR
         marker = mpl_markers.MarkerStyle("o")
         s = base_s * 1.3
 
@@ -1343,6 +1407,7 @@ def plot_binned_rates(
     mark_runs=False,
     plot_colorbars=True,
     cbar_aspect=12,
+    cbar_label="Firing rate",
 ):
     """
     plot_binned_rates(binned_rate_means)
@@ -1360,6 +1425,7 @@ def plot_binned_rates(
     - mark_runs (bool, optional): Whether to mark runs in the plot. Default is False.
     - plot_colorbars (bool, optional): Whether to plot colorbars. Default is True.
     - cbar_aspect (int, optional): Aspect ratio of the colorbar. Default is 12.
+    - cbar_label (str, optional): Label for the colorbar. Default is "Firing rate".
 
     Returns:
     - ax (plt.Axes or np.ndarray): Subplot or array of subplots with the binned firing
@@ -1401,7 +1467,7 @@ def plot_binned_rates(
             if shared_range and i < num_neurons - 1:
                 continue
             cbar = plt.colorbar(im, ax=ax1D[i], pad=0.15, aspect=cbar_aspect)
-            cbar.set_label("Firing rate")
+            cbar.set_label(cbar_label)
             cbar.ax.yaxis.set_label_position("left")
 
         ax1D[i].set_title(f"Neuron #{i}")

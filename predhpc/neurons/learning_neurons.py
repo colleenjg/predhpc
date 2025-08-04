@@ -949,7 +949,7 @@ class LearnLayer(SmoothFeedForwardLayer):
 
         if normalize_together:
             cbar = plot_util.normalize_cmaps(subplots, shrink=0.7)
-            cbar.set_label("Firing rate / Hz")
+            cbar.set_label("Firing rate (Hz)")
 
         fig = np.asarray(axes).ravel()[0].figure
 
@@ -1579,7 +1579,6 @@ class HebbianLayer(LearnLayer):
         t_start: float | None = None,
         t_end: float | None = None,
         chosen_neurons: int | str = "all",
-        mark_BTSP: bool = True,
         bias_norms: bool = False,
         in_min: bool = True,
         lw: float = 1,
@@ -1597,7 +1596,6 @@ class HebbianLayer(LearnLayer):
         - t_end (float, optional): End time of the plot. Default is None.
         - chosen_neurons (int, str, list or 1D np.ndarray, optional): Neurons to plot.
             Default is "all".
-        - mark_BTSP (bool, optional): Whether to mark the BTSP. Default is True.
         - bias_norms (bool, optional): Whether to plot the bias normalization values.
             Default is False.
         - in_min (bool, optional): Whether to plot the time in minutes. Default is True.
@@ -1684,17 +1682,6 @@ class HebbianLayer(LearnLayer):
 
         plot_util.pad_axis(sub_ax, axis="x", pad_prop=0.05)
         plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.5, prop_high=1.0)
-
-        if mark_BTSP:
-            self.add_BTSP_markers_to_plots(
-                ax=sub_ax,
-                t_start=t_start,
-                t_end=t_end,
-                chosen_neurons=chosen_neurons,
-                timeseries=True,
-                in_min=in_min,
-            )
-            plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.05, prop_high=1.0)
 
         sub_ax.axhline(1, color="k", lw=1, ls="--", alpha=0.3)
 
@@ -1861,6 +1848,8 @@ class BTSPLayer(HebbianLayer):
         • self.add_BTSP_markers_to_plots()
         • self.plot_rate_map()
         • self.plot_rate_timeseries()
+        • self.plot_normalization_values_over_time()
+
     """
 
     default_params = {
@@ -4082,6 +4071,9 @@ class BTSPLayer(HebbianLayer):
         in_steps: bool = False,
         color: str | None = None,
         s: int = 10,
+        marker: str = "x",
+        prop_y: float = 0.7,
+        lw: float = 1.0,
     ):
         """
         self.add_BTSP_markers_to_plots()
@@ -4103,6 +4095,10 @@ class BTSPLayer(HebbianLayer):
             True. If True, takes precedence over in_min. Default is False.
         - color (str, optional): Color of the BTSP markers. Default is None.
         - s (int, optional): Size of the BTSP markers. Default is 10.
+        - marker (str, optional): Marker style for the BTSP markers. Default is "x".
+        - prop_y (float, optional): Proportional y-offset for the markers if timeseries
+            is True. Default is 0.7.
+        - lw (float, optional): Line width of the markers. Default is 1.
         """
 
         if color is None:
@@ -4153,13 +4149,13 @@ class BTSPLayer(HebbianLayer):
                         if in_min:
                             x_pos = x_pos / 60
                     line_sep = (ymax - 1) / num_neurons
-                    y_pos = 1 + line_sep * i + line_sep * 0.7
+                    y_pos = 1 + line_sep * i + line_sep * prop_y
                     pos = [x_pos, y_pos]
                 else:
                     pos = self.Agent.history["pos"][step]
                     if self.Agent.Environment.dimensionality == "1D":
                         line_sep = (ymax - 1) / num_neurons
-                        y_pos = 1 + line_sep * i + line_sep * 0.7
+                        y_pos = 1 + line_sep * i + line_sep * prop_y
                         pos = pos + [y_pos]
                     else:
                         sub_ax = ax1D[i]
@@ -4168,8 +4164,9 @@ class BTSPLayer(HebbianLayer):
                     *pos,
                     color=color,
                     alpha=alpha,
-                    marker=mpl_markers.MarkerStyle("x"),
+                    marker=marker,
                     s=s,
+                    lw=lw,
                 )
 
     def plot_rate_map(
@@ -4181,6 +4178,7 @@ class BTSPLayer(HebbianLayer):
         ) = "all",
         mark_BTSP: bool = True,
         BTSP_s: int = 10,
+        BTSP_lw: float = 1.0,
         ax: np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]] | None = None,
         autosave: bool | None = None,
         **kwargs,
@@ -4199,6 +4197,7 @@ class BTSPLayer(HebbianLayer):
             Default is "all".
         - mark_BTSP (bool, optional): Whether to include BTSP markers. Default is True.
         - BTSP_s (int, optional): Size of the BTSP markers. Default is 10.
+        - BTSP_lw (float, optional): Line width of the BTSP markers. Default is 1.0.
         - ax (np.ndarray or plt.Axes): Subplot or array of subplots. Single subplot
             if plotting timeseries or 1D rate map. Otherwise, an array of subplots.
         - autosave (bool, optional): Whether to autosave the figure. If None, the global
@@ -4232,6 +4231,7 @@ class BTSPLayer(HebbianLayer):
                 chosen_neurons=chosen_neurons,
                 timeseries=False,
                 s=BTSP_s,
+                lw=BTSP_lw,
             )
 
         fig = np.asarray(ax).ravel()[0].figure
@@ -4251,6 +4251,8 @@ class BTSPLayer(HebbianLayer):
         color: str | None = None,
         mark_BTSP: bool = True,
         BTSP_s: int = 10,
+        BTSP_lw: float = 1.0,
+        BTSP_marker: str = "x",
         in_min: bool = True,
         autosave: bool | None = None,
         **kwargs,
@@ -4273,6 +4275,8 @@ class BTSPLayer(HebbianLayer):
         - color (str, optional): The color of the plot. Default is None.
         - mark_BTSP (bool, optional): Whether to include BTSP markers. Default is True.
         - BTSP_s (int, optional): Size of the BTSP markers. Default is 10.
+        - BTSP_lw (float, optional): Line width of the BTSP markers. Default is 1.0.
+        - BTSP_marker (str, optional): Marker style for the BTSP markers. Default is "x".
         - in_min (bool, optional): Whether to plot time in minutes. Default is True.
         - autosave (bool, optional): Whether to autosave the figure. If None, the global
         autosave setting for ratinabox is used. Default is None.
@@ -4306,6 +4310,8 @@ class BTSPLayer(HebbianLayer):
                 color=color,
                 in_min=in_min,
                 s=BTSP_s,
+                lw=BTSP_lw,
+                marker=BTSP_marker,
             )
 
         if xlim is not None:
@@ -4313,6 +4319,79 @@ class BTSPLayer(HebbianLayer):
 
         fig = sub_ax.figure
         plot_util.save_figure(fig, f"{self.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
+
+        return sub_ax
+
+    def plot_normalization_values_over_time(
+        self,
+        input_layer: str,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        chosen_neurons: int | str = "all",
+        mark_BTSP: bool = True,
+        bias_norms: bool = False,
+        in_min: bool = True,
+        lw: float = 1,
+        autosave: bool | None = None,
+        sub_ax: plt.Axes | None = None,
+    ):
+        """
+        self.plot_normalization_values_over_time()
+
+        Plot the normalization values for the weights of the layer over time.
+
+        Args:
+        - input_layer (str): Name of the input layer.
+        - t_start (float, optional): Start time of the plot. Default is None.
+        - t_end (float, optional): End time of the plot. Default is None.
+        - chosen_neurons (int, str, list or 1D np.ndarray, optional): Neurons to plot.
+            Default is "all".
+        - mark_BTSP (bool, optional): Whether to mark the BTSP. Default is True.
+        - bias_norms (bool, optional): Whether to plot the bias normalization values.
+            Default is False.
+        - in_min (bool, optional): Whether to plot the time in minutes. Default is True.
+        - lw (float, optional): Line width of the plot. Default is 1.
+        - autosave (bool, optional): Whether to save the figure. Default is None.
+        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
+            created. Default is None.
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with normalization values plotted.
+        """
+
+        sub_ax = super().plot_normalization_values_over_time(
+            input_layer=input_layer,
+            t_start=t_start,
+            t_end=t_end,
+            chosen_neurons=chosen_neurons,
+            bias_norms=bias_norms,
+            in_min=in_min,
+            lw=lw,
+            autosave=False,
+            sub_ax=sub_ax,
+        )
+
+        if mark_BTSP:
+            pre_ymin, pre_ymax = sub_ax.get_ylim()
+            sub_ax.autoscale(axis="y")
+            plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.5, prop_high=1.0)
+
+            self.add_BTSP_markers_to_plots(
+                ax=sub_ax,
+                t_start=t_start,
+                t_end=t_end,
+                chosen_neurons=chosen_neurons,
+                timeseries=True,
+                in_min=in_min,
+                lw=lw,
+            )
+            plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.05, prop_high=1.0)
+
+            ymin, ymax = sub_ax.get_ylim()
+            sub_ax.set_ylim(min(pre_ymin, ymin), max(pre_ymax, ymax))
+
+        fig = sub_ax.figure
+        plot_util.save_figure(fig, f"{self.name}_norm_over_time", save=autosave)  # type: ignore[attr-defined]
 
         return sub_ax
 

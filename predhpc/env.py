@@ -11,7 +11,7 @@ import pandas as pd  # type: ignore[import]
 
 from ratinabox import Environment as riabEnv  # type: ignore[import]
 
-from predhpc.util import trig_util, plot_util, ext_util
+from predhpc.util import gen_util, trig_util, params_util, plot_util, ext_util
 
 
 class EnvironmentWarning(UserWarning):
@@ -924,7 +924,7 @@ class OpenField(Environment):
                 object_type_num_to_plot_params_dict[num] = {
                     "name": name,
                     "marker": "o",
-                    "color": "blue",
+                    "color": params_util.TARGET_COLOR,
                     "s": s,
                     "zorder": 5,
                 }
@@ -932,7 +932,7 @@ class OpenField(Environment):
                 object_type_num_to_plot_params_dict[num] = {
                     "name": name,
                     "marker": "o",
-                    "color": "green",
+                    "color": params_util.NOVEL_COLOR,
                     "s": s,
                     "zorder": 5,
                 }
@@ -1600,6 +1600,8 @@ class OpenField(Environment):
         s: float = 20,
         no_legend: bool = False,
         return_env_fig: bool = False,
+        scale_loc: None | tuple = None,
+        scale_length: float = 0.2,
         autosave: bool | None = None,
         **kwargs,
     ) -> plt.Axes:
@@ -1626,8 +1628,15 @@ class OpenField(Environment):
             Default is False.
         - return_env_fig (bool, optional): Whether to return the figure
             (for compatibility). Default is False.
+        - scale_loc (None or tuple, optional): Location at which to add a scale bar to
+            the plot. If None, no scale bar is added. Default is None.
+        - scale_length (float, optional): Length of the scale bar in meters. Default
+            is 0.2.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
         global autosave setting for ratinabox is used. Default is None.
+
+        Keyword Args:
+        - **kwargs: Additional keyword arguments to pass to the plotting function.
 
         Returns:
         if return_env_fig:
@@ -1674,6 +1683,23 @@ class OpenField(Environment):
         legend = sub_ax.get_legend()
         if no_legend and legend is not None:
             legend.remove()
+
+        if scale_loc is not None:
+            y_shift = gen_util.get_proportion_edges(sub_ax.get_ylim(), 0.09)
+            xs = [scale_loc[0] - scale_length / 2, scale_loc[0] + scale_length / 2]
+            ys = [scale_loc[1], scale_loc[1]]
+            sub_ax.plot(xs, ys, color="black", lw=2, zorder=10, alpha=0.8)
+            # add text right below
+            sub_ax.text(
+                scale_loc[0],
+                scale_loc[1] - y_shift,
+                f"{scale_length} m",
+                ha="center",
+                va="center",
+                fontsize=10,
+                color="black",
+                alpha=0.8,
+            )
 
         fig = sub_ax.figure
         plot_util.save_figure(fig, "Environment", save=autosave)

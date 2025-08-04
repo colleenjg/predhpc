@@ -104,7 +104,7 @@ def format_1D_PF_xaxis(sub_ax, scale=params_util.SCALE_LINEAR, num_ticks=7):
     plot_util.expand_ticks(
         sub_ax, axis="x", num_ticks=num_ticks, alternating=True, round_dec=0
     )
-    sub_ax.set_xlabel("Input place field center")
+    sub_ax.set_xlabel("Input place field center (m)")
 
 
 def mark_1D_target(sub_ax, Ag=None, target_shift=0, alpha=0.8):
@@ -187,12 +187,53 @@ def add_1D_position_markers(
             y_1D=y_1D,
             base_s=base_s,
             alpha=use_alpha,
+            lw=LW,
             **kwargs,
         )
 
 
+def configure_neural_activity_axis(sub_ax, ymin=0, ymax=10, right=False, label=True):
+    """
+    configure_neural_activity_axis(sub_ax)
+
+    Configures axes for neural activity plots.
+
+    Args:
+    - sub_ax (plt.Axes): Subplot for which to configure axis.
+    - ymin (float, optional): Minimum value for y axis spine. Default is 0.
+    - ymax (float, optional): Maximum value for y axis spine. Default is 10.
+    - right (bool, optional): IF True, y axis spine and labels are moved to the right.
+        Default is False.
+    - label (bool, optional): If True, y axis label is added. Default is True.
+    """
+
+    sub_ax.set_yticks([ymin, ymax])
+
+    spine = "left"
+    labelpad = 0
+    if right:
+        spine = "right"
+        sub_ax.yaxis.tick_right()
+        sub_ax.yaxis.set_label_position("right")
+        labelpad = 6
+
+    sub_ax.spines[spine].set_visible(True)
+    sub_ax.spines[spine].set_bounds(ymin, ymax)
+    sub_ax.spines["bottom"].set_bounds(0, sub_ax.get_xlim()[1])
+    if label:
+        sub_ax.set_ylabel("Neural activity", labelpad=labelpad)
+
+
 def plot_1D_PF_weights(
-    PCs, weights, shift=0, scale_y=4, alpha=0.8, lw=LW, base=None, sub_ax=None
+    PCs,
+    weights,
+    shift=0,
+    scale_y=4,
+    alpha=0.8,
+    lw=LW,
+    base=None,
+    mark_original=False,
+    sub_ax=None,
 ):
     """
     plot_1D_PF_weights(PCs, weights)
@@ -207,6 +248,8 @@ def plot_1D_PF_weights(
     - alpha (float, optional): Alpha value for the plot line. Default is 0.8.
     - lw (float, optional): Line width for the plot line. Default is LW.
     - base (1D np.ndarray, optional): Base weights to compare against. Default is None.
+    - mark_original (bool, optional): Whether to mark the original weights.
+        Default is False.
     - sub_ax (plt.Axes, optional): Axes to plot on. If None, a new figure and subplot
         are created. Default is None.
 
@@ -220,6 +263,7 @@ def plot_1D_PF_weights(
     PC_centers = PCs.place_cell_centres[:, 0]
     plot_weights = weights * scale_y + shift
 
+    alphas = [0.3, 0.45]
     if base is not None:
         base = base * scale_y + shift
         diff = plot_weights - base
@@ -227,8 +271,18 @@ def plot_1D_PF_weights(
             diff = -diff if i == 1 else diff
             cond = plot_util.get_greater_condition_for_fill_between(diff)
             sub_ax.fill_between(
-                PC_centers, base, plot_weights, color=color, alpha=0.3, lw=0, where=cond
+                PC_centers,
+                base,
+                plot_weights,
+                color=color,
+                alpha=alphas[i],
+                lw=0,
+                where=cond,
             )
+    if mark_original:
+        sub_ax.plot(
+            PC_centers, base, color=PCs.color, alpha=0.5, lw=lw * 0.8, ls="dashed"
+        )
 
     sub_ax.plot(PC_centers, plot_weights, color=PCs.color, alpha=alpha, lw=lw)
     return sub_ax
@@ -328,7 +382,7 @@ def plot_environment(Ag=None):
 
     _, sub_ax = plt.subplots(figsize=(6.2, 0.8))
     sub_ax = plot_fcts.plot_1D_reset_environment(
-        Ag, minimalist=True, title="", base_s=50, sub_ax=sub_ax
+        Ag, minimalist=True, title="", base_s=50, obj_lw=LW, sub_ax=sub_ax
     )
     sub_ax.spines["bottom"].set_linewidth(2.5)
     leg = sub_ax.get_legend()
@@ -448,15 +502,16 @@ def plot_linear_summary(learner=None, max_time_min=1.8):
     plot_kwargs = {
         "hspace": 0.35,
         "height_ratios": [0.1, 0.12, 0.36, 0.14, 0.14, 0.14],
-        "figsize": (6.1, 8.3),
+        "figsize": (5.8, 8.3),
         "lw": LW,
         "s": 1.2,
         "base_s": 25,
     }
 
     Pyr_kwargs = {
-        "norm_by": "shared_max",
-        "BTSP_s": 40,
+        "BTSP_s": 35,
+        "BTSP_lw": LW,
+        "BTSP_marker": (5, 2, 0),  # asterisk
         "separate_axes": True,
         "no_legend": True,
     }
@@ -467,10 +522,12 @@ def plot_linear_summary(learner=None, max_time_min=1.8):
     ax1D = axes[:, 0]
 
     ax1D[0].set_yticks([0, 3, 6])
+    ax1D[0].spines["left"].set_bounds(0, 6)
     plot_util.expand_ticks(
         ax1D[-1], axis="x", num_ticks=9, alternating=True, round_dec=1
     )
-    plot_util.pad_axis(ax1D[0], axis="x", pad_prop=0.02, prop_high=1.0)
+    plot_util.pad_axis(ax1D[0], axis="x", pad_prop=0.01, prop_high=0)
+    ax1D[0].set_xlim([None, ax1D[0].get_xticks()[-1]])
 
     titles = [
         "Trajectories",
@@ -481,10 +538,9 @@ def plot_linear_summary(learner=None, max_time_min=1.8):
         "",
     ]
     for i, title in enumerate(titles):
-        ax1D[i].set_title(title, y=1.06)
-        if i == 3:
-            ax1D[i].set_ylabel("Neural activity", labelpad=12)
-        elif i > 0:
+        y = 1.02 if "Place" in title else 1.06
+        ax1D[i].set_title(title, y=y)
+        if i > 0:
             ax1D[i].set_ylabel("")
 
     for i, comp in enumerate(["soma", "dend", "inhibit"]):
@@ -492,11 +548,16 @@ def plot_linear_summary(learner=None, max_time_min=1.8):
             ax1D[3 + i],
             compartment=comp,
             lw=plot_kwargs["lw"],
-            loc=(0.72, 0.8),
+            loc=(0.71, 0.65),
+            handlelength=1.5,
             frameon=False,
             fontsize=11,
         )
-        ax1D[3 + i].set_ylim(0.95, None)
+
+    # mark axes for neural activity
+    for i, sub_ax in enumerate(ax1D[1:]):
+        label = True if i == 2 else False
+        configure_neural_activity_axis(sub_ax, label=label)
 
     return ax1D
 
@@ -570,6 +631,7 @@ def plot_linear_binned_rates(learner, num_bins=100, max_time_min=1.8):
         "plot_occ": False,
         "mark_runs": True,
         "shared_range": True,
+        "cbar_label": "Neural activity",
     }
 
     learner.Pyrs.plot_binned_rates(axes=ax1D.reshape(-1, 1), **kwargs)
@@ -850,6 +912,7 @@ def plot_PF_cmap(
     y_vals=None,
     cmap_x_corr=1.0027,
     plot_colorbar=True,
+    mark_maxes=True,
     keep_yticks=False,
 ):
     """
@@ -871,6 +934,8 @@ def plot_PF_cmap(
     - cmap_x_corr (float, optional): Correction factor along the x axis for plotting
         scatterplot elements. Default is 1.0022.
     - plot_colorbar (bool, optional): Whether to plot a colorbar. Default is True.
+    - mark_maxes (bool, optional): Whether to mark the maximum values along the x and
+        y axes with horizontal and vertical lines, respectively. Default is True.
     - keep_yticks (bool, optional): Whether to keep the y-ticks on the plot.
         Default is False.
 
@@ -906,15 +971,18 @@ def plot_PF_cmap(
         vmax=vmax,
     )
 
-    scatter_kwargs = {"color": "k", "s": 8, "alpha": 0.6}
+    if mark_maxes:
+        scatter_kwargs = {"color": "k", "s": 8, "alpha": 0.6}
 
-    if len(x_vals) > 1:
-        horiz_max = plot_util.get_cmap_max(PF_cmap_data, axis=1, indexed=x_vals)
-        sub_ax.scatter(horiz_max * cmap_x_corr, y_vals, marker="_", **scatter_kwargs)
+        if len(x_vals) > 1:
+            horiz_max = plot_util.get_cmap_max(PF_cmap_data, axis=1, indexed=x_vals)
+            sub_ax.scatter(
+                horiz_max * cmap_x_corr, y_vals, marker="_", **scatter_kwargs
+            )
 
-    if len(y_vals) > 1:
-        vert_max = plot_util.get_cmap_max(PF_cmap_data, axis=0, indexed=y_vals)
-        sub_ax.scatter(x_vals * cmap_x_corr, vert_max, marker="|", **scatter_kwargs)
+        if len(y_vals) > 1:
+            vert_max = plot_util.get_cmap_max(PF_cmap_data, axis=0, indexed=y_vals)
+            sub_ax.scatter(x_vals * cmap_x_corr, vert_max, marker="|", **scatter_kwargs)
 
     sub_ax.spines[["top", "left", "right"]].set_visible(False)
     if keep_yticks:
@@ -927,12 +995,98 @@ def plot_PF_cmap(
         cbar.set_label("Input weight")
         cbar.ax.yaxis.set_label_position("left")
 
-    sub_ax.set_xlabel("Input place field center")
+    sub_ax.set_xlabel("Input place field center (m)")
 
     return sub_ax
 
 
-def plot_linear_shift_PF_examples(shift_data=None, to_plot=[0.4, -2]):
+def plot_PF_peak_shift(
+    PF_data,
+    sub_ax,
+    initial_peak_idx=0,
+    initial_peak_value=None,
+    s=10,
+    lw=LW,
+    alpha=0.7,
+    x_vals=None,
+    y_vals=None,
+    **arrow_kwargs,
+):
+    """
+    plot_PF_peak_shift(PF_data, sub_ax)
+
+    Plots the peak shifts of place fields in a 1D environment.
+
+    Args:
+    - PF_data (2D np.ndarray): Place field weights to plot (number of place fields x
+        number of inputs).
+    - sub_ax (plt.Axes): Subplot on which to plot the data.
+    - initial_peak_idx (int, optional): Index of the initial peak in the place field
+        weights. Default is 0.
+    - initial_peak_value (float, optional): Value of the initial peak. Default is None.
+    - s (float, optional): Size of the scatter points for the initial peak.
+        Default is 10.
+    - lw (float, optional): Line width for the arrows. Default is LW.
+    - alpha (float, optional): Alpha value for the plot. Default is 0.7.
+    - x_vals (1D np.ndarray, optional): X values for the place field weights. If None,
+        the x-axis is set to the range of the number of inputs. Default is None.
+    - y_vals (1D np.ndarray, optional): Y values for the place field weights. If None,
+        the y-axis is set to the range of the number of place fields. Default is None.
+
+    Keyword args:
+    - **arrow_kwargs: Additional keyword arguments for the arrow properties.
+    """
+
+    if x_vals is None:
+        x_vals = np.arange(PF_data.shape[1])
+
+    if y_vals is None:
+        y_vals = np.arange(PF_data.shape[0])
+
+    y_diff = 0
+    for i, data in enumerate(PF_data):
+        if np.isfinite(data).any():
+            new_peak_idx = np.argmax(data)
+            sub_ax.scatter(
+                x_vals[initial_peak_idx],
+                y_vals[i],
+                marker=".",
+                color="k",
+                alpha=alpha,
+                s=s,
+            )
+            if new_peak_idx != initial_peak_idx:
+                x_start = x_vals[initial_peak_idx]
+                x_end = x_vals[new_peak_idx]
+                if initial_peak_value is not None:
+                    y_diff = data[initial_peak_idx] - initial_peak_value
+
+                sub_ax.arrow(
+                    x_start,
+                    y_vals[i],
+                    x_end - x_start,
+                    y_diff,
+                    facecolor="k",
+                    edgecolor="k",
+                    length_includes_head=True,
+                    alpha=alpha,
+                    lw=lw,
+                    **arrow_kwargs,
+                )
+
+        keep_yticks = False
+        sub_ax.spines[["top", "left", "right"]].set_visible(False)
+        if keep_yticks:
+            sub_ax.tick_params(axis="y", length=0)
+        else:
+            sub_ax.set_yticks([])
+
+        sub_ax.set_xlabel("Input place field center (m)")
+
+
+def plot_linear_shift_PF_examples(
+    shift_data=None, to_plot=[1.0, -0.4], plot_cmap=False
+):
     """
     plot_linear_shift_PF_examples()
 
@@ -943,6 +1097,8 @@ def plot_linear_shift_PF_examples(shift_data=None, to_plot=[0.4, -2]):
         (see run_linear_shifts()). If not provided, data is loaded or experiment is run
         from scratch. Default is None.
     - to_plot (list): List of target shifts to plot. Default is [0.4, -2].
+    - plot_cmap (bool): Whether to plot the place field colormap instead of a peak shift
+        plot. Default is False.
 
     Returns:
     - axes (2D np.ndarray of plt.Axes): Subplots with example place fields plotted.
@@ -954,18 +1110,22 @@ def plot_linear_shift_PF_examples(shift_data=None, to_plot=[0.4, -2]):
     Pyrs = get_linear_Pyrs()
     _, Ag, PCs, _ = ext_util.extract_objects_from_Pyrs(Pyrs)
 
+    figsize = (8.7, 2.4) if plot_cmap else (10.01, 2.4)
+    width_ratios = [1.7, 1] if plot_cmap else [2, 1]
+
     _, axes = plt.subplots(
         len(to_plot),
         2,
-        figsize=(8.7, 2.4),
-        sharex="col",
+        figsize=figsize,
+        sharex=True,
         sharey="col",
-        width_ratios=[1.7, 1],
-        gridspec_kw={"wspace": 0.06, "hspace": 0.4},
+        width_ratios=width_ratios,
+        gridspec_kw={"wspace": 0.08, "hspace": 0.4},
         squeeze=False,
     )
 
     base = shift_data["PF_weights"][0][1]
+    peak_idx = np.argmax(base)
     vmax = np.nanmax(shift_data["PF_weights"])
     for i, target_shift in enumerate(to_plot):
         if target_shift not in shift_data["target_shifts"]:
@@ -977,19 +1137,34 @@ def plot_linear_shift_PF_examples(shift_data=None, to_plot=[0.4, -2]):
             scale_y=1,
             base=base,
             sub_ax=axes[i, 0],
+            mark_original=True,
         )
-        axes[i, 0].text(5.0, 0.2, f"{to_plot[i]} m shift", ha="center", fontsize=12)
+        axes[i, 0].text(1.2, 0.22, f"{to_plot[i]} m shift", ha="center", fontsize=12)
+        mark_1D_target(axes[i, 0], Ag=Ag, target_shift=target_shift)
 
         data = shift_data["PF_weights"][idx : idx + 1, -1]
-        plot_PF_cmap(
-            data,
-            sub_ax=axes[i, 1],
-            vmax=vmax,
-            x_vals=PCs.place_cell_centres[:, 0],
-            plot_colorbar=False,
-        )
-        for sub_ax in axes[i]:
-            mark_1D_target(sub_ax, Ag=Ag, target_shift=target_shift)
+        if plot_cmap:
+            plot_PF_cmap(
+                data,
+                sub_ax=axes[i, 1],
+                vmax=vmax,
+                x_vals=PCs.place_cell_centres[:, 0],
+                plot_colorbar=False,
+            )
+            mark_1D_target(axes[i, 1], Ag=Ag, target_shift=target_shift)
+
+        else:
+            plot_PF_peak_shift(
+                data.reshape(1, -1),
+                sub_ax=axes[i, 1],
+                initial_peak_idx=peak_idx,
+                # initial_peak_value=base[peak_idx],
+                s=35,
+                lw=LW,
+                x_vals=PCs.place_cell_centres[:, 0],
+                head_width=0.1,
+                head_length=0.1,
+            )
 
     for sub_ax in axes[:, 0]:
         sub_ax.set_ylim([0, 0.28])
@@ -998,9 +1173,12 @@ def plot_linear_shift_PF_examples(shift_data=None, to_plot=[0.4, -2]):
         plot_util.expand_ticks(
             sub_ax, axis="y", num_ticks=3, alternating=True, round_dec=2
         )
+
+    for sub_ax in axes.ravel():
         format_1D_PF_xaxis(sub_ax)
 
     axes[-1, 0].set_ylabel("Input weight", va="top", labelpad=15)
+
     for sub_ax in axes[:, 1]:
         sub_ax.set_ylim(-0.8, 0.8)
 
@@ -1014,7 +1192,7 @@ def plot_linear_shift_PF_examples(shift_data=None, to_plot=[0.4, -2]):
     return axes
 
 
-def plot_target_shift_PFs(shift_data=None, examples=[0.4, -2]):
+def plot_target_shift_PFs(shift_data=None, examples=[1.0, -0.4], plot_cmap=False):
     """
     plot_target_shift_PFs()
 
@@ -1025,7 +1203,9 @@ def plot_target_shift_PFs(shift_data=None, examples=[0.4, -2]):
     - shift_data (dict): Dictionary containing target shift-related data
         (see run_linear_shifts()). If not provided, data is loaded or experiment is run
         from scratch. Default is None.
-    - examples (list): List of target shifts to plot arrows for. Default is [0.4, -2].
+    - examples (list): List of target shifts to plot arrows for. Default is [1.0, -0.4].
+    - plot_cmap (bool): Whether to plot the place field colormap instead of a peak shift
+        plot. Default is False.
 
     Returns:
     - ax1D (1D np.ndarray of plt.Axes): Subplots with target shifts and place field
@@ -1038,20 +1218,27 @@ def plot_target_shift_PFs(shift_data=None, examples=[0.4, -2]):
     Pyrs = get_linear_Pyrs()
     _, Ag, PCs, _ = ext_util.extract_objects_from_Pyrs(Pyrs)
 
-    _, ax1D = plt.subplots(
+    width_ratios = [1.2, 1] if plot_cmap else [2, 1]
+    _, axes = plt.subplots(
         1,
         2,
-        figsize=(10.01, 4),
-        width_ratios=[1.2, 1],
-        gridspec_kw={"wspace": 0.05},
+        figsize=(10.01, 4.3),
         sharey=True,
+        squeeze=False,
+        width_ratios=width_ratios,
+        gridspec_kw={"wspace": 0.07, "hspace": 0.4},
     )
+
+    ax1D = axes[0, :]
 
     base = shift_data["PF_weights"][0][1]
     base_shift = np.nanmin(base)
     base_shifted = base - base_shift
-    plot_1D_PF_weights(PCs, base_shifted, lw=1.8, sub_ax=ax1D[0])
 
+    scale_y = 4
+    plot_1D_PF_weights(PCs, base_shifted, lw=1.8, sub_ax=ax1D[0], scale_y=scale_y)
+
+    peak_idx = np.argmax(base)
     for i, shift in enumerate(shift_data["target_shifts"]):
         last_shifted = shift_data["PF_weights"][i, -1] - base_shift
         if np.isfinite(last_shifted.all()):
@@ -1063,8 +1250,10 @@ def plot_target_shift_PFs(shift_data=None, examples=[0.4, -2]):
                 lw=1.0,
                 sub_ax=ax1D[0],
             )
-    format_1D_PF_xaxis(ax1D[0])
-    ax1D[0].set_ylabel("Target object shift", labelpad=13)
+
+    for sub_ax in ax1D:
+        format_1D_PF_xaxis(sub_ax)
+    ax1D[0].set_ylabel("Target object shift (m)", labelpad=13)
 
     ymin = shift_data["target_shifts"].min()
     ymax = shift_data["target_shifts"].max()
@@ -1072,37 +1261,53 @@ def plot_target_shift_PFs(shift_data=None, examples=[0.4, -2]):
     ax1D[0].spines["left"].set_bounds(ymin, ymax)
     ax1D[0].set_yticks(yticks)
 
-    cmap_data = shift_data["PF_weights"][:, -1]
+    data = shift_data["PF_weights"][:, -1]
     for idx in np.where(shift_data["target_shifts"] == 0)[0]:
-        cmap_data[idx] = shift_data["PF_weights"][idx, 1]
+        data[idx] = shift_data["PF_weights"][idx, 1]
 
-    plot_PF_cmap(
-        cmap_data,
-        sub_ax=ax1D[1],
-        x_vals=PCs.place_cell_centres[:, 0],
-        y_vals=shift_data["target_shifts"],
-        keep_yticks=True,
-    )
-
-    x_loc = gen_util.get_proportion_edges(PCs.place_cell_centres, 0.01)
-    for target_shift in examples:
-        if target_shift not in shift_data["target_shifts"]:
-            raise RuntimeError(f"{target_shift} shift not found in data dictionary.")
-        idx = np.where(shift_data["target_shifts"] == target_shift)[0][0]
-        ax1D[1].scatter(
-            x_loc,
-            shift_data["target_shifts"][idx],
-            color=PCs.color,
-            marker=">",
-            s=10,
-            zorder=5,
+    if plot_cmap:
+        plot_PF_cmap(
+            data,
+            sub_ax=ax1D[1],
+            x_vals=PCs.place_cell_centres[:, 0],
+            y_vals=shift_data["target_shifts"],
+            keep_yticks=True,
+        )
+    else:
+        plot_PF_peak_shift(
+            data * scale_y,
+            sub_ax=ax1D[1],
+            initial_peak_idx=peak_idx,
+            # initial_peak_value=base[peak_idx] * scale_y,
+            x_vals=PCs.place_cell_centres[:, 0],
+            y_vals=shift_data["target_shifts"],
+            lw=LW * 0.8,
+            head_width=0.04,
+            head_length=0.04,
         )
 
-    for sub_ax in ax1D:
+        x_loc = gen_util.get_proportion_edges(PCs.place_cell_centres, 0.01)
+        for target_shift in examples:
+            if target_shift not in shift_data["target_shifts"]:
+                raise RuntimeError(
+                    f"{target_shift} shift not found in data dictionary."
+                )
+            idx = np.where(shift_data["target_shifts"] == target_shift)[0][0]
+            ax1D[1].scatter(
+                x_loc,
+                shift_data["target_shifts"][idx],
+                color=PCs.color,
+                marker=">",
+                s=10,
+                zorder=5,
+            )
+
+    for i, sub_ax in enumerate(ax1D):
         add_1D_position_markers(
             sub_ax, Ag=Ag, y_1D=sub_ax.get_ylim()[1], target_alpha=0.5
         )
-        mark_1D_target(sub_ax, Ag=Ag, alpha=0.4)
+        if i == 0 or plot_cmap:
+            mark_1D_target(sub_ax, Ag=Ag, alpha=0.4)
 
     plot_util.pad_axis(ax1D[0], axis="y", pad_prop=0.05)
 

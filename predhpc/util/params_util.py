@@ -39,7 +39,10 @@ BASE_LR = 4e-5
 TOLERANCE_LINEAR = 0.55
 TOLERANCE_2D = 5
 
-OBJ_COLOR = "#22772E"  # dark green
+TARGET_COLOR = "#3C539B"  # blue
+NOVEL_COLOR = "#22772E"  # dark green
+
+OBJ_COLOR = TARGET_COLOR
 PC_COLOR = "#99193A"  # dark red
 PYR_SOMA_COLOR = "#8787C9"  # light purple
 PYR_DEND_COLOR = "#3D3D79"  # dark purple

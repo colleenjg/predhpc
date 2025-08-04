@@ -111,6 +111,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         self,
         t_start: float | None = None,
         t_end: float | None = None,
+        chosen_neurons: str | int | list | np.ndarray = "all",
     ):
         """
         self.get_min_max_firingrates()
@@ -122,6 +123,8 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
             Default is None.
         - t_end (float, optional): Stop time for obtaining firingrate min and max.
             Default is None.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
+            Default is "all".
 
         Returns:
         - min_firingrate (float): Minimum firing rate.
@@ -131,8 +134,10 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         _, startid, endid = self.get_plotting_times(t_start, t_end)
         firingrates = np.asarray(self.history["firingrate"])[startid : endid + 1]
 
-        min_firingrate = np.min(firingrates)
-        max_firingrate = np.max(firingrates)
+        chosen_neurons = self.get_chosen_neurons(chosen_neurons)
+
+        min_firingrate = np.min(firingrates[:, chosen_neurons])
+        max_firingrate = np.max(firingrates[:, chosen_neurons])
 
         return min_firingrate, max_firingrate
 
@@ -473,6 +478,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         mark_runs: bool = False,
         plot_colorbars: bool = True,
         cbar_aspect: int = 12,
+        cbar_label: str = "Firing rate",
         autosave: bool | None = None,
     ) -> plt.Axes | np.ndarray:
         """
@@ -505,6 +511,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         - mark_runs (bool, optional): Whether to mark runs in the plot. Default is False.
         - plot_colorbars (bool, optional): Whether to plot colorbars. Default is True.
         - cbar_aspect (int, optional): Aspect ratio of the colorbar. Default is 12.
+        - cbar_label (str, optional): Label for the colorbar. Default is "Firing rate".
         - autosave (bool, optional): Whether to autosave the figure. If None, the
             global autosave setting for ratinabox is used. Default is None.
 
@@ -539,6 +546,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
             mark_runs=mark_runs,
             plot_colorbars=plot_colorbars,
             cbar_aspect=cbar_aspect,
+            cbar_label=cbar_label,
         )
 
         for i in chosen_neurons:
@@ -581,9 +589,13 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         self,
         t_start: float | None = None,
         t_end: float | None = None,
+        chosen_neurons: str | int | list | np.ndarray = "all",
         sub_ax: plt.Axes | None = None,
         adjust_xlim: bool = True,
         in_min: bool = True,
+        imshow: bool = False,
+        norm_by: str | None = None,
+        lw: float = 1.0,
         autosave: bool | None = None,
         **kwargs,
     ) -> plt.Axes:
@@ -597,12 +609,17 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
             Default is None.
         - t_end (float, optional): Time at which to stop plotting data.
             Default is None.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
+            Default is "all".
         - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
             created. Default is None.
         - adjust_xlim (bool, optional): Whether to adjust the x limits to the start
             and stop times. Default is True.
         - in_min (bool, optional): Whether to plot time in minutes instead of seconds.
             Default is True.
+        - norm_by (str, optional): Normalization method for the firing rates. If "none",
+            parameters are chosen so no normalization is applied. Default is None.
+        - lw (float, optional): Line width for the firing rate timeseries. Default is 1.0.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
         global autosave setting for ratinabox is used. Default is None.
 
@@ -612,6 +629,9 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         Returns:
         - sub_ax (plt.Axes): Subplot with firing rate timeseries plotted.
         """
+
+        if "linewidth" in kwargs.keys():
+            lw = kwargs.pop("linewidth")
 
         if not in_min:
             raise NotImplementedError("Plotting in seconds is not implemented.")
@@ -624,12 +644,34 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         t_start = t[0]
         t_end = t[-1]
 
+        adjust_ylim = False
+        if not imshow and norm_by == "none":
+            adjust_ylim = True
+            kwargs["norm_by"] = 1
+            kwargs["overlap"] = 1
+            kwargs["global_shift"] = -1
+        else:
+            kwargs["norm_by"] = norm_by
+
         _, sub_ax = super().plot_rate_timeseries(
             t_start=t_start,
             t_end=t_end,
+            chosen_neurons=chosen_neurons,
+            linewidth=lw,
+            imshow=imshow,
             autosave=False,
             **kwargs,
         )
+
+        if adjust_ylim:
+            chosen_neurons = self.get_chosen_neurons(chosen_neurons)
+            min_fr, max_fr = self.get_min_max_firingrates(
+                t_start=t_start, t_end=t_end, chosen_neurons=chosen_neurons
+            )
+            ymin = min(0, min_fr / kwargs["norm_by"])
+            ymax = max_fr / kwargs["norm_by"] + len(chosen_neurons) - 1
+            sub_ax.set_ylim(ymin, ymax)
+            plot_util.pad_axis(sub_ax, pad_prop=0.2, axis="y")
 
         xlabel = "Time (min)" if in_min else "Time (s)"
         sub_ax.set_xlabel(xlabel)
@@ -875,7 +917,17 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
 
         return shuffle_sorter
 
-    def plot_place_cell_locations(self, sub_ax=None, autosave=None, **kwargs):
+    def plot_place_cell_locations(
+        self,
+        sub_ax=None,
+        s=15,
+        marker="x",
+        alpha=0.8,
+        chosen_neurons="all",
+        plot_env=True,
+        autosave=None,
+        **kwargs,
+    ):
         """
         self.plot_place_cell_locations()
 
@@ -885,6 +937,14 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
         Args:
         - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
             created. Default is None.
+        - s (int, optional): Size of the markers. Default is 15.
+        - marker (str, optional): Marker style for the place cell locations.
+            Default is "x".
+        - alpha (float, optional): Alpha transparency of the markers. Default is 0.8.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
+            Default is "all".
+        - plot_env (bool, optional): Whether to plot the environment if a subplot is
+            provided. Default is True.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
             global autosave setting for ratinabox is used. Default is None.
 
@@ -899,11 +959,15 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
         if sub_ax is not None:
             fig = sub_ax.figure
 
-        sub_ax = self.Agent.Environment.plot_environment(
-            sub_ax=sub_ax, alpha=0.6, autosave=False, **kwargs
-        )
+        if plot_env or sub_ax is None:
+            sub_ax = self.Agent.Environment.plot_environment(
+                sub_ax=sub_ax, alpha=0.6, autosave=False, **kwargs
+            )
 
         place_cell_centres = self.place_cell_centres
+        if not isinstance(chosen_neurons, str) or chosen_neurons != "all":
+            chosen_neurons = self.get_chosen_neurons(chosen_neurons)
+            place_cell_centres = place_cell_centres[chosen_neurons]
 
         x = place_cell_centres[:, 0]
         if self.Agent.Environment.dimensionality == "1D":
@@ -911,7 +975,7 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
         elif self.Agent.Environment.dimensionality == "2D":
             y = place_cell_centres[:, 1]
 
-        sub_ax.scatter(x, y, c="C1", marker="x", s=15, zorder=2)
+        sub_ax.scatter(x, y, c=self.color, alpha=alpha, marker=marker, s=s, zorder=2)
 
         plot_util.save_figure(fig, f"{self.name}_place_cell_locations", save=autosave)  # type: ignore[attr-defined]
 

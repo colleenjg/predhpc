@@ -109,6 +109,7 @@ def get_proportion_edges(data, prop=0.5):
     - prop_val (float): Value at the specified proportion of the data's range.
     """
 
+    data = np.asarray(data)
     extent = data.max() - data.min()
     prop_val = data.min() + extent * prop
 

@@ -1269,11 +1269,19 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         return reached_df
 
-    def get_reached_position_steps(self, position_name: str = "reset") -> np.ndarray:
+    def get_reached_position_steps(
+        self, position_name: str = "reset", min_steps_btw: int = 0
+    ) -> np.ndarray:
         """
         self.get_reached_position_steps()
 
         Obtain the steps at which the agent reached the specified position.
+
+        Args:
+        - position_name (str, optional): Name of the position to check for.
+            Options are 'start', 'reset', or 'target'. Default is 'reset'.
+        - min_steps_btw (int, optional): Minimum difference between steps to consider.
+            Default is 0.
 
         Returns:
         - reached_position_steps (1D np.ndarray): Steps at which the agent
@@ -1296,7 +1304,25 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         reached_position_steps = reached_position_steps.astype(int)
 
+        if min_steps_btw > 0 and len(reached_position_steps) > 1:
+            step_diff = np.diff(reached_position_steps)
+            keep_steps = np.concatenate(
+                [[0], np.where(step_diff >= min_steps_btw)[0] + 1]
+            )
+            reached_position_steps = reached_position_steps[keep_steps]
+
         return reached_position_steps
+
+        # last_t_sec = -np.inf
+        # for step in steps:
+        #     if step == len(Pyrs.Agent.history["t"]):
+        #         if step - 1 in steps:
+        #             continue
+        #         else:
+        #             step = step - 1
+        #     t_sec = Pyrs.Agent.history["t"][step]
+        #     if t_sec < last_t_sec + min_t_sec:
+        #         continue
 
     def get_distances_from_target(self, norm=True):
         """
@@ -2013,11 +2039,13 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         self,
         sub_ax,
         position_name="start",
+        y=None,
         base_s=15,
         t_start=None,
         t_end=None,
         in_min=True,
         dim_idx=0,
+        min_steps_btw=0,
         raise_error=True,
         **kwargs,
     ):
@@ -2043,14 +2071,18 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         - **kwargs: Additional keyword arguments passed to plt.scatter().
         """
 
-        y = self.get_position(
+        pos_y = self.get_position(
             position_name=position_name, dim_idx=dim_idx, raise_error=raise_error
         )
 
-        if y is None:
+        if pos_y is None:
             return
 
-        indices = self.get_reached_position_steps(position_name)
+        y = pos_y if y is None else y
+
+        indices = self.get_reached_position_steps(
+            position_name, min_steps_btw=min_steps_btw
+        )
         if len(indices) == 0:
             if raise_error:
                 raise ValueError(f"No {position_name} positions reached.")
@@ -2079,6 +2111,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         color: str = "k",
         s: int | float | None = None,
         base_s: int | float | None = None,
+        obj_lw: float = 1,
         plot_targets: bool = True,
         rasterize_traj: bool = False,
         xlim: float | None = None,
@@ -2108,6 +2141,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             defaults are used. Default is None.
         - base_s (float, optional): Base size of scatterplot markers for objects in
             environment. If None, defaults are used. Default is None.
+        - obj_lw (float, optional): Line width for objects. Default is 1.
         - plot_targets (bool, optional): Whether to plot the target. Default is True.
         - rasterize_traj (bool, optional): Whether to rasterize the trajectory scatter
             points, reducing the size of exported vector files. Default is False.
@@ -2168,6 +2202,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                     sub_ax,
                     position_name=position_name,
                     base_s=base_s,
+                    lw=obj_lw,
                     alpha=alpha_pts,
                     t_start=t_start,
                     t_end=t_end,
@@ -2244,7 +2279,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             s=s,
             zorder=3,
             c=agent_color,
-            linewidth=0,
+            lw=0,
             marker="o",
             alpha=alpha,
         )
@@ -2265,7 +2300,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 alpha=alpha,
                 zorder=zorder,
                 c=agent_color,
-                linewidth=0,
+                lw=0,
                 marker=rotated_agent_marker,
             )
 
@@ -2412,7 +2447,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 alpha=alpha,
                 zorder=2,
                 c=colors,
-                linewidth=0,
+                lw=0,
                 rasterized=rasterize_traj,
             )
 
@@ -4579,7 +4614,7 @@ class OpenFieldAgent(ResetableAgent):
                 [start_pos[0], target_row["position_x"]],
                 [start_pos[1], target_row["position_y"]],
                 color=color,
-                linewidth=lw,
+                lw=lw,
                 linestyle=ls,
                 alpha=alpha,
                 zorder=1,
