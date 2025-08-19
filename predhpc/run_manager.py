@@ -47,7 +47,8 @@ class VNUpdater:
         rewards = Agent.Environment.get_object_locations("reward")
         if len(rewards) != 1:
             raise ValueError(
-                "VNUpdater requires exactly one reward object in the environment."
+                "VNUpdater requires exactly one reward object in the environment, "
+                f"but found {len(rewards)}."
             )
 
         VN_params = params_util.get_VN_params(peak=rewards[0])

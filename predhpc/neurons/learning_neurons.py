@@ -4619,7 +4619,7 @@ class NMDACurrent(object):
         evaluate_at="last",
         return_all: bool = False,
         dt: float | None = None,
-        **catchall_kwargs,
+        **kwargs,
     ):
         """
         self.get_state()
@@ -4634,7 +4634,7 @@ class NMDACurrent(object):
         - dt (float, optional): Time step. Default is None.
 
         Keyword args:
-        - **catchall_kwargs: Ignored keyword arguments (hacky!)
+        - **kwargs: Mostly ignored keyword arguments (hacky!)
 
         Returns:
         - current (1D np.ndarray): State of the NMDA current for each neuron.

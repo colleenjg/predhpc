@@ -1,11 +1,11 @@
 import numpy as np
 
-from predhpc.util import signal_util
+from predhpc.util import ext_util, signal_util
 
 WIDTH = 0.5  # symmetical width (m) around PC peak to use for pre/post weight ratio
 
 
-def get_PC_info(Pyrs, PC_name="PCs"):
+def get_PC_info(Pyrs, PC_name="PCs", smoothed=False, effective=False, max_recurrence=8):
     """
     get_PC_info(Pyrs)
 
@@ -13,6 +13,14 @@ def get_PC_info(Pyrs, PC_name="PCs"):
 
     Args:
     - Pyrs (two_comp_neurons.TwoCompLayer): Pyr. layer.
+    - PC_name (str, optional): Name of the place cell layer. Default is "PCs".
+    - smoothed (bool, optional): Whether to return smoothed weights, if effective is
+        False. Default is False.
+    - effective (bool, optional): Whether to return effective weights corresponding to
+        the output of the Pyramidal layer based on the input weights. Default is False.
+    - max_recurrence (int, optional): Maximum number of time get_state() recursively calls
+        recurrent inputs (prevents infinite recursion error). Appears to stabilize
+        after about 7. Default is 5.
 
     Returns:
     - PC_weights (np.ndarray): Sorted place cell weights.
@@ -32,11 +40,30 @@ def get_PC_info(Pyrs, PC_name="PCs"):
     if PC_name not in Pyrs.inputs.keys():
         raise KeyError(f"PC name '{PC_name}' not found in Pyrs inputs.")
 
-    PC_centres = Pyrs.inputs["PCs"]["layer"].place_cell_centres[:, 0]
+    PCs = Pyrs.inputs["PCs"]["layer"]
+
+    PC_centres = PCs.place_cell_centres[:, 0]
     sorter = np.argsort(PC_centres)
     PC_centres = PC_centres[sorter]
 
-    PC_weights = Pyrs.inputs["PCs"]["w"][0][sorter]
+    if effective:
+        if smoothed:
+            raise ValueError("smoothed and effective cannot both be True.")
+        PC_weights = Pyrs.get_state(
+            evaluate_at="pos",
+            pos=PC_centres.reshape(-1, 1),
+            max_recurrence=max_recurrence,
+        )[0]
+
+    else:
+        PC_weights = Pyrs.inputs["PCs"]["w"][0][sorter]
+
+        if smoothed:
+            sigma_in_steps = float(PCs.widths) / np.absolute(np.diff(PC_centres)).mean()
+            PC_weights = Pyrs.inputs["PCs"]["w"][0][sorter]
+            PC_weights = signal_util.smooth_kernel(
+                PC_weights, sigma_in_steps
+            )  # change to smooth circularly!
 
     if not np.isfinite(PC_weights).all():
         peak_idx = None

@@ -70,7 +70,7 @@ def load_np_dict(filepath):
     data_dict = None
     if filepath.is_file():
         print(f"Loading data from {filepath}.")
-        data_dict = np.load(filepath)
+        data_dict = dict(np.load(filepath))
     return data_dict
 
 
@@ -92,6 +92,51 @@ def save_np_dict(filepath, data_dict):
         print(f"Saving data to {filepath}.")
 
     np.savez(filepath, **data_dict)
+
+
+def get_filtered_np_data_dict(data_dict, filter_key, values=list(), skip_keys=list()):
+    """
+    get_filtered_np_data_dict(data_dict, filter_key)
+
+    Obtain a filtered version of a numpy data dictionary to retain for each key only
+    the indices corresponding to specified values for a specified filtering key.
+
+    Args:
+    - data_dict (dict): Dictionary to filter.
+    - key (str): Key to filter on.
+    - values (list, optional): List of values to keep. Default is empty list.
+    - skip_keys (list, optional): List of keys to skip. Default is empty list.
+
+    Returns:
+    - filtered_dict (dict): Filtered dictionary.
+    """
+
+    if filter_key not in data_dict.keys():
+        raise KeyError(f"Filter key '{filter_key}' not found in data dictionary.")
+
+    indices = list()
+    for val in values:
+        if val not in data_dict[filter_key]:
+            raise RuntimeError(
+                f"{val} value not found in data dictionary under '{filter_key}'."
+            )
+        idxs = np.where(data_dict[filter_key] == val)[0]
+        indices.extend(idxs.tolist())
+
+    num = len(data_dict[filter_key])
+
+    data_dict = data_dict.copy()
+    for key in list(data_dict.keys()):
+        if key in skip_keys:
+            continue
+        if len(data_dict[key]) != num:
+            raise RuntimeError(
+                f"Expected all keys to filter to have the same length as '{filter_key}' "
+                f"({num}), but found {len(data_dict[key])} for '{key}'."
+            )
+        data_dict[key] = data_dict[key][indices]
+
+    return data_dict
 
 
 def get_proportion_edges(data, prop=0.5):

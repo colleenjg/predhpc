@@ -55,9 +55,14 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         • self.trajectory_df_columns
 
     List of methods (in addition to ratinabox.Agent methods):
+        • self.get_step_and_time()
+        • self.get_speed()
+        • self.get_speed_mean()
+        • self.log_speed_stats()
+        • self.get_plotting_times()
         • self.format_position()
-        • self.set_target_position
-        • self.set_all_positions
+        • self.set_target_position()
+        • self.set_all_positions()
         • self.reverse()
         • self.set_position_and_velocity()
         • self.sample_position_within_tolerance()
@@ -554,6 +559,51 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             speed = signal_util.smooth_data(speed.T, k=smooth_k).T
 
         return speed
+
+    def get_speed_mean(
+        self,
+        min_history: int = 1000,
+        linear: bool = True,
+        directional: bool = False,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        cm: bool = True,
+        ignore_near_zero: bool = False,
+        thr: float = 1e-4,
+    ):
+        """
+        self.get_speed_mean()
+
+        Get the mean speed of the agent.
+
+        Args:
+        - min_history (int, optional): Minimum history length to consider for mean
+            speed calculation. Default is 1000.
+
+        Returns:
+        - mean_speed (float): Mean speed of the agent.
+        """
+
+        if len(self.history["vel"]) < min_history:
+            raise NotImplementedError(
+                "Not implemented, but should return a theoretical mean speed based "
+                "on agent parameters."
+            )
+
+        else:
+            speed = self.get_speed(
+                linear=linear,
+                directional=directional,
+                t_start=t_start,
+                t_end=t_end,
+                cm=cm,
+                ignore_near_zero=ignore_near_zero,
+                thr=thr,
+            )
+
+            mean_speed = np.mean(speed)
+
+        return mean_speed
 
     def log_speed_stats(
         self,
