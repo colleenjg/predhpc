@@ -178,6 +178,7 @@ def run_linear_track(
     target_moved=0,
     disable_tqdm=False,
     plot=True,
+    PF_kwargs=dict(),
     **Pyr_kwargs,
 ):
     """
@@ -209,6 +210,8 @@ def run_linear_track(
         Default is 0.
     - disable_tqdm (bool, optional): Whether to disable tqdm. Default is False.
     - plot (bool, optional): Whether to generate plots. Default is True.
+    - PF_kwargs (dict, optional): Keyword arguments passed to place field analysis
+        functions. Default is an empty dictionary.
 
     Keyword args:
     - **Pyr_kwargs (dict): Keyword arguments passed to params_util.get_Pyr_params().
@@ -276,7 +279,7 @@ def run_linear_track(
             "time_axes": outputs[2],
         }
 
-    BTSP_metrics = metrics.compute_BTSP_metrics(Pyrs)
+    BTSP_metrics = metrics.compute_BTSP_metrics(Pyrs, **PF_kwargs)
 
     if plot:
         return BTSP_metrics, plot_dict

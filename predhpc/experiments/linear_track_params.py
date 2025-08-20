@@ -149,6 +149,7 @@ def run_linear_track(
     target_moved=0,
     disable_tqdm=False,
     plot=True,
+    PF_kwargs=dict(),
     **kwargs,
 ):
     """
@@ -169,6 +170,8 @@ def run_linear_track(
         the return linear track is run. Default is 0.
     - disable_tqdm (bool, optional): Whether to disable tqdm. Default is False.
     - plot (bool, optional): Whether to generate plots. Default is True.
+    - PF_kwargs (dict, optional): Keyword arguments passed to place field analysis
+        functions. Default is an empty dictionary.
 
     Keyword args:
     - **kwargs (dict): Keyword arguments passed to linear_track.get_Pyrs().
@@ -219,7 +222,9 @@ def run_linear_track(
             raise RuntimeError(f"Only {num_traj_completed} trajectories completed.")
 
         t_start = int(Pyrs.Agent.trajectory_df.loc[skip_runs + prev, "start_time"])
-        mode_BTSP_metrics = metrics.compute_BTSP_metrics(Pyrs, t_start=t_start)
+        mode_BTSP_metrics = metrics.compute_BTSP_metrics(
+            Pyrs, t_start=t_start, **PF_kwargs
+        )
 
         add_str = f"_({mode})" if len(modes) > 1 else ""
         for key, value in mode_BTSP_metrics.items():

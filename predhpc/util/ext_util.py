@@ -63,7 +63,7 @@ def extract_objects_from_Pyrs(Pyrs):
         if not hasattr(Objs, "input_object_types"):
             raise RuntimeError(f"Objs incorrectly identified. Got {type(Objs)}.")
 
-    if not hasattr(PCs, "place_cell_centres"):
+    if not hasattr(PCs, "place_cell_centers"):
         raise RuntimeError(f"PCs incorrectly identified. Got {type(PCs)}.")
 
     return Env, Ag, PCs, Objs
@@ -756,6 +756,49 @@ def estimate_1D_place_cell_density(PCs):
             raise NotImplementedError(f"Env type {type(Env)} not supported.")
 
     return PC_density_1D
+
+
+def choose_t_start_after_BTSP(
+    NeuronLayer, t_buffer=6, next_trajectory=False, min_total=60
+):
+    """
+    choose_t_start_after_BTSP
+
+    Obtain a start time after the last BTSP event.
+
+    Args:
+    - NeuronLayer: The neuron layer object.
+    - t_buffer (float): Time buffer to add after the last BTSP event.
+    - next_trajectory (bool): Whether to use the next trajectory's start time.
+    - min_total (float): Minimum total time required after the last BTSP event.
+
+    Returns:
+    - t_start (float): The chosen start time.
+    """
+
+    BTSP_applied = NeuronLayer.get_BTSP_steps(applied_only=True, apply_step=True)
+    if len(BTSP_applied) == 0:
+        t_start = 0
+    else:
+        t_start = BTSP_applied[-1] * NeuronLayer.Agent.dt + t_buffer
+        if next_trajectory:
+            traj_df = NeuronLayer.Agent.trajectory_df
+            sub_df = traj_df.loc[traj_df["start_time"] > t_start]
+            if len(sub_df) == 0:
+                raise RuntimeError(
+                    "No new trajectories found after last BTSP was event was "
+                    f"applied using buffer of {t_buffer} seconds."
+                )
+            t_start = sub_df.loc[sub_df.index[0]]["start_time"]
+
+    total_time = NeuronLayer.Agent.t - t_start
+    if total_time < min_total:
+        raise RuntimeError(
+            f"Insufficient time after last BTSP event {total_time:.2f} seconds "
+            f"(minimum requested is {min_total} seconds)."
+        )
+
+    return t_start
 
 
 def create_weights_dict(weights, steps, t, steps_triggered=None):

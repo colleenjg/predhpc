@@ -980,7 +980,7 @@ def learn_openfield_BTSP(
 
     learner = learn(
         Pyrs_or_learner,
-        BTSP_on=0,
+        BTSP_on=None,
         max_num_steps=max_num_steps,
         finish_trajectory=finish_trajectory,
         record_weights_at_BTSP=record_weights_at_BTSP,

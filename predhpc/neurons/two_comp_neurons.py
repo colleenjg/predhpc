@@ -50,9 +50,9 @@ class TwoCompLayer(object):
     List of methods:
         • self.set_learn()
         • self.set_BTSP_learn()
-        • self.get_place_cell_centre_of_main_dendrite_input()
-        • self.get_vectors_to_place_cell_centre_of_main_dendrite_input()
-        • self.get_distances_to_place_cell_centre_of_main_dendrite_input()
+        • self.get_place_cell_center_of_main_dendrite_input()
+        • self.get_vectors_to_place_cell_center_of_main_dendrite_input()
+        • self.get_distances_to_place_cell_center_of_main_dendrite_input()
         • self.get_closest_steps_to_target()
         • self.match_closest_to_target_steps_to_BTSP_steps()
         • self.update()
@@ -461,13 +461,13 @@ class TwoCompLayer(object):
 
         return input_idx
 
-    def get_place_cell_centre_of_main_dendrite_input(
+    def get_place_cell_center_of_main_dendrite_input(
         self, neuron_idx: int = 0, src_name: str = "Obj"
     ):
         """
-        self.get_place_cell_centre_of_main_dendrite_input()
+        self.get_place_cell_center_of_main_dendrite_input()
 
-        Get the place cell centre input location for the dendrite of a specified neuron.
+        Get the place cell center input location for the dendrite of a specified neuron.
 
         Args:
         - neuron_idx (int, optional): Neuron index. Default is 0.
@@ -475,7 +475,7 @@ class TwoCompLayer(object):
             (must be a place cell-derived layer). Default is "Obj".
 
         Returns:
-        - place_cell_centre (1D np.ndarray): Main dendrite input place cell centre
+        - place_cell_center (1D np.ndarray): Main dendrite input place cell center
             location.
         """
 
@@ -485,11 +485,11 @@ class TwoCompLayer(object):
 
         input_layer = self.DendriteCompartment.inputs[src_name]["layer"]
 
-        place_cell_centre = input_layer.place_cell_centres[input_idx]
+        place_cell_center = input_layer.place_cell_centers[input_idx]
 
-        return place_cell_centre
+        return place_cell_center
 
-    def get_vectors_to_place_cell_centre_of_main_dendrite_input(
+    def get_vectors_to_place_cell_center_of_main_dendrite_input(
         self,
         neuron_idx: int = 0,
         src_name: str = "Obj",
@@ -497,9 +497,9 @@ class TwoCompLayer(object):
         radians: bool = False,
     ):
         """
-        self.get_vectors_to_place_cell_centre_of_main_dendrite_input()
+        self.get_vectors_to_place_cell_center_of_main_dendrite_input()
 
-        Get the vectors from the agent's current position to the place cell centre
+        Get the vectors from the agent's current position to the place cell center
         input location for the dendrite of a specified neuron.
 
         Args:
@@ -513,27 +513,27 @@ class TwoCompLayer(object):
 
         Returns:
         - vectors (2D np.ndarray): Vectors from agent's position to dendrite input
-            place cell centre.
+            place cell center.
         """
 
-        place_cell_centre = self.get_place_cell_centre_of_main_dendrite_input(
+        place_cell_center = self.get_place_cell_center_of_main_dendrite_input(
             neuron_idx=neuron_idx, src_name=src_name
         )
         pos = np.asarray(self.Agent.history["pos"])
 
         vectors = trig_util.get_vectors_to_target(
-            pos, target=place_cell_centre, polar=polar, radians=radians
+            pos, target=place_cell_center, polar=polar, radians=radians
         )
 
         return vectors
 
-    def get_distances_to_place_cell_centre_of_main_dendrite_input(
+    def get_distances_to_place_cell_center_of_main_dendrite_input(
         self, neuron_idx: int = 0, src_name: str = "Obj"
     ):
         """
-        self.get_distances_to_place_cell_centre_of_main_dendrite_input()
+        self.get_distances_to_place_cell_center_of_main_dendrite_input()
 
-        Get the distances from the agent's current position to the place cell centre
+        Get the distances from the agent's current position to the place cell center
         input location for the dendrite of a specified neuron.
 
         Args:
@@ -543,10 +543,10 @@ class TwoCompLayer(object):
 
         Returns:
         - distances (1D np.ndarray): Distances from agent's position to dendrite input
-            place cell centre.
+            place cell center.
         """
 
-        vectors = self.get_vectors_to_place_cell_centre_of_main_dendrite_input(
+        vectors = self.get_vectors_to_place_cell_center_of_main_dendrite_input(
             neuron_idx, src_name
         )
 
@@ -565,7 +565,7 @@ class TwoCompLayer(object):
         self.get_target_visits()
 
         Get the indices of the steps where the agent is closest to the target specified
-        by the place cell centre of the main input to the neuron's dendrite.
+        by the place cell center of the main input to the neuron's dendrite.
 
         Args:
         - neuron_idx (int, optional): Neuron index. Default is 0.
@@ -581,7 +581,7 @@ class TwoCompLayer(object):
             closest to the target.
         """
 
-        distances = self.get_distances_to_place_cell_centre_of_main_dendrite_input(
+        distances = self.get_distances_to_place_cell_center_of_main_dendrite_input(
             neuron_idx=neuron_idx, src_name=target_src_name
         )
 
@@ -603,7 +603,7 @@ class TwoCompLayer(object):
         self.get_closest_steps_to_target()
 
         Get the steps where the agent is closest to the target specified by the place
-        cell centre of the main input to the neuron's dendrite.
+        cell center of the main input to the neuron's dendrite.
 
         Args:
         - target_src_name (str, optional): Name of the input layer
@@ -620,7 +620,7 @@ class TwoCompLayer(object):
         - closest_steps (1D np.ndarray): Steps identified as locally closest to the target.
         """
 
-        distances = self.get_distances_to_place_cell_centre_of_main_dendrite_input(
+        distances = self.get_distances_to_place_cell_center_of_main_dendrite_input(
             neuron_idx, src_name=target_src_name
         )
         closest_steps = gen_util.get_minima_indices(
@@ -646,7 +646,7 @@ class TwoCompLayer(object):
         """
         self.get_nbr_visits_per_target()
 
-        Get the number of visits to the target specified by the place cell centre of
+        Get the number of visits to the target specified by the place cell center of
         the main input to the neuron's dendrite for each neuron in the layer.
 
         Args:
@@ -663,7 +663,7 @@ class TwoCompLayer(object):
 
         Returns:
         - nbr_visits_per_BTSP_target (1D np.ndarray): Number of visits to the target
-            specified by the place cell centre of the main input to the neuron's
+            specified by the place cell center of the main input to the neuron's
             dendrite for each neuron in the layer.
         """
 
@@ -1375,7 +1375,7 @@ class TwoCompLayer(object):
         """
         self.plot_distances_to_target()
 
-        Plot the distances from the agent's current position to the place cell centre
+        Plot the distances from the agent's current position to the place cell center
         of the main input to the neuron's dendrite, over time.
 
         Args:
@@ -1407,7 +1407,7 @@ class TwoCompLayer(object):
         t = np.asarray(self.Agent.history["t"])
         if in_min:
             t = t / 60
-        distances = self.get_distances_to_place_cell_centre_of_main_dendrite_input(
+        distances = self.get_distances_to_place_cell_center_of_main_dendrite_input(
             neuron_idx, src_name=target_src_name
         )
 
@@ -1483,7 +1483,7 @@ class TwoCompLayer(object):
         """
         self.plot_distances_to_targets()
 
-        Plot the distances from the agent's current position to the place cell centre
+        Plot the distances from the agent's current position to the place cell center
         of the main input to the neuron's dendrite, over time.
 
         Args:
@@ -1642,7 +1642,7 @@ class TwoCompLayer(object):
         elif len(axes.ravel()) != 4:
             raise ValueError("axes must have length 4.")
 
-        distances = self.get_distances_to_place_cell_centre_of_main_dendrite_input(
+        distances = self.get_distances_to_place_cell_center_of_main_dendrite_input(
             neuron_idx, src_name=target_src_name
         )
         firingrates = np.asarray(self.SomaCompartment.history["firingrate"]).T[
@@ -1650,7 +1650,7 @@ class TwoCompLayer(object):
         ]
 
         velocities = np.sqrt(np.sum(np.asarray(self.Agent.history["vel"]) ** 2, axis=1))
-        angles = self.get_vectors_to_place_cell_centre_of_main_dendrite_input(
+        angles = self.get_vectors_to_place_cell_center_of_main_dendrite_input(
             neuron_idx, src_name=target_src_name, polar=True
         )[:, 1]
 

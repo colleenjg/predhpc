@@ -89,7 +89,7 @@ class ObjectInstanceCells(riab_neurons.PlaceCells):
         # update object params
         self.params.update(params)
         self.params["n"] = n
-        self.params["place_cell_centres"] = self.input_object_locations
+        self.params["place_cell_centers"] = self.input_object_locations
 
         super().__init__(Agent, self.params)
 
@@ -143,17 +143,17 @@ class ObjectInstanceCells(riab_neurons.PlaceCells):
         """
         self.check_link()
 
-        Check whether the place cell centres are still linked  of objects in the
+        Check whether the place cell centers are still linked  of objects in the
         environment has changed.
 
         If the number of objects has changed, a warning is raised, as this change will
-        have detached the object cell centres from the environment object locations,
+        have detached the object cell centers from the environment object locations,
         preventing them from being dynamically updated.
         """
 
-        if self.place_cell_centres is not self.Agent.Environment.objects["objects"]:
+        if self.place_cell_centers is not self.Agent.Environment.objects["objects"]:
             warnings.warn(
-                "Object cell centres have been detached from the environment object "
+                "Object cell centers have been detached from the environment object "
                 "locations, preventing them from being dynamically updated."
             )
             self._broken_link = True
@@ -164,7 +164,7 @@ class ObjectInstanceCells(riab_neurons.PlaceCells):
 
         Update layer.
 
-        Also checks whether the place cell centres are linked to the objects in the
+        Also checks whether the place cell centers are linked to the objects in the
         environment. If not, a warning is raised and then this is no longer checked in
         the future.
         """
@@ -213,7 +213,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
         "wall_geometry": "line_of_sight",  # input place cells
         "min_fr": 0,
         "max_fr": 1,
-        "dynamic": True,  # place cells centres will update if object locations change
+        "dynamic": True,  # place cells centers will update if object locations change
         "is_dummy": False,  # dummy object cells, where all objects have been removed
     }
 
@@ -396,13 +396,13 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
         self._create_place_cell_layer()
 
         Create place cell layer, with one place cell per object location. Place cell
-        centres will update if the object locations change.
+        centers will update if the object locations change.
 
         Attributes:
         - PlaceCellInputs (riab_neurons.PlaceCells): Place cell layer.
         """
 
-        self.place_params["place_cell_centres"] = self.input_object_locations
+        self.place_params["place_cell_centers"] = self.input_object_locations
         self.PlaceCellInputs = riab_neurons.PlaceCells(
             self.Agent, params=self.place_params
         )
@@ -424,20 +424,20 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
         """
         self.check_link()
 
-        Check whether the place cell centres are still linked to the objects in the
+        Check whether the place cell centers are still linked to the objects in the
         environment has changed.
 
         If the number of objects has changed, a warning is raised, as this change will
-        have detached the object cell centres from the environment object locations,
+        have detached the object cell centers from the environment object locations,
         preventing them from being dynamically updated.
         """
 
         if (
-            self.PlaceCellInputs.place_cell_centres
+            self.PlaceCellInputs.place_cell_centers
             is not self.Agent.Environment.objects["objects"]
         ):
             warnings.warn(
-                "Object cell centres have been detached from the environment object "
+                "Object cell centers have been detached from the environment object "
                 "locations, preventing them from being dynamically updated."
             )
             self._broken_link = True
@@ -520,7 +520,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
 
         Update the object cell layer, after updating its place cell input layer.
 
-        Also checks whether the place cell centres are linked to the objects in the
+        Also checks whether the place cell centers are linked to the objects in the
         environment. If not, a warning is raised and then this is no longer checked in
         the future.
         """

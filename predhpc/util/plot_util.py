@@ -1530,34 +1530,40 @@ def plot_CC_across_periods(CC, sub_ax=None):
     return sub_ax
 
 
-def plot_FWHM(signal, positions=None, plot_smoothed=True, k=1, max_pos=None):
+def plot_width(
+    signal, positions=None, plot_smoothed=True, prop_peak=0.15, k=1, max_pos=None
+):
     """
-    plot_FWHM(signal, positions=None)
+    plot_width(signal, positions=None)
 
-    Plot the Full Width at Half Maximum (FWHM) of a signal.
+    Plot the width of a signal.
 
     Args:
-    - signal (1D np.ndarray): Signal to compute FWHM for.
+    - signal (1D np.ndarray): Signal to compute width for.
     - positions (1D np.ndarray, optional): Positions corresponding to the signal.
         Default is None.
     - plot_smoothed (bool, optional): Whether to plot the smoothed signal.
         Default is True.
+    - prop_peak (float, optional): Proportion of the peak to use for width calculation.
+        Default is 0.15.
     - k (int, optional): Smoothing factor for the signal. Default is 1.
     - max_pos (float, optional): Maximum position value for circular smoothing.
         If None, it is inferred from the positions data. Default is None.
 
     Returns:
-    - sub_ax (plt.Axes): Subplot with the FWHM plotted.
+    - sub_ax (plt.Axes): Subplot with the width plotted.
     """
 
     if positions is None:
         positions = np.arange(len(signal))
 
-    FWHM, edges = signal_util.compute_FWHM(signal, x=positions, k=k, return_edges=True)
+    width, edges = signal_util.compute_signal_width(
+        signal, x=positions, k=k, return_edges=True
+    )
 
     _, sub_ax = plt.subplots(figsize=(6, 2.5))
     sub_ax.plot(positions, signal, color="k")
-    half_max = signal_util.get_half_max(signal)
+    half_max = signal_util.get_prop_max(signal, prop_peak=prop_peak)
     sub_ax.axhline(half_max, color="k", alpha=0.8, label="half max")
 
     max_pos = max_pos or positions.max()
@@ -1573,7 +1579,7 @@ def plot_FWHM(signal, positions=None, plot_smoothed=True, k=1, max_pos=None):
         end_pts=end_pts,
         color="k",
         alpha=0.2,
-        label=f"FWHM={FWHM:.2f}",
+        label=f"width={width:.2f}",
         lw=0,
         zorder=-3,
     )
@@ -1587,8 +1593,8 @@ def plot_FWHM(signal, positions=None, plot_smoothed=True, k=1, max_pos=None):
             "ls": "dashed",
         }
         sub_ax.plot(positions, smoothed_signal, label="smoothed", **smooth_kwargs)
-        smoothed_half_max = signal_util.get_half_max(signal)
-        sub_ax.axhline(smoothed_half_max, label="smoothed half max", **smooth_kwargs)
+        smoothed_half_max = signal_util.get_prop_max(signal, prop_peak=prop_peak)
+        sub_ax.axhline(smoothed_half_max, label="threshold smoothed", **smooth_kwargs)
 
     sub_ax.set_xlabel("Position")
     sub_ax.set_ylabel("Signal value")
@@ -1602,12 +1608,12 @@ def plot_FWHM(signal, positions=None, plot_smoothed=True, k=1, max_pos=None):
     if xmax < max_pos:
         sub_ax.set_xlim(None, max_pos)
 
-    sub_ax.set_title("Full Width at Half Maximum (FWHM) computation")
+    sub_ax.set_title(f"Width computation ({prop_peak} of max)")
 
     sub_ax.spines[["top", "right"]].set_visible(False)
     sub_ax.legend()
 
-    return sub_ax, FWHM, edges
+    return sub_ax, width, edges
 
 
 def plot_learning_kernel(Is, xs, kernel=None, kernel_xs=None):

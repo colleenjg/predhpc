@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 
 import copy
+import time
 from pathlib import Path
 import warnings
 
+import itertools
+from joblib import Parallel, delayed
 import numpy as np
 import ratinabox
 from tqdm import tqdm
@@ -15,8 +18,10 @@ from predhpc.experiments import metrics
 PAPER_SEED = 18
 gen_util.seed_all(PAPER_SEED)
 
-SPEED_EXAMPLES = [0.15, 0.35]
+SPEED_EXAMPLES = [0.15, 0.25, 0.35]
 SHIFT_EXAMPLES = [1.0, -0.4, -3.0]
+
+SMOOTH_K = 1
 
 
 def suppress_warnings():
@@ -50,7 +55,7 @@ def get_linear_Pyrs(
     scale=params_util.SCALE_LINEAR,
     speed_mean=params_util.SPEED_MEAN_LINEAR,
     speed_std=params_util.SPEED_STD,
-    wait_at_end=int(15 / params_util.DT),
+    wait_at_end=0,
     log_BTSP=True,
     seed=True,
 ):
@@ -66,7 +71,7 @@ def get_linear_Pyrs(
     - speed_std (float): Standard deviation of the agent's speed. Default is
         params_util.SPEED_STD.
     - wait_at_end (int): Number of steps to wait at the end of the environment.
-        Default is 15 seconds converted to steps.
+        Default is 0.
     - log_BTSP (bool): Whether to log BTSP events. Default is True.
     - seed (bool): Whether to seed the random number generator with the paper seed.
         Default is True.
@@ -172,7 +177,9 @@ def plot_BTSP_kernel(Pyrs=None, **kwargs):
     return sub_ax
 
 
-def run_linear(Pyrs=None, max_num_steps=3800, max_time_min=None, seed=True, **kwargs):
+def run_linear(
+    Pyrs=None, max_num_steps=3800, max_time_min=None, BTSP_on=None, seed=True, **kwargs
+):
     """
     run_linear()
 
@@ -186,6 +193,8 @@ def run_linear(Pyrs=None, max_num_steps=3800, max_time_min=None, seed=True, **kw
     - max_time_min (float, optional): Maximum time in minutes to run the environment.
         If specified, it overrides max_num_steps based on the agent's time step.
         Default is None.
+    - BTSP_on (int): Trajectory on which to turn on BTSP. 1 for first trajectory.
+        Default is None.
     - seed (bool): Whether to seed the random number generator with the paper seed.
         Default is True.
 
@@ -198,13 +207,13 @@ def run_linear(Pyrs=None, max_num_steps=3800, max_time_min=None, seed=True, **kw
         gen_util.seed_all(PAPER_SEED)
 
     if Pyrs is None:
-        Pyrs = get_linear_Pyrs(seed=False)
+        Pyrs = get_linear_Pyrs(seed=False, wait_at_end=int(15 / params_util.DT))
 
     if max_time_min is not None:
         max_num_steps = int(max_time_min * 60 / Pyrs.Agent.dt)
 
     learner = run_manager.learn_1D_BTSP(
-        Pyrs, BTSP_on=0, max_num_steps=max_num_steps, plot=False, **kwargs
+        Pyrs, BTSP_on=BTSP_on, max_num_steps=max_num_steps, plot=False, **kwargs
     )
 
     return learner
@@ -238,9 +247,11 @@ def plot_linear_summary(learner=None, max_time_min=1.8, **kwargs):
     return ax1D
 
 
-def plot_linear_PFs(learner, max_time_min=1.8, **kwargs):
+def plot_linear_place_fields(learner, max_time_min=1.8, **kwargs):
     """
-    plot_linear_PFs(learner)
+    plot_linear_place_fields(learner)
+
+    Plots place weights and place field for a linear environment.
 
     Args:
     - learner (Learner): Learner object.
@@ -250,18 +261,18 @@ def plot_linear_PFs(learner, max_time_min=1.8, **kwargs):
 
     Keywords args:
     - **kwargs: Additional keyword arguments passed to
-        paper_plot_fcts.plot_linear_PFs().
+        paper_plot_fcts.plot_linear_place_fields().
 
     Returns:
-    - sub_ax (plt.Axes): The subplot with the linear place fields plotted.
+    - ax1D (1D np.ndarray of plt.Axes): Subplots with the linear place fields plotted.
     """
 
     if learner is None:
         learner = run_linear(max_time_min=max_time_min)
 
-    sub_ax = paper_plot_fcts.plot_linear_PFs(learner, **kwargs)
+    ax1D = paper_plot_fcts.plot_linear_place_fields(learner, **kwargs)
 
-    return sub_ax
+    return ax1D
 
 
 def plot_linear_binned_rates(learner, max_time_min=1.8, **kwargs):
@@ -292,7 +303,100 @@ def plot_linear_binned_rates(learner, max_time_min=1.8, **kwargs):
     return ax1D
 
 
-def run_linear_speeds(seed=True):
+def run_linear_speed(
+    speed_mean=params_util.SPEED_MEAN_LINEAR,
+    i=0,
+    max_time_min=20,
+    max_num_traj=20,
+    k=SMOOTH_K,
+    no_logs=True,
+    seed=True,
+):
+    """
+    run_linear_speed()
+
+    Runs and collects data for a single linear speed experiment.
+
+    Args:
+    - speed_mean (float): Mean speed for the experiment.
+        Default is params_util.SPEED_MEAN_LINEAR.
+    - i (int): Index for the experiment run. Default is 0.
+    - max_time_min (float): Maximum time in minutes to run the environment.
+        Default is 20.
+    - max_num_traj (int): Maximum number of trajectories to run. Default is 20.
+    - k (int): Smoothing factor for measuring place field width from firingrate history.
+        Default is SMOOTH_K.
+    - no_logs (bool): Whether to disable logging. Default is True.
+    - seed (bool): Whether to seed the random number generator with the paper seed.
+        Default is True.
+
+    Keyword Args:
+    - **kwargs: Additional keyword arguments passed to run_manager.learn_1D_BTSP().
+
+    Returns:
+    - data_dict (dict): Dictionary containing the results of the experiment under keys:
+        - "speed_mean": Mean speed for the experiment.
+        - "PFs": Place fields computed from history.
+        - "PF_widths": Place field widths.
+        - "PF_centers": Place field centers.
+        - "PC_weights": Place cell input weights.
+        - "PC_weight_widths": Place cell input weight widths.
+        - "PC_place_centers": Place cell centers.
+        if seed:
+        - "seed": Seed for the experiment.
+    """
+
+    if seed:
+        gen_util.seed_all(PAPER_SEED + i)
+
+    Pyrs = get_linear_Pyrs(
+        speed_mean=speed_mean,
+        speed_std=0,
+        log_BTSP=False,
+        wait_at_end=0,
+        seed=False,
+    )
+    learner = run_linear(
+        Pyrs,
+        max_time_min=max_time_min,
+        max_num_traj=max_num_traj,
+        max_num_target_reaches=max_num_traj,
+        no_logs=no_logs,
+        BTSP_on=5,  # to ensure sufficient time before BTSP with very high running speeds
+        seed=False,
+    )
+
+    # compute place fields from history
+    history_kwargs = {
+        "method": "history",
+        "t_start": ext_util.choose_t_start_after_BTSP(
+            Pyrs.SomaCompartment, next_trajectory=True
+        ),
+    }
+
+    _, _, PCs, _ = ext_util.extract_objects_from_Pyrs(Pyrs)
+    PFs, PF_centers = metrics.evaluate_PFs(Pyrs, **history_kwargs)
+
+    data_dict = {
+        "speed_mean": speed_mean,
+        "PFs": PFs,
+        "PF_widths": metrics.compute_PF_width(Pyrs, k=k, **history_kwargs),
+        "PF_centers": PF_centers,
+        "PC_weight_widths": metrics.compute_PF_width(Pyrs),
+        "PC_weights": learner.get_recorded_weights()["weights"][:, 0],
+        "PC_place_centers": PCs.place_cell_centers[:, 0],
+        "PF_smoothing": k,
+    }
+
+    if seed:
+        data_dict["seed"] = PAPER_SEED + i
+
+    return data_dict
+
+
+def run_linear_speeds(
+    seed=True, max_time_min=20, num_repeats=1, k=SMOOTH_K, num_jobs=1
+):
     """
     run_linear_speeds()
 
@@ -302,43 +406,70 @@ def run_linear_speeds(seed=True):
     Args:
     - seed (bool): Whether to seed the random number generator with the paper seed.
         Default is True.
+    - max_time_min (float): Maximum time in minutes to run the environment.
+        Default is 20.
+    - num_repeats (int): Number of repeats for the experiment. Default is 1.
+    - k (int): Smoothing factor for measuring place field width from firingrate history.
+        Default is SMOOTH_K.
+    - num_jobs (int): Number of parallel jobs to run. Default is 1.
 
     Returns:
     - speed_data (dict): Dictionary containing:
         - "speed_means": Array of speed means used in the experiment.
+        - "PFs": List of place fields computed from history for each speed mean.
         - "PF_widths": List of place field widths for each speed mean.
-        - "PF_weights": List of place field weights for each speed mean.
-        - "PC_place_centers": Array of place cell centers for each speed mean.
+        - "PF_centers": List of place field centers.
+        - "PC_weights": List of place cell input weights for each speed mean.
+        - "PC_weight_widths": List of place cell input weight widths for each speed mean.
+        - "PC_place_centers": Array of place cell centers.
+        - "PF_smoothing": Smoothing factor for place fields.
+        if seed:
+        - "seeds": Array of seeds for each run.
     """
 
-    speed_data = {
-        "speed_means": gen_util.get_rounded_linspace(0.05, 0.4, 29),
-        "PF_widths": list(),
-        "PF_weights": list(),
+    speed_means = gen_util.get_rounded_linspace(0.05, 0.55, 41)
+
+    # product of means and seeds
+    total = num_repeats * len(speed_means)
+    n_jobs = min(num_jobs, total)
+    iterations = itertools.product(speed_means, range(num_repeats))
+
+    kwargs = {
+        "max_time_min": max_time_min,
+        "k": k,
+        "no_logs": True,
+        "seed": seed,
     }
-    for speed_mean in tqdm(speed_data["speed_means"]):
-        if seed:
-            gen_util.seed_all(PAPER_SEED)
-        Pyrs = get_linear_Pyrs(
-            speed_mean=speed_mean,
-            speed_std=0,
-            log_BTSP=False,
-            wait_at_end=0,
-            seed=False,
+
+    if num_jobs > 1:
+        speed_dicts = Parallel(n_jobs=n_jobs)(
+            delayed(run_linear_speed)(speed_mean=speed_mean, i=i, **kwargs)
+            for speed_mean, i in tqdm(iterations, total=total)
         )
-        learner = run_linear(Pyrs, max_time_min=1.2, no_logs=True, seed=False)
-        speed_data["PF_widths"].append(metrics.compute_PC_FWHM(Pyrs))
-        speed_data["PF_weights"].append(learner.get_recorded_weights()["weights"][:, 0])
+    else:
+        speed_dicts = list()
+        for speed_mean, i in tqdm(iterations, total=total):
+            speed_dict = run_linear_speed(speed_mean=speed_mean, i=i, **kwargs)
+            speed_dicts.append(speed_dict)
 
-    speed_data = {key: np.asarray(val) for key, val in speed_data.items()}
-
-    _, _, PCs, _ = ext_util.extract_objects_from_Pyrs(Pyrs)
-    speed_data["PC_place_centers"] = PCs.place_cell_centres[:, 0]
+    speed_data = dict()
+    for key in speed_dicts[0].keys():
+        if key in ["PF_centers", "PC_place_centers"]:
+            speed_data[key] = speed_dicts[0][key]
+        else:
+            speed_data[key] = np.asarray(
+                [speed_dict[key] for speed_dict in speed_dicts]
+            )
+    speed_data["speed_means"] = speed_data.pop("speed_mean")
+    if "seed" in speed_data.keys():
+        speed_data["seeds"] = speed_data.pop("seed")
 
     return speed_data
 
 
-def plot_linear_speed_PF_examples(speed_data=None, to_plot=SPEED_EXAMPLES, **kwargs):
+def plot_linear_speed_PF_examples(
+    speed_data=None, to_plot=SPEED_EXAMPLES, PF_type="history", **kwargs
+):
     """
     plot_linear_speed_PF_examples()
 
@@ -349,6 +480,7 @@ def plot_linear_speed_PF_examples(speed_data=None, to_plot=SPEED_EXAMPLES, **kwa
         (see run_linear_speeds()). If not provided, data is loaded or experiment is run
         from scratch. Default is None.
     - to_plot (list): List of speed means to plot. Default is SPEED_EXAMPLES.
+    - PF_type (str): PF type to plot. Default is "history".
 
     Keywords args:
     - **kwargs: Additional keyword arguments passed to
@@ -361,25 +493,31 @@ def plot_linear_speed_PF_examples(speed_data=None, to_plot=SPEED_EXAMPLES, **kwa
     if speed_data is None:
         speed_data = run_linear_fct("linear_speeds", overwrite=False)
 
-    speed_data = gen_util.get_filtered_np_data_dict(
-        speed_data, "speed_means", values=to_plot, skip_keys=["PC_place_centers"]
-    )
+    for key, vals in [("speed_means", to_plot), ("seeds", [PAPER_SEED])]:
+        speed_data = gen_util.get_filtered_np_data_dict(
+            speed_data,
+            key,
+            values=vals,
+            skip_keys=["PF_centers", "PC_place_centers"],
+        )
 
     Pyrs = get_linear_Pyrs()
     _, Ag, _, _ = ext_util.extract_objects_from_Pyrs(Pyrs)  # to add plot markers
 
-    ax1D = paper_plot_fcts.plot_linear_speed_PF_examples(speed_data, Ag=Ag, **kwargs)
+    ax1D = paper_plot_fcts.plot_linear_speed_PF_examples(
+        speed_data, Ag=Ag, PF_type=PF_type, **kwargs
+    )
 
     return ax1D
 
 
 def plot_linear_speed_PF_widths(
-    speed_data=None, mark_examples=SPEED_EXAMPLES, **kwargs
+    speed_data=None, mark_examples=SPEED_EXAMPLES, PF_type="history", **kwargs
 ):
     """
     plot_linear_speed_PF_widths()
 
-    Plots the relationship between speed means and place field widths for the linear
+    Plots the relationship between speed means and place weight widths for the linear
     experiment.
 
     Args:
@@ -387,13 +525,14 @@ def plot_linear_speed_PF_widths(
         (see run_linear_speeds()). If not provided, data is loaded or experiment is run
         from scratch. Default is None.
     - mark (list): List of speed means to mark. Default is list().
+    - PF_type (str): PF type to plot. Default is "history".
 
     Keywords args:
     - **kwargs: Additional keyword arguments passed to
         paper_plot_fcts.plot_linear_speed_PF_widths().
 
     Returns:
-    - sub_ax (plt.Axes): The subplot with the speed means and place field widths
+    - sub_ax (plt.Axes): The subplot with the speed means and place weight widths
         plotted.
     """
 
@@ -401,7 +540,7 @@ def plot_linear_speed_PF_widths(
         speed_data = run_linear_fct("linear_speeds", overwrite=False)
 
     sub_ax = paper_plot_fcts.plot_linear_speed_PF_widths(
-        speed_data, mark_examples=mark_examples, **kwargs
+        speed_data, mark_examples=mark_examples, PF_type=PF_type, **kwargs
     )
 
     return sub_ax
@@ -447,7 +586,7 @@ def run_linear_shifts(seed=True):
             )
             learner.Pyrs.Agent.move_target_position(shift)
         learner = run_linear(learner, max_time_min=1.2, no_logs=True)
-        shift_data["PF_widths"].append(metrics.compute_PC_FWHM(Pyrs))
+        shift_data["PF_widths"].append(metrics.compute_PF_width(Pyrs))
         shift_data["PF_weights"].append(learner.get_recorded_weights()["weights"][:, 0])
 
     num = max([len(wei) for wei in shift_data["PF_weights"]])
@@ -459,7 +598,7 @@ def run_linear_shifts(seed=True):
     shift_data = {key: np.asarray(val) for key, val in shift_data.items()}
 
     _, _, PCs, _ = ext_util.extract_objects_from_Pyrs(Pyrs)
-    shift_data["PC_place_centers"] = PCs.place_cell_centres[:, 0]
+    shift_data["PC_place_centers"] = PCs.place_cell_centers[:, 0]
 
     return shift_data
 
@@ -492,7 +631,10 @@ def plot_linear_shift_PF_examples(
         shift_data = run_linear_fct("linear_shifts", overwrite=False)
 
     shift_data = gen_util.get_filtered_np_data_dict(
-        shift_data, "target_shifts", values=to_plot, skip_keys=["PC_place_centers"]
+        shift_data,
+        "target_shifts",
+        values=to_plot,
+        skip_keys=["PF_centers", "PC_place_centers"],
     )
 
     Pyrs = get_linear_Pyrs()
@@ -544,7 +686,7 @@ def plot_target_shift_PFs(
     return ax1D
 
 
-def run_linear_fct(fct_name="linear_speeds", overwrite=False, seed=True):
+def run_linear_fct(fct_name="linear_speeds", overwrite=False, seed=True, num_jobs=1):
     """
     run_linear_fct()
 
@@ -578,8 +720,10 @@ def run_linear_fct(fct_name="linear_speeds", overwrite=False, seed=True):
 
     if data_dict is None:
         print("Running...")
-        data_dict = fct(seed=seed)
+        start_time = time.perf_counter()
+        data_dict = fct(seed=seed, num_jobs=num_jobs)
         gen_util.save_np_dict(save_path, data_dict)
+        gen_util.get_duration_str(start_time, log=True)
 
     return data_dict
 
@@ -806,7 +950,7 @@ def plot_figure_panel(*args, fig=1, panel="A", save=True, **kwargs):
         },
         2: {
             "A": plot_linear_summary,
-            "B": plot_linear_PFs,
+            "B": plot_linear_place_fields,
             "C": plot_linear_binned_rates,
         },
         3: {

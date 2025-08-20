@@ -34,8 +34,6 @@ POST_BTSP_NEG_FILTER_WEIGHT = 1.0006
 PRE_BTSP_FILTER_TAU_NEG = PRE_BTSP_FILTER_TAU_POS + PRE_BTSP_NEG_FILTER_DELTA
 POST_BTSP_FILTER_TAU_NEG = POST_BTSP_FILTER_TAU_POS + POST_BTSP_NEG_FILTER_DELTA
 
-BASE_LR = 4e-5
-
 TOLERANCE_LINEAR = 0.55
 TOLERANCE_2D = 5
 
@@ -403,7 +401,7 @@ def get_PC_params(n=None, environment="linear", **kwargs):
     PC_params = {
         "name": "PCs",
         "description": "gaussian",
-        "place_cell_centres": "uniform",
+        "place_cell_centers": "uniform",
         "min_fr": 0,
         "max_fr": 10,
         "color": PC_COLOR,

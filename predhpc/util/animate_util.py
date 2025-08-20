@@ -366,13 +366,13 @@ def plot_linear_track(
         # plot place cell input weights to Pyr.
         plot_fcts.plot_recorded_1D_input_place_cell_weights(
             np.asarray(Pyrs_weights)[:, target_Pyr_idx],
-            input_centres=PCs.place_cell_centres,
+            input_centers=PCs.place_cell_centers,
             weights_t=Pyrs_weights_t,
             color=PCs.color,
             sub_ax=ax1D[1],
             t_start=t_start,
             t_end=t_end,
-            plot_last_FWHM=(Pyrs.n == 1),
+            plot_last_width=(Pyrs.n == 1),
         )
 
         target_Pyr_idx_str = ""

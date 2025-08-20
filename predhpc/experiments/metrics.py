@@ -1,32 +1,33 @@
 import numpy as np
 
-from predhpc.util import ext_util, signal_util
+from predhpc.util import signal_util
 
 WIDTH = 0.5  # symmetical width (m) around PC peak to use for pre/post weight ratio
 
 
-def get_PC_info(Pyrs, PC_name="PCs", smoothed=False, effective=False, max_recurrence=8):
+def evaluate_PFs(Pyrs, PC_name="PCs", method="weights", t_start=None, t_end=None):
     """
-    get_PC_info(Pyrs)
+    evaluate_PFs(Pyrs)
 
-    Get place cell information from the Pyr. layer.
+    Evaluate the place fields of a pyramidal layer.
 
     Args:
     - Pyrs (two_comp_neurons.TwoCompLayer): Pyr. layer.
     - PC_name (str, optional): Name of the place cell layer. Default is "PCs".
-    - smoothed (bool, optional): Whether to return smoothed weights, if effective is
-        False. Default is False.
-    - effective (bool, optional): Whether to return effective weights corresponding to
-        the output of the Pyramidal layer based on the input weights. Default is False.
-    - max_recurrence (int, optional): Maximum number of time get_state() recursively calls
-        recurrent inputs (prevents infinite recursion error). Appears to stabilize
-        after about 7. Default is 5.
+    - method (str, optional): Method to use for evaluating place fields.
+        "weights" returns the input weights from the place cell layer.
+        "weights_applied" calculates Pyramidal neuron activity considering only place
+            cell input.
+        "weights_smoothed" applies a Gaussian smoothing kernel to the weights to take
+            into account the spatial structure of the place fields.
+        "history" uses firingrate history to compute place field.
+        Default is "weights".
+    - t_start (float, optional): Start time for history evaluation. Default is None.
+    - t_end (float, optional): End time for history evaluation. Default is None.
 
     Returns:
-    - PC_weights (np.ndarray): Sorted place cell weights.
-    - PC_centres (np.ndarray): Sorted place cell centres.
-    - peak_idx (int or None): Index of the place cell weight peak. If all weights are
-        equal, returns None.
+    - PFs (2D np.ndarray): Place fields (neurons x PF centers).
+    - PF_centers (1D np.ndarray): Place field centers (PF centers).
     """
 
     if Pyrs.Agent.Environment.D != 1:
@@ -42,45 +43,101 @@ def get_PC_info(Pyrs, PC_name="PCs", smoothed=False, effective=False, max_recurr
 
     PCs = Pyrs.inputs["PCs"]["layer"]
 
-    PC_centres = PCs.place_cell_centres[:, 0]
-    sorter = np.argsort(PC_centres)
-    PC_centres = PC_centres[sorter]
+    PF_centers = PCs.place_cell_centers[:, 0]
+    sorter = np.argsort(PF_centers)
+    PF_centers = PF_centers[sorter]
 
-    if effective:
-        if smoothed:
-            raise ValueError("smoothed and effective cannot both be True.")
-        PC_weights = Pyrs.get_state(
-            evaluate_at="pos",
-            pos=PC_centres.reshape(-1, 1),
-            max_recurrence=max_recurrence,
-        )[0]
+    dist = np.absolute(np.diff(PF_centers)).mean()
+
+    if method in ["weights", "weights_applied"]:
+
+        PFs = Pyrs.inputs["PCs"]["w"][:, sorter]
+
+        if method == "smoothed_weights":
+            if PCs.description != "gaussian" or not isinstance(
+                PCs.widths, (int, float)
+            ):
+                raise ValueError(
+                    "PCs must have a Gaussian description and a single numeric width "
+                    "to use 'smoothed_weights' method."
+                )
+            sigma_in_steps = float(PCs.widths) / dist
+            sm_PFs = list()
+            for neuron_PF in PFs:
+                sm_PFs.append(
+                    signal_util.gaussian_smooth_kernel(
+                        neuron_PF, sigma_in_steps, circular=True
+                    )
+                )
+            PFs = np.asarray(sm_PFs)
+
+        if method == "weights_applied":
+            PC_inputs = PCs.get_state(evaluate_at="pos", pos=PF_centers.reshape(-1, 1))
+            V = np.matmul(PFs, PC_inputs)
+            if Pyrs.biases.shape != V.shape:
+                Pyrs.biases = Pyrs.biases.reshape((-1, 1))
+            V += Pyrs.biases
+
+            PFs = V
+
+            PFs = Pyrs.activation_function(V, deriv=False)
+
+    elif method == "history":
+        PFs, PF_centers = Pyrs.get_history_ratemap(
+            t_start=t_start, t_end=t_end, bin_size=dist
+        )
 
     else:
-        PC_weights = Pyrs.inputs["PCs"]["w"][0][sorter]
+        raise ValueError(f"Unknown method: {method}.")
 
-        if smoothed:
-            sigma_in_steps = float(PCs.widths) / np.absolute(np.diff(PC_centres)).mean()
-            PC_weights = Pyrs.inputs["PCs"]["w"][0][sorter]
-            PC_weights = signal_util.smooth_kernel(
-                PC_weights, sigma_in_steps
-            )  # change to smooth circularly!
-
-    if not np.isfinite(PC_weights).all():
-        peak_idx = None
-    elif np.max(PC_weights) == np.min(PC_weights):
-        peak_idx = None
-    else:
-        peak_idx = np.argmax(PC_weights)
-
-    return PC_weights, PC_centres, peak_idx
+    return PFs, PF_centers
 
 
-def get_PC_weight_peak_relative_position(Pyrs, target_position=None):
+def get_PF_info(Pyrs, PC_name="PCs", **kwargs):
     """
-    get_PC_weight_peak_relative_position(Pyrs, target_position=None)
+    get_PF_info(Pyrs)
 
-    Compute the position of the place cell weight peak relative to a target position.
-    If the place cell weights are flat, np.nan is returned.
+    Get place field information from the Pyr. layer.
+
+    Args:
+    - Pyrs (two_comp_neurons.TwoCompLayer): Pyr. layer.
+    - PC_name (str, optional): Name of the place cell layer. Default is "PCs".
+
+    Keyword args:
+    - **kwargs: Keyword arguments passed to evaluate_PFs().
+
+    Returns:
+    - PFs (2D np.ndarray): Place field.
+    - PF_centers (np.ndarray): center coordinates for each place field point.
+    - peak_idx (int or None): Index of the place cell weight peak. If all weights are
+        equal, returns None.
+    """
+
+    PFs, PF_centers = evaluate_PFs(Pyrs, PC_name=PC_name, **kwargs)
+
+    if len(PFs) > 1:
+        raise NotImplementedError(
+            "Place field analysis for multiple place fields is not implemented."
+        )
+
+    PFs = PFs[0]
+
+    if not np.isfinite(PFs).any():
+        peak_idx = None
+    elif np.nanmax(PFs) == np.nanmin(PFs):
+        peak_idx = None
+    else:
+        peak_idx = np.nanargmax(PFs)
+
+    return PFs, PF_centers, peak_idx
+
+
+def get_PF_weight_peak_relative_position(Pyrs, target_position=None, **kwargs):
+    """
+    get_PF_weight_peak_relative_position(Pyrs)
+
+    Compute the position of the place field peak relative to a target position.
+    If the place field is flat, np.nan is returned.
 
     Args:
     - Pyrs (two_comp_neurons.TwoCompLayer): Pyr. layer.
@@ -88,19 +145,22 @@ def get_PC_weight_peak_relative_position(Pyrs, target_position=None):
         from. If None, the target position is taken from Pyrs.Agent.target_position[0].
         Default is None.
 
+    Keyword args:
+    - **kwargs: Keyword arguments passed to get_PF_info().
+
     Returns:
-    - peak_rel_pos (float): Relative position of the place cell weight peak.
-        If all place cell weights are equal, returns np.nan.
+    - peak_rel_pos (float): Relative position of the place field peak.
+        If all place field values are equal, returns np.nan.
     """
 
-    _, PC_centres, peak_idx = get_PC_info(Pyrs)
+    _, PF_centers, peak_idx = get_PF_info(Pyrs, **kwargs)
 
     if peak_idx is None:
         peak_rel_pos = np.nan
     else:
         if target_position is None:
             target_position = Pyrs.Agent.target_position[0]
-        peak_rel_pos = PC_centres[peak_idx] - target_position
+        peak_rel_pos = PF_centers[peak_idx] - target_position
         scale = Pyrs.Agent.Environment.scale
         if peak_rel_pos < -scale / 2:
             peak_rel_pos += scale
@@ -110,67 +170,76 @@ def get_PC_weight_peak_relative_position(Pyrs, target_position=None):
     return peak_rel_pos
 
 
-def get_PC_weight_ratio(Pyrs, width=WIDTH):
+def get_PF_ratio(Pyrs, width=WIDTH, **kwargs):
     """
-    get_PC_weight_ratio(Pyrs)
+    get_PF_ratio(Pyrs)
 
-    Compute the ratio of place cell weights at a symmetrical distance before and after
-    the peak weight. If the place cell weights are flat, np.nan is returned.
+    Compute the ratio of place field values at a symmetrical distance before and after
+    the peak weight. If the place field is flat, np.nan is returned.
 
     Args:
     - Pyrs (two_comp_neurons.TwoCompLayer): Pyr. layer.
     - width (float, optional): Width (m) around PC peak to use for pre/post weight
         ratio. Default is WIDTH.
 
+    Keyword args:
+    - **kwargs: Keyword arguments passed to get_PF_info().
+
     Returns:
-    - pre_post_ratio (float): Ratio of place cell weights before and after the peak
-        weight (pre/post). If place cell weights are flat, returns np.nan.
+    - pre_post_ratio (float): Ratio of place field values before and after the peak
+        weight (pre/post). If place field values are flat, returns np.nan.
     """
 
-    PC_weights, PC_centres, peak_idx = get_PC_info(Pyrs)
+    PF, PF_centers, peak_idx = get_PF_info(Pyrs, **kwargs)
 
     if peak_idx is None:
         pre_post_ratio = np.nan
     else:
-        pre_centre = PC_centres[peak_idx] - width / 2
-        post_centre = PC_centres[peak_idx] + width / 2
+        pre_center = PF_centers[peak_idx] - width / 2
+        post_center = PF_centers[peak_idx] + width / 2
 
-        pre_idx = np.argmin(np.abs(PC_centres - pre_centre))
-        post_idx = np.argmin(np.abs(PC_centres - post_centre))
+        pre_idx = np.argmin(np.abs(PF_centers - pre_center))
+        post_idx = np.argmin(np.abs(PF_centers - post_center))
 
-        pre_post_ratio = PC_weights[pre_idx] / PC_weights[post_idx]
+        pre_post_ratio = PF[pre_idx] / PF[post_idx]
 
     return pre_post_ratio
 
 
-def compute_PC_FWHM(Pyrs, k=1):
+def compute_PF_width(Pyrs, k=1, prop_peak=0.15, **kwargs):
     """
-    compute_PC_FWHM(Pyrs)
+    compute_PF_width(Pyrs)
 
-    Compute the full width at half maximum for a place field. If the place cell
-    weights are flat, np.nan is returned.
+    Compute the full width at half maximum for a place field. If the place field
+    is flat, np.nan is returned.
 
     Args:
     - Pyrs (two_comp_neurons.TwoCompLayer): Pyr. layer.
     - k (int, optional): Kernel size for circular smoothing. Default is 1.
+    - prop_peak (float, optional): Proportion of peak to use for width calculation.
+        Default is 0.15.
+
+    Keyword args:
+    - **kwargs: Keyword arguments passed to get_PF_info().
 
     Returns:
-    - pre_post_ratio (float): Ratio of place cell weights before and after the peak
-        weight (pre/post). If place cell weights are flat, returns np.nan.
+    - width (float): Width of the place field.
     """
 
-    PC_weights, PC_centres, peak_idx = get_PC_info(Pyrs)
+    PF, PF_centers, peak_idx = get_PF_info(Pyrs, **kwargs)
 
     if peak_idx is None:
-        FWHM = 0
+        width = 0
     else:
         scale = Pyrs.Agent.Environment.scale
-        FWHM = signal_util.compute_FWHM(PC_weights, PC_centres, k=k, max_x=scale)
+        width = signal_util.compute_signal_width(
+            PF, PF_centers, prop_peak=prop_peak, k=k, max_x=scale
+        )
 
-    return FWHM
+    return width
 
 
-def compute_BTSP_metrics(Pyrs, t_start=0, bins=21, width=WIDTH, k=1):
+def compute_BTSP_metrics(Pyrs, t_start=0, bins=21, width=WIDTH, k=1, **kwargs):
     """
     compute_BTSP_metrics(Pyrs)
 
@@ -183,8 +252,12 @@ def compute_BTSP_metrics(Pyrs, t_start=0, bins=21, width=WIDTH, k=1):
         track and counting number of positions a BTSP event occurred in. Default is 21.
     - width (float, optional): Width (m) around PC peak to use for pre/post weight
         ratio. Default is WIDTH.
-    - k (int, optional): Kernel size for circular smoothing when computing FWHM.
+    - k (int, optional): Kernel size for circular smoothing when computing width.
         Default is 1.
+
+    Keyword args:
+    - **kwargs: Keyword arguments passed to get_PF_ratio(),
+        get_PF_weight_peak_relative_position() and compute_PF_width().
 
     Returns:
     - BTSP_metrics (dict): Dictionary of BTSP metrics, with keys and values:
@@ -214,10 +287,12 @@ def compute_BTSP_metrics(Pyrs, t_start=0, bins=21, width=WIDTH, k=1):
 
     BTSP_ramp_max = Pyrs.SomaCompartment.get_BTSP_ramp_peaks(t_start=t_start)[0]
 
-    PC_weight_ratio_pre_post = get_PC_weight_ratio(Pyrs, width=width)
-    PC_weight_peak_relative_position = get_PC_weight_peak_relative_position(Pyrs)
+    PC_weight_ratio_pre_post = get_PF_ratio(Pyrs, width=width, **kwargs)
+    PC_weight_peak_relative_position = get_PF_weight_peak_relative_position(
+        Pyrs, **kwargs
+    )
 
-    PC_weight_FWHM = compute_PC_FWHM(Pyrs, k=k)
+    PC_weight_width = compute_PF_width(Pyrs, k=k, **kwargs)
 
     BTSP_metrics = {
         "metric/num_BTSP_events": num_BTSP_events,
@@ -226,7 +301,7 @@ def compute_BTSP_metrics(Pyrs, t_start=0, bins=21, width=WIDTH, k=1):
         "metric/first_BTSP_relative_position": first_BTSP_relative_position,
         "metric/max_BTSP_ramp": BTSP_ramp_max,
         "metric/PC_weight_peak_relative_position": PC_weight_peak_relative_position,
-        "metric/PC_weight_FWHM": PC_weight_FWHM,
+        "metric/PC_weight_width": PC_weight_width,
         "metric/PC_weight_ratio_pre_post": PC_weight_ratio_pre_post,
     }
 

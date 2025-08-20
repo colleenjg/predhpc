@@ -141,6 +141,74 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
 
         return min_firingrate, max_firingrate
 
+    def get_history_ratemap(
+        self,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        chosen_neurons: str | int | list | np.ndarray = "all",
+        bin_size: float | None = None,
+        nan_zero_bins: bool = True,
+    ):
+        """
+        self.get_history_ratemap()
+
+        Obtain a rate map based on firingrate history.
+
+        Args:
+        - t_start (float, optional): Start time. Default is None.
+        - t_end (float, optional): End time. Default is None.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
+            Default is "all".
+        - bin_size (float, optional): Bin size for the rate map. Default is None.
+        - nan_zero_bins (bool, optional): Whether to set zero bins to NaN.
+            Default is True.
+
+        Returns:
+        - rate_maps (2D np.ndarray): Rate maps for the chosen neurons. Unvisited bins
+            are set to NaN.
+        - centers (1D np.ndarray): center positions for the bins.
+        """
+
+        _, startid, endid = self.get_plotting_times(t_start, t_end)
+        firingrates = np.asarray(self.history["firingrate"])[startid : endid + 1]
+        pos = np.asarray(self.Agent.history["pos"])[startid : endid + 1]
+
+        chosen_neurons = self.get_chosen_neurons(chosen_neurons)
+
+        if bin_size is None:
+            bin_size = 0.05 if self.Agent.Environment.D == 2 else 0.1
+        extent = self.Agent.Environment.extent
+
+        if self.Agent.Environment.D == 1:
+            pos = pos[:, 0]
+
+        rate_maps = list()
+        for chosen_neuron in chosen_neurons:
+            outputs = rutils.bin_data_for_histogramming(
+                data=pos,
+                extent=self.Agent.Environment.extent,
+                dx=bin_size,
+                weights=firingrates[:, chosen_neuron],
+                norm_by_bincount=True,
+                return_zero_bins=True,
+            )
+
+            rate_map = outputs[0]
+            if nan_zero_bins:
+                rate_map[outputs[-1]] = np.nan
+            rate_maps.append(rate_map)
+
+        rate_maps = np.asarray(rate_maps)
+
+        xedges = np.arange(extent[0], extent[1] + bin_size, bin_size)
+        centers = (xedges[1:] + xedges[:-1]) / 2
+        if self.Agent.Environment.D == 2:
+            yedges = np.arange(extent[2], extent[3] + bin_size, bin_size)
+            ycenters = (yedges[1:] + yedges[:-1]) / 2
+            centers = np.asarray([centers, ycenters])
+
+        return rate_maps, centers
+
     def get_firingrate_CC_matrix(
         self, num_periods: int = 8, plot: bool = False, sub_ax: plt.Axes | None = None
     ):
@@ -780,8 +848,6 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
     See ratinabox.Neurons.PlaceCells for default parameters, and
     NeuronsMixin for additional properties and methods.
 
-
-
     List of methods (in addition ratinabox.Neurons.PlaceCells methods):
         • self.plot_place_cell_locations()
         • self.shuffle_place_cell_locations
@@ -814,17 +880,50 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
 
-        place_cell_centres = self.params["place_cell_centres"]
-        if isinstance(place_cell_centres, str):
-            self.place_cell_centre_type = place_cell_centres
-        else:
-            self.place_cell_centre_type = "specified"
+        self._handle_place_cell_center_param()
+        params = copy.copy(self.params)
 
         super().__init__(Agent, params=params)
 
         self._current_sorter = np.arange(self.n)
         self.shuffle_sorters = list()
         self.shuffle_times = list()
+
+    @property
+    def place_cell_center_type(self):
+        """
+        self.place_cell_center_type
+
+        Points to self.place_cell_centre_type.
+        """
+
+        return self.place_cell_centre_type
+
+    @property
+    def place_cell_centers(self):
+        """
+        self.place_cell_centers
+
+        Points to self.place_cell_centres.
+        """
+
+        return self.place_cell_centres
+
+    def _handle_place_cell_center_param(self):
+        """
+        self._handle_place_cell_center_param
+
+        Stores the original description of the place cell center param if provided as
+        a string. Also makes spelling flexible to both 'center' and 'centre'.
+        """
+
+        if "place_cell_centers" in self.params.keys():  # takes precedence
+            self.params["place_cell_centres"] = self.params.pop("place_cell_centers")
+
+        if isinstance(self.params["place_cell_centres"], str):
+            self.place_cell_centre_type = self.params["place_cell_centres"]
+        else:
+            self.place_cell_centre_type = "specified"
 
     def get_place_field_FWHM(self, average=True):
         """
@@ -907,7 +1006,7 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
 
         use_sorter = np.argsort(self._current_sorter)[shuffle_sorter]
 
-        self.place_cell_centres[:] = self.place_cell_centres[use_sorter]
+        self.place_cell_centers[:] = self.place_cell_centers[use_sorter]
 
         self._current_sorter = shuffle_sorter
 
@@ -964,16 +1063,16 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
                 sub_ax=sub_ax, alpha=0.6, autosave=False, **kwargs
             )
 
-        place_cell_centres = self.place_cell_centres
+        place_cell_centers = self.place_cell_centers
         if not isinstance(chosen_neurons, str) or chosen_neurons != "all":
             chosen_neurons = self.get_chosen_neurons(chosen_neurons)
-            place_cell_centres = place_cell_centres[chosen_neurons]
+            place_cell_centers = place_cell_centers[chosen_neurons]
 
-        x = place_cell_centres[:, 0]
+        x = place_cell_centers[:, 0]
         if self.Agent.Environment.dimensionality == "1D":
             y = np.zeros_like(x)
         elif self.Agent.Environment.dimensionality == "2D":
-            y = place_cell_centres[:, 1]
+            y = place_cell_centers[:, 1]
 
         sub_ax.scatter(x, y, c=self.color, alpha=alpha, marker=marker, s=s, zorder=2)
 

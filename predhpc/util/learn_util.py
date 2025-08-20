@@ -536,7 +536,7 @@ def infer_spatial_learning_kernel(
     coords_base = np.linspace(0, 2 * env_scale, num_pts)
     coords_base -= coords_base[(len(coords_base) - 1) // 2]
 
-    smoothed_kernel = signal_util.smooth_kernel(
+    smoothed_kernel = signal_util.gaussian_smooth_kernel(
         kernel,
         sigma_in_steps,
         smooth_2D=not (env_1D),
@@ -818,10 +818,10 @@ def assess_Pyrs_learning_rates_spatially(
             "Assessment will assume geodesic wall geometry even though "
             f"place cell wall geometry is {PCs.wall_geometry}."
         )
-    if PCs.place_cell_centre_type != "uniform":
+    if PCs.place_cell_center_type != "uniform":
         warnings.warn(
-            f"Actual place cell centres were initialized as {PCs.place_cell_centre_type}, "
-            "but assessment will assume uniformly arranged place cell centres."
+            f"Actual place cell centers were initialized as {PCs.place_cell_center_type}, "
+            "but assessment will assume uniformly arranged place cell centers."
         )
 
     Env = Pyrs.Agent.Environment

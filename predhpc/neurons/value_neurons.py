@@ -64,7 +64,7 @@ class SimpleValueNeuron(riab_neurons.PlaceCells):
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
 
-        self.params["place_cell_centres"] = np.asarray(self.params["peak"]).reshape(
+        self.params["place_cell_centers"] = np.asarray(self.params["peak"]).reshape(
             -1, 2
         )
 

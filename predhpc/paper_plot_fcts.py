@@ -9,6 +9,7 @@ import scipy.stats
 import ratinabox
 
 from predhpc import plot_fcts
+from predhpc.experiments import metrics
 from predhpc.util import gen_util, params_util, plot_util, ext_util
 
 LW = 1.6
@@ -322,7 +323,7 @@ def plot_linear_environment(Ag):
     - sub_ax (plt.Axes): The subplot with the plotted environment.
     """
 
-    _, sub_ax = plt.subplots(figsize=(6.2, 0.8))
+    _, sub_ax = plt.subplots(figsize=(6.2, 1.0))
     sub_ax = plot_fcts.plot_1D_reset_environment(
         Ag, minimalist=True, title="", base_s=50, obj_lw=LW, sub_ax=sub_ax
     )
@@ -457,37 +458,62 @@ def plot_linear_summary(learner):
     return ax1D
 
 
-def plot_linear_PFs(learner):
+def plot_linear_place_fields(learner):
     """
-    plot_linear_PFs(learner)
+    plot_linear_place_fields(learner)
+
+    Plots the place fields and weights for the given learner object.
 
     Args:
     - learner (Learner): Learner object.
 
     Returns:
-    - sub_ax (plt.Axes): The subplot with the linear place fields plotted.
+    - ax1D (1D np.ndarray of plt.Axes): Subplots with the linear place fields plotted.
     """
 
     _, Ag, PCs, _ = ext_util.extract_objects_from_Pyrs(learner.Pyrs)
 
-    _, sub_ax = plt.subplots(figsize=(3, 2))
+    _, ax1D = plt.subplots(2, 1, figsize=(3, 3), sharex=True)
 
-    plot_fcts.plot_recorded_1D_input_place_cell_weights(
-        learner.get_recorded_weights()["weights"][:, 0],
-        PCs.place_cell_centres,
-        color=PCs.color,
-        marker="none",
-        lw=LW,
-        plot_last_FWHM=False,
-        sub_ax=sub_ax,
+    for i, plot_type in enumerate(["weights", "history"]):
+        if plot_type == "weights":
+            data = learner.get_recorded_weights()["weights"][:, 0]
+            centers = PCs.place_cell_centers
+            color = PCs.color
+        else:
+            t_start = ext_util.choose_t_start_after_BTSP(
+                learner.Pyrs.SomaCompartment, next_trajectory=True
+            )
+            data, centers = metrics.evaluate_PFs(
+                learner.Pyrs, method="history", t_start=t_start
+            )
+            color = learner.Pyrs.SomaCompartment.color
+        plot_fcts.plot_recorded_1D_input_place_cell_weights(
+            data,
+            centers,
+            color=color,
+            marker="none",
+            lw=LW,
+            plot_last_width=False,
+            sub_ax=ax1D[i],
+        )
+
+        format_1D_PF_xaxis(ax1D[i])
+        mark_1D_target(ax1D[i], Ag=Ag)
+
+    plot_util.expand_ticks(
+        ax1D[0], axis="y", num_ticks=5, alternating=True, round_dec=1
     )
+    add_1D_position_markers(ax1D[0], Ag=Ag, y_1D=0.2)
 
-    format_1D_PF_xaxis(sub_ax)
-    plot_util.expand_ticks(sub_ax, axis="y", num_ticks=5, alternating=True, round_dec=1)
-    add_1D_position_markers(sub_ax, Ag=Ag, y_1D=0.2)
-    mark_1D_target(sub_ax, Ag=Ag)
+    ax1D[0].set_xlabel("")
+    ax1D[0].xaxis.set_tick_params(bottom=False)
+    ax1D[0].spines["bottom"].set_visible(False)
 
-    return sub_ax
+    ax1D[1].set_xlabel("Position (m)")
+    ax1D[1].set_ylabel("Neural activity")
+
+    return ax1D
 
 
 def plot_linear_binned_rates(learner, num_bins=100):
@@ -504,7 +530,7 @@ def plot_linear_binned_rates(learner, num_bins=100):
     - ax1D (1D np.ndarray of plt.Axes): Subplots with linear binned rates plotted.
     """
 
-    _, ax1D = plt.subplots(3, 1, figsize=(3.7, 5.6), squeeze=True)
+    _, ax1D = plt.subplots(3, 1, figsize=(3.7, 5), squeeze=True)
 
     kwargs = {
         "num_bins": num_bins,
@@ -535,7 +561,7 @@ def plot_linear_binned_rates(learner, num_bins=100):
     return ax1D
 
 
-def plot_linear_speed_PF_examples(speed_data, Ag=None, PC_color=params_util.PC_COLOR):
+def plot_linear_speed_PF_examples(speed_data, Ag=None, color=None, PF_type="weights"):
     """
     plot_linear_speed_PF_examples()
 
@@ -546,65 +572,88 @@ def plot_linear_speed_PF_examples(speed_data, Ag=None, PC_color=params_util.PC_C
         (see run_linear_speeds()).
     - Ag (Agent, optional): Agent object. If provided, it is used to add markers to
         subplot. Default is None.
-    - PC_color (str, optional): Color of the place cell plot lines. Default is
-        params_util.PC_COLOR.
+    - color (str, optional): Color for PF lines. Default is None.
+    - PF_type (str, optional): PF evaluation method to plot. Default is "weights".
 
     Returns:
     - ax1D (1D np.ndarray of plt.Axes): Subplots with example place fields plotted.
     """
 
+    num_examples = len(speed_data["speed_means"])
+
     _, axes = plt.subplots(
-        len(speed_data["speed_means"]),
+        num_examples,
         1,
-        figsize=(5.7, 3.8),
+        figsize=(5.7, 1.3 * num_examples),
         sharex=True,
         sharey=True,
+        gridspec_kw={"hspace": 0.23},
         squeeze=False,
     )
     ax1D = axes[:, 0]
 
+    ks = np.ones(len(speed_data["speed_means"]))
+    if PF_type == "weights":
+        data_key, center_key = "PC_weights", "PC_place_centers"
+        color = color or params_util.PC_COLOR
+        ymax = 0.28
+        ytick_max = 0.25
+        round_dec = 2
+    elif PF_type == "history":
+        data_key, center_key = "PFs", "PF_centers"
+        color = color or params_util.PYR_SOMA_COLOR
+        ymax = 6
+        ytick_max = 6
+        round_dec = 0
+        if "PF_smoothing" in speed_data.keys():
+            ks = speed_data["PF_smoothing"]
+
     for i, speed_mean in enumerate(speed_data["speed_means"]):
         sub_ax = ax1D[i]
         plot_fcts.plot_recorded_1D_input_place_cell_weights(
-            speed_data["PF_weights"][i],
-            speed_data["PC_place_centers"].reshape(-1, 1),
-            color=PC_color,
+            speed_data[data_key][i],
+            speed_data[center_key],
+            color=color,
             marker="none",
-            plot_last_FWHM=True,
+            plot_last_width=True,
+            k=ks[i],
             lw=LW,
             no_legend=True,
             sub_ax=sub_ax,
         )
-        sub_ax.text(5, 0.223, f"{speed_mean:.2f} m/s", ha="center", fontsize=12)
+        sub_ax.text(5, ymax * 0.83, f"{speed_mean:.2f} m/s", ha="center", fontsize=12)
 
         width = speed_data["PF_widths"][i]
         width = np.around(width, 2)
         rect = mpl_patches.Rectangle(
-            (4.59, 0.17), 0.8, 0.043, color=PC_color, alpha=0.3, lw=0
+            (4.59, ymax * 0.57), 0.8, ymax * 0.22, color=color, alpha=0.3, lw=0
         )
         sub_ax.add_patch(rect)
-        sub_ax.text(5, 0.18, f"{width} m", ha="center", fontsize=12)
+        sub_ax.text(5, ymax * 0.62, f"{width} m", ha="center", fontsize=12)
 
     for sub_ax in ax1D:
-        sub_ax.set_ylim([0, 0.28])
-        sub_ax.set_yticks([0, 0.25])
+        sub_ax.set_ylim([0, ymax])
+        sub_ax.set_yticks([0, ytick_max])
         plot_util.expand_ticks(
-            sub_ax, axis="y", num_ticks=6, alternating=True, round_dec=2
+            sub_ax, axis="y", num_ticks=5, alternating=True, round_dec=round_dec
         )
         if Ag is not None:
             mark_1D_target(sub_ax, Ag=Ag)
         format_1D_PF_xaxis(sub_ax)
 
-    ax1D[0].set_xlabel("")
+    for sub_ax in ax1D[:-1]:
+        sub_ax.set_xlabel("")
+        sub_ax.xaxis.set_tick_params(bottom=False)
+        sub_ax.spines["bottom"].set_visible(False)
 
     if Ag is not None:
-        add_1D_position_markers(ax1D[0], Ag=Ag, y_1D=0.27)
+        add_1D_position_markers(ax1D[0], Ag=Ag, y_1D=ymax * 0.98)
 
     return ax1D
 
 
 def plot_linear_speed_PF_widths(
-    speed_data, mark_examples=list(), PC_color=params_util.PC_COLOR
+    speed_data, mark_examples=list(), color=None, PF_type="weights"
 ):
     """
     plot_linear_speed_PF_widths()
@@ -616,8 +665,8 @@ def plot_linear_speed_PF_widths(
     - speed_data (dict): Dictionary containing speed-related data
         (see run_linear_speeds()).
     - mark_examples (list): List of speed means to mark. Default is an empty list.
-    - PC_color (str, optional): Color of the place cell plot lines. Default is
-        params_util.PC_COLOR.
+    - color (str, optional): Color for PF lines. Default is None.
+    - PF_type (str, optional): PF evaluation method to plot. Default is "weights".
 
     Returns:
     - sub_ax (plt.Axes): The subplot with the speed means and place field widths
@@ -626,8 +675,17 @@ def plot_linear_speed_PF_widths(
 
     _, sub_ax = plt.subplots(figsize=(3.3, 3.3))
 
+    if PF_type == "weights":
+        data_key = "PC_weight_widths"
+        color = color or params_util.PC_COLOR
+        ytick_max = 1.6
+    elif PF_type == "history":
+        data_key = "PF_widths"
+        color = color or params_util.PYR_SOMA_COLOR
+        ytick_max = 0.9
+
     sub_ax.scatter(
-        speed_data["speed_means"], speed_data["PF_widths"], s=20, alpha=0.5, color="k"
+        speed_data["speed_means"], speed_data[data_key], s=20, alpha=0.5, color="k"
     )
 
     # Format axes
@@ -642,22 +700,22 @@ def plot_linear_speed_PF_widths(
     )
 
     sub_ax.set_ylabel("Place field width (m)")
-    sub_ax.set_yticks([0.2, 0.7])
+    sub_ax.set_yticks([0.2, ytick_max])
     plot_util.expand_ticks(
         sub_ax, axis="y", num_ticks=6, alternating=True, round_dec=1, start_idx=1
     )
 
     # Add regression line last
-    regr = scipy.stats.linregress(speed_data["speed_means"], speed_data["PF_widths"])
+    regr = scipy.stats.linregress(speed_data["speed_means"], speed_data[data_key])
     x = np.asarray(sub_ax.get_xlim())
     y = x * regr.slope + regr.intercept
     sub_ax.plot(x, y, alpha=0.6, color="k", ls="dashed", zorder=-5, lw=LW)
 
     regr_str = f"y = {regr.slope:.2f}x + {regr.intercept:.2f}"
-    sub_ax.text(0.11, 0.7, regr_str, fontsize=12)
+    sub_ax.text(0.11, ytick_max * 0.95, regr_str, fontsize=12)
 
     regr_kwargs = {
-        "color": PC_color,
+        "color": color,
         "ls": "dotted",
         "lw": LW,
         "alpha": 1.0,
@@ -670,7 +728,7 @@ def plot_linear_speed_PF_widths(
         if speed_mean not in speed_data["speed_means"]:
             raise RuntimeError(f"{speed_mean} speed mean not found in data dictionary.")
         idx = np.where(speed_data["speed_means"] == speed_mean)[0][0]
-        width = speed_data["PF_widths"][idx]
+        width = speed_data[data_key][idx]
         sub_ax.plot(
             [speed_mean, speed_mean],
             [ymin, width],

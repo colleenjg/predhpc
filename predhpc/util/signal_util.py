@@ -105,16 +105,17 @@ def smooth_circularly(data, k=3):
     return smoothed
 
 
-def get_partway_idx_of_half_max_crossing_on_right(signal):
+def get_partway_idx_of_prop_max_crossing_on_right(signal, prop_peak=0.5):
     """
-    get_partway_idx_of_half_max_crossing_on_right(signal)
+    get_partway_idx_of_prop_max_crossing_on_right(signal)
 
-    Find the index of the point at which the signal first crosses the half peak to on
-    the right side. Index is a decimal value that is partway between the points around
-    the half max crossing.
+    Find the index of the point at which the signal first crosses the proportion of the
+    peak to on the right side. Index is a decimal value that is partway between the
+    points around the crossing.
 
     Args:
     - signal (np.ndarray): 1D array of signal values.
+    - prop_peak (float): Proportion of the maximum to compute. Default is 0.5.
 
     Returns:
     - partway_idx (float or None): Index of the point where the half max is first
@@ -122,9 +123,9 @@ def get_partway_idx_of_half_max_crossing_on_right(signal):
     """
 
     peak_idx = np.argmax(signal)
-    half_max = get_half_max(signal)
+    prop_max = get_prop_max(signal, prop_peak=prop_peak)
 
-    right_side = np.concatenate((signal[peak_idx:], signal[:peak_idx])) - half_max
+    right_side = np.concatenate((signal[peak_idx:], signal[:peak_idx])) - prop_max
 
     post_idxs = np.where(right_side < 0)[0]
     if len(post_idxs) == 0:
@@ -179,45 +180,50 @@ def get_interp_x(x, partway_idx, max_x=None):
     return interp_x
 
 
-def get_half_max(signal):
+def get_prop_max(signal, prop_peak=0.5):
     """
-    get_half_max(signal)
+    get_prop_max(signal)
 
     Compute the half maximum of a signal.
 
     Args:
     - signal (1D np.ndarray): Signal values.
+    - prop_peak (float): Proportion of the maximum to compute. Default is 0.5.
 
     Returns:
-    - half_max (float): Half maximum of the signal.
+    - prop_max (float): Proportion of the maximum of the signal.
     """
 
     signal = np.asarray(signal)
 
-    half_max = signal.min() + (signal.max() - signal.min()) / 2
+    prop_max = signal.min() + (signal.max() - signal.min()) * prop_peak
 
-    return half_max
+    return prop_max
 
 
-def compute_FWHM(signal, x=None, k=1, max_x=None, return_edges=False):
+def compute_signal_width(
+    signal, x=None, k=1, prop_peak=0.15, max_x=None, return_edges=False
+):
     """
-    compute_FWHM(signal)
+    compute_signal_width(signal)
 
-    Compute the full width at half maximum (FWHM) of a signal.
+    Compute the width of a signal, e.g., FWHM (full-width half max).
 
     Args:
     - signal (1D np.ndarray): Signal values.
     - x (1D np.ndarray): X axis. If None, indices are used.
     - k (int, optional): Kernel size for circular smoothing. Default is 1.
-    - max_x (float, optional): Maximum x value to consider for FWHM. If None,
+    - prop_peak (float, optional): Proportion of peak height to use for width
+        calculation. Default is 0.15.
+    - max_x (float, optional): Maximum x value to consider for width. If None,
         the maximum value of x is used. Default is None.
     - return_positions (bool, optional): If True, return the positions defining the
-        FWHM.
+        width.
 
     Returns:
-    - FWHM (float): Full width at half maximum of the signal.
+    - width (float): Width of the signal.
     if return_edges:
-    - FWHM_edges (1D np.ndarray): Edges defining the FWHM [left, right].
+    - width_edges (1D np.ndarray): Edges defining the width [left, right].
     """
 
     if x is None:
@@ -233,37 +239,41 @@ def compute_FWHM(signal, x=None, k=1, max_x=None, return_edges=False):
     smoothed_signal = smooth_circularly(signal, k=k)
 
     # check right side of the peak
-    right_idx = get_partway_idx_of_half_max_crossing_on_right(smoothed_signal)
-    left_idx = get_partway_idx_of_half_max_crossing_on_right(smoothed_signal[::-1])
+    right_idx = get_partway_idx_of_prop_max_crossing_on_right(
+        smoothed_signal, prop_peak=prop_peak
+    )
+    left_idx = get_partway_idx_of_prop_max_crossing_on_right(
+        smoothed_signal[::-1], prop_peak=prop_peak
+    )
 
     if max_x is None:
         max_x = x.max()
 
-    FWHM_edges = np.full(2, np.nan)
+    width_edges = np.full(2, np.nan)
     if np.isnan(right_idx) or np.isnan(left_idx):
-        FWHM = max_x
+        width = max_x
 
     elif np.isclose(right_idx, len(x) - 1 - left_idx):
-        FWHM = max_x
+        width = max_x
 
     else:
         right_pos = get_interp_x(x, right_idx, max_x=max_x)
         left_pos = get_interp_x(x[::-1], left_idx, max_x=max_x)
 
         if right_pos == left_pos:
-            FWHM = max_x
+            width = max_x
         else:
-            FWHM_edges = np.asarray([left_pos, right_pos])
+            width_edges = np.asarray([left_pos, right_pos])
             if right_pos > left_pos:
-                FWHM = right_pos - left_pos
+                width = right_pos - left_pos
             else:
-                FWHM = max_x + (right_pos - left_pos)
+                width = max_x + (right_pos - left_pos)
 
     if return_edges:
-        return FWHM, FWHM_edges
+        return width, width_edges
 
     else:
-        return FWHM
+        return width
 
 
 def pad_throughout(indices, pad_prop=0.1, min_val=None, max_val=None):
@@ -650,9 +660,9 @@ def get_exponential(
     return X_ts
 
 
-def smooth_kernel(kernel, sigma_in_steps, smooth_2D=False):
+def gaussian_smooth_kernel(kernel, sigma_in_steps, smooth_2D=False, circular=False):
     """
-    smooth_kernel(kernel, sigma_in_steps)
+    gaussian_smooth_kernel(kernel, sigma_in_steps)
 
     Smooth a kernel using a Gaussian filter with an AUC of 1.
 
@@ -662,7 +672,7 @@ def smooth_kernel(kernel, sigma_in_steps, smooth_2D=False):
     - smooth_2D (bool, optional): If True, smooth the kernel in 2D. Default is False.
 
     Returns:
-    - smoothed_kernel (1D or 2D np.ndarray): Smoothed kernel.
+    - smoothed_kernel (2D np.ndarray): Smoothed kernel.
     """
 
     num_pts = len(kernel)
@@ -673,15 +683,21 @@ def smooth_kernel(kernel, sigma_in_steps, smooth_2D=False):
         pre = num_pts - post - 1
         kernel_2D = np.pad(kernel_2D, pad_width=((0, 0), (pre, post)), mode="constant")
 
-    gaussian_kernel = get_2D_Gaussian_kernel(
-        sigma=sigma_in_steps, max_aperture=num_pts * 2
-    )
     if sigma_in_steps > 4:
-        smoothed_kernel = fftconvolve(kernel_2D, gaussian_kernel, mode="same")
-    else:
-        smoothed_kernel = gaussian_filter(
-            kernel_2D, sigma_in_steps, mode="constant", cval=0
+        gaussian_kernel = get_2D_Gaussian_kernel(
+            sigma=sigma_in_steps, max_aperture=num_pts * 2
         )
+        if circular:
+            kernel_2D = np.tile(kernel_2D, (3, 1))
+        smoothed_kernel = fftconvolve(kernel_2D, gaussian_kernel, mode="same")
+        if circular:
+            smoothed_kernel = smoothed_kernel[num_pts : 2 * num_pts]
+    else:
+        mode = "wrap" if circular else "constant"
+        smoothed_kernel = gaussian_filter(kernel_2D, sigma_in_steps, mode=mode, cval=0)
+
+    if len(kernel.shape) == 1 and not smooth_2D:
+        smoothed_kernel = smoothed_kernel[:, 0]
 
     return smoothed_kernel
 
@@ -780,7 +796,7 @@ def get_pre_post_exponential(
         pre_post_exp, align_pt = pad_and_convolve_exp(pre_exp, post_exp)
 
     if sigma_in_steps is not None:
-        pre_post_exp = smooth_kernel(pre_post_exp, sigma_in_steps)[:, 0]
+        pre_post_exp = gaussian_smooth_kernel(pre_post_exp, sigma_in_steps)[:, 0]
 
     if return_AUC_only:
         AUC = np.sum(pre_post_exp)
@@ -1023,7 +1039,9 @@ def get_summed_exp(
         summed_pre_post_exp, align_pt = pad_and_convolve_exp(summed_pre, summed_post)
 
     if sigma_in_steps is not None:
-        summed_pre_post_exp = smooth_kernel(summed_pre_post_exp, sigma_in_steps)[:, 0]
+        summed_pre_post_exp = gaussian_smooth_kernel(
+            summed_pre_post_exp, sigma_in_steps
+        )[:, 0]
 
     if norm_max:
         summed_pre_post_exp = summed_pre_post_exp / summed_pre_post_exp.max()
@@ -1130,6 +1148,7 @@ def get_2D_Gaussian_kernel(sigma, aperture_prop=8, max_aperture=np.inf):
     """
 
     aperture = int(np.ceil(min(sigma * aperture_prop, max_aperture)) // 2 * 2 + 1)
+    print(aperture)
 
     x = np.linspace(-(aperture // 2), aperture // 2, aperture)
     xx, yy = np.meshgrid(x, x)

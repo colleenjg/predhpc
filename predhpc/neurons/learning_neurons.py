@@ -583,7 +583,7 @@ class LearnLayer(SmoothFeedForwardLayer):
 
         self.set_learn(True)
 
-        self.history["target_mse"] = list()
+        self.history["target_MSE"] = list()
         self.num_steps_total = 0
 
         return
@@ -740,10 +740,10 @@ class LearnLayer(SmoothFeedForwardLayer):
         super().save_to_history()
 
         if self.target is None:
-            self.history["target_mse"].append(np.nan)
+            self.history["target_MSE"].append(np.nan)
         else:
-            target_mse = np.mean((self.target - self.firingrate) ** 2)
-            self.history["target_mse"].append(target_mse)
+            target_MSE = np.mean((self.target - self.firingrate) ** 2)
+            self.history["target_MSE"].append(target_MSE)
 
     def update_weights(self):
         """
@@ -1013,7 +1013,7 @@ class LearnLayer(SmoothFeedForwardLayer):
 
         sub_ax = plot_fcts.plot_loss(
             self.history["t"],
-            self.history["target_mse"],
+            self.history["target_MSE"],
             mark_ts=reset_times,
             t_start=t_start,
             t_end=t_end,
@@ -2320,8 +2320,8 @@ class BTSPLayer(HebbianLayer):
         applied to the BTSP trigger time if apply_step is False, and to the BTSP
         application time if apply_step.
 
-        If applied_also is True, application steps outside of the time constraints
-        are allowed.
+        If applied_also is True, BTSP events with application steps outside of the time
+        constraints are still included.
 
         Args:
         - applied_only (bool, optional): Whether to return only applied BTSP events.
@@ -2374,17 +2374,19 @@ class BTSPLayer(HebbianLayer):
                     if step < startid or step >= endid:
                         continue
                     if i >= len(BTSP_apply_step_dict[target]):
-                        apply_step = np.nan
+                        step_applied = np.nan
                     elif np.isnan(BTSP_apply_step_dict[target][i]):
-                        apply_step = np.nan
+                        step_applied = np.nan
                     else:
-                        apply_step = BTSP_apply_step_dict[target][i]
+                        step_applied = BTSP_apply_step_dict[target][i]
 
-                if applied_only and (np.isnan(apply_step) or apply_step >= endid):
-                    continue
+                    if applied_only and (
+                        np.isnan(step_applied) or step_applied >= endid
+                    ):
+                        continue
 
+                    applied_steps.append(step_applied)
                 all_steps.append(step)
-                applied_steps.append(apply_step)
 
         all_steps = np.sort(all_steps)
 
