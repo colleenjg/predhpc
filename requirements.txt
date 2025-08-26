@@ -4,6 +4,7 @@ pandas
 ratinabox
 ray
 scikit-learn
+scipy
 seaborn
 tqdm
 
