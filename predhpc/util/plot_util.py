@@ -1531,7 +1531,12 @@ def plot_CC_across_periods(CC, sub_ax=None):
 
 
 def plot_width(
-    signal, positions=None, plot_smoothed=True, prop_peak=0.15, k=1, max_pos=None
+    signal,
+    positions=None,
+    plot_smoothed=True,
+    prop_peak=signal_util.DFT_PROP_PEAK,
+    k=1,
+    max_pos=None,
 ):
     """
     plot_width(signal, positions=None)
@@ -1545,7 +1550,7 @@ def plot_width(
     - plot_smoothed (bool, optional): Whether to plot the smoothed signal.
         Default is True.
     - prop_peak (float, optional): Proportion of the peak to use for width calculation.
-        Default is 0.15.
+        Default is signal_util.DFT_PROP_PEAK.
     - k (int, optional): Smoothing factor for the signal. Default is 1.
     - max_pos (float, optional): Maximum position value for circular smoothing.
         If None, it is inferred from the positions data. Default is None.

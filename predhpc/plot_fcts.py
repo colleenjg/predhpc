@@ -1259,7 +1259,7 @@ def add_1D_place_cell_weights_width(
     sub_ax,
     place_weights: np.ndarray[tuple[int, int, int], np.dtype[np.float64]],
     PCs: "riab_neurons.PlaceCells",
-    prop_peak: float = 0.15,
+    prop_peak: float = signal_util.DFT_PROP_PEAK,
     time_axis: bool = False,
     time_shift: float = 0.0,
     **kwargs,
@@ -1275,7 +1275,7 @@ def add_1D_place_cell_weights_width(
         (num_epochs, num_cells, num_PCs).
     - PCs (riab_neurons.PlaceCells): Place cells of the layer.
     - prop_peak (float): Proportion of the peak to use for width computation.
-        Default is 0.15.
+        Default is signal_util.DFT_PROP_PEAK.
     - time_axis (bool, optional): Whether to plot the x-axis in time. Default is False.
     - time_shift (float, optional): Time shift to apply to the x-axis if time_axis is
         True. Default is 0.0.
@@ -1589,8 +1589,8 @@ def plot_recorded_1D_input_place_cell_weights(
         if not no_legend:
             sub_ax.legend(frameon=False, loc="upper right")
 
-    sub_ax.set_xlabel("Place field centers")
-    sub_ax.set_ylabel(f"Input weights")
+    sub_ax.set_xlabel("Input place field center (m)")
+    sub_ax.set_ylabel(f"Input weight")
     sub_ax.set_ylim(0, sub_ax.get_ylim()[1] * 1.1)
     sub_ax.spines[["top", "right"]].set_visible(False)
 

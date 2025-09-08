@@ -4,6 +4,8 @@ from scipy.optimize import curve_fit
 from scipy.ndimage import gaussian_filter
 from scipy.signal import fftconvolve
 
+DFT_PROP_PEAK = 0.5
+
 
 def fit_exp(xs, ys, log=True):
     """
@@ -105,45 +107,6 @@ def smooth_circularly(data, k=3):
     return smoothed
 
 
-def get_partway_idx_of_prop_max_crossing_on_right(signal, prop_peak=0.5):
-    """
-    get_partway_idx_of_prop_max_crossing_on_right(signal)
-
-    Find the index of the point at which the signal first crosses the proportion of the
-    peak to on the right side. Index is a decimal value that is partway between the
-    points around the crossing.
-
-    Args:
-    - signal (np.ndarray): 1D array of signal values.
-    - prop_peak (float): Proportion of the maximum to compute. Default is 0.5.
-
-    Returns:
-    - partway_idx (float or None): Index of the point where the half max is first
-        crossed, to the right of the peak. If no crossing is found, returns np.nan.
-    """
-
-    peak_idx = np.argmax(signal)
-    prop_max = get_prop_max(signal, prop_peak=prop_peak)
-
-    right_side = np.concatenate((signal[peak_idx:], signal[:peak_idx])) - prop_max
-
-    post_idxs = np.where(right_side < 0)[0]
-    if len(post_idxs) == 0:
-        return np.nan
-
-    post_idx = post_idxs[0]
-    pre_idx = post_idx - 1
-
-    # Find a decimal index under linear interpolation between points
-    pre_diff = right_side[pre_idx]
-    post_diff = right_side[post_idx]
-
-    pre_idx = (peak_idx + pre_idx) % len(signal)
-    partway_idx = pre_idx + pre_diff / (pre_diff + np.absolute(post_diff))
-
-    return partway_idx
-
-
 def get_interp_x(x, partway_idx, max_x=None):
     """
     get_interp_x(x, partway_idx)
@@ -201,8 +164,47 @@ def get_prop_max(signal, prop_peak=0.5):
     return prop_max
 
 
+def get_partway_idx_of_prop_max_crossing_on_right(signal, prop_peak=DFT_PROP_PEAK):
+    """
+    get_partway_idx_of_prop_max_crossing_on_right(signal)
+
+    Find the index of the point at which the signal first crosses the proportion of the
+    peak to on the right side. Index is a decimal value that is partway between the
+    points around the crossing.
+
+    Args:
+    - signal (np.ndarray): 1D array of signal values.
+    - prop_peak (float): Proportion of the maximum to compute. Default is DFT_PROP_PEAK.
+
+    Returns:
+    - partway_idx (float or None): Index of the point where the half max is first
+        crossed, to the right of the peak. If no crossing is found, returns np.nan.
+    """
+
+    peak_idx = np.argmax(signal)
+    prop_max = get_prop_max(signal, prop_peak=prop_peak)
+
+    right_side = np.concatenate((signal[peak_idx:], signal[:peak_idx])) - prop_max
+
+    post_idxs = np.where(right_side < 0)[0]
+    if len(post_idxs) == 0:
+        return np.nan
+
+    post_idx = post_idxs[0]
+    pre_idx = post_idx - 1
+
+    # Find a decimal index under linear interpolation between points
+    pre_diff = right_side[pre_idx]
+    post_diff = right_side[post_idx]
+
+    pre_idx = (peak_idx + pre_idx) % len(signal)
+    partway_idx = pre_idx + pre_diff / (pre_diff + np.absolute(post_diff))
+
+    return partway_idx
+
+
 def compute_signal_width(
-    signal, x=None, k=1, prop_peak=0.15, max_x=None, return_edges=False
+    signal, x=None, k=1, prop_peak=DFT_PROP_PEAK, max_x=None, return_edges=False
 ):
     """
     compute_signal_width(signal)
@@ -214,7 +216,7 @@ def compute_signal_width(
     - x (1D np.ndarray): X axis. If None, indices are used.
     - k (int, optional): Kernel size for circular smoothing. Default is 1.
     - prop_peak (float, optional): Proportion of peak height to use for width
-        calculation. Default is 0.15.
+        calculation. Default is DFT_PROP_PEAK.
     - max_x (float, optional): Maximum x value to consider for width. If None,
         the maximum value of x is used. Default is None.
     - return_positions (bool, optional): If True, return the positions defining the

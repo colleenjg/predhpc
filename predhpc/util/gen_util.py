@@ -94,7 +94,9 @@ def save_np_dict(filepath, data_dict):
     np.savez(filepath, **data_dict)
 
 
-def get_filtered_np_data_dict(data_dict, filter_key, values=list(), skip_keys=list()):
+def get_filtered_np_data_dict(
+    data_dict, filter_key, values=list(), skip_keys=list(), raise_missing=True
+):
     """
     get_filtered_np_data_dict(data_dict, filter_key)
 
@@ -106,6 +108,8 @@ def get_filtered_np_data_dict(data_dict, filter_key, values=list(), skip_keys=li
     - key (str): Key to filter on.
     - values (list, optional): List of values to keep. Default is empty list.
     - skip_keys (list, optional): List of keys to skip. Default is empty list.
+    - raise_missing (bool, optional): If True, raise an error if a value is not found
+        in the filter key. Default is True.
 
     Returns:
     - filtered_dict (dict): Filtered dictionary.
@@ -116,7 +120,7 @@ def get_filtered_np_data_dict(data_dict, filter_key, values=list(), skip_keys=li
 
     indices = list()
     for val in values:
-        if val not in data_dict[filter_key]:
+        if val not in data_dict[filter_key] and raise_missing:
             raise RuntimeError(
                 f"{val} value not found in data dictionary under '{filter_key}'."
             )

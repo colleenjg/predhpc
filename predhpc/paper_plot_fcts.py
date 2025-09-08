@@ -65,7 +65,9 @@ def initialize_paper_parameters(gen_dir=".", notebook=False):
     stylize_plots_for_paper(notebook=notebook)
 
 
-def format_1D_PF_xaxis(sub_ax, scale=params_util.SCALE_LINEAR, num_ticks=7):
+def format_1D_PF_xaxis(
+    sub_ax, scale=params_util.SCALE_LINEAR, num_ticks=7, PF_type="weights"
+):
     """
     format_1D_PF_xaxis(sub_ax)
 
@@ -77,6 +79,9 @@ def format_1D_PF_xaxis(sub_ax, scale=params_util.SCALE_LINEAR, num_ticks=7):
         Default is params_util.SCALE_LINEAR.
     - num_ticks (int, optional): The number of ticks to display on the x-axis.
         Default is 7.
+    - PF_type (str, optional): If "weights", the y-axis label is set to
+        "Input weight". If "history", it is set to "Neural activity".
+        Default is "weights".
     """
 
     sub_ax.set_xlim([0, scale])
@@ -86,6 +91,17 @@ def format_1D_PF_xaxis(sub_ax, scale=params_util.SCALE_LINEAR, num_ticks=7):
         sub_ax, axis="x", num_ticks=num_ticks, alternating=True, round_dec=0
     )
     sub_ax.set_xlabel("Input place field center (m)")
+
+    if PF_type == "weights":
+        ylabel = "Input weight"
+    elif PF_type == "history":
+        ylabel = "Neural activity"
+    elif PF_type == "smoothed_weights":
+        ylabel = "Smoothed input weight"
+    else:
+        raise ValueError(f"PF_type '{PF_type}' not recognized.")
+
+    sub_ax.set_ylabel(ylabel)
 
 
 def mark_1D_target(sub_ax, Ag, target_shift=0, alpha=0.8):
@@ -209,12 +225,12 @@ def plot_1D_PF_weights(
     sub_ax=None,
 ):
     """
-    plot_1D_PF_weights(PCs, weights)
+    plot_1D_PF_weights(PC_centers, weights)
 
     Plots the weights of place cells.
 
     Args:
-    - PCs (PlaceCells): PlaceCells object containing place cell data.
+    - PC_centers (1D np.ndarray): Centers of the place cells.
     - weights (1D np.ndarray): Weights to plot.
     - shift (float, optional): Shift to apply to the weights. Default is 0.
     - scale_y (float, optional): Scale factor for the y-axis. Default is 4.
@@ -475,11 +491,15 @@ def plot_linear_place_fields(learner):
 
     _, ax1D = plt.subplots(2, 1, figsize=(3, 3), sharex=True)
 
-    for i, plot_type in enumerate(["weights", "history"]):
-        if plot_type == "weights":
+    for i, PF_type in enumerate(["weights", "history"]):
+        if "weights" in PF_type:
             data = learner.get_recorded_weights()["weights"][:, 0]
             centers = PCs.place_cell_centers
             color = PCs.color
+            if PF_type == "smoothed_weights":
+                data, centers = metrics.get_smoothed_weights(data, centers, PCs.widths)
+            elif PF_type != "weights":
+                raise ValueError(f"PF_type '{PF_type}' not recognized.")
         else:
             t_start = ext_util.choose_t_start_after_BTSP(
                 learner.Pyrs.SomaCompartment, next_trajectory=True
@@ -488,6 +508,7 @@ def plot_linear_place_fields(learner):
                 learner.Pyrs, method="history", t_start=t_start
             )
             color = learner.Pyrs.SomaCompartment.color
+
         plot_fcts.plot_recorded_1D_input_place_cell_weights(
             data,
             centers,
@@ -498,7 +519,7 @@ def plot_linear_place_fields(learner):
             sub_ax=ax1D[i],
         )
 
-        format_1D_PF_xaxis(ax1D[i])
+        format_1D_PF_xaxis(ax1D[i], PF_type=PF_type)
         mark_1D_target(ax1D[i], Ag=Ag)
 
     plot_util.expand_ticks(
@@ -561,6 +582,48 @@ def plot_linear_binned_rates(learner, num_bins=100):
     return ax1D
 
 
+def retrieve_PF_data(data_dict, PF_type="weights"):
+    """
+    retrieve_PF_data(data_dict)
+
+    Retrieves place field data from the given data dictionary.
+
+    Args:
+    - data_dict (dict): Dictionary containing place field data.
+    - PF_type (str, optional): PF evaluation method to retrieve. Default is "weights".
+
+    Returns:
+    - PF_centers (1D np.ndarray): Centers of the place fields.
+    - PFs (2D np.ndarray): Place fields.
+    - PF_widths (1D np.ndarray): Widths of the place fields.
+    """
+
+    if PF_type == "weights":
+        data_key = "PC_weights"
+        center_key = "PC_place_centers"
+        width_key = "PC_weight_widths"
+    elif PF_type == "smoothed_weights":
+        data_key = "PC_smoothed_weights"
+        center_key = "PC_place_centers"
+        width_key = "PC_smoothed_weight_widths"
+    elif PF_type == "history":
+        data_key = "PFs"
+        center_key = "PF_centers"
+        width_key = "PF_widths"
+    else:
+        raise ValueError(f"PF_type '{PF_type}' not recognized.")
+
+    for key in [data_key, center_key, width_key]:
+        if key not in data_dict:
+            raise ValueError(f"Key '{key}' not found in data_dict.")
+
+    PFs = data_dict[data_key]
+    PF_centers = data_dict[center_key]
+    PF_widths = data_dict[width_key]
+
+    return PF_centers, PFs, PF_widths
+
+
 def plot_linear_speed_PF_examples(speed_data, Ag=None, color=None, PF_type="weights"):
     """
     plot_linear_speed_PF_examples()
@@ -593,26 +656,23 @@ def plot_linear_speed_PF_examples(speed_data, Ag=None, color=None, PF_type="weig
     ax1D = axes[:, 0]
 
     ks = np.ones(len(speed_data["speed_means"]))
-    if PF_type == "weights":
-        data_key, center_key = "PC_weights", "PC_place_centers"
+    PFs, PF_centers, PF_widths = retrieve_PF_data(speed_data, PF_type=PF_type)
+    if "weights" in PF_type:
         color = color or params_util.PC_COLOR
-        ymax = 0.28
-        ytick_max = 0.25
+        ytick_max, ymax = 0.25, 0.28
         round_dec = 2
     elif PF_type == "history":
-        data_key, center_key = "PFs", "PF_centers"
         color = color or params_util.PYR_SOMA_COLOR
-        ymax = 6
-        ytick_max = 6
+        ytick_max, ymax = 6, 6
         round_dec = 0
-        if "PF_smoothing" in speed_data.keys():
-            ks = speed_data["PF_smoothing"]
+    else:
+        raise ValueError(f"PF_type '{PF_type}' not recognized.")
 
     for i, speed_mean in enumerate(speed_data["speed_means"]):
         sub_ax = ax1D[i]
         plot_fcts.plot_recorded_1D_input_place_cell_weights(
-            speed_data[data_key][i],
-            speed_data[center_key],
+            PFs[i],
+            PF_centers,
             color=color,
             marker="none",
             plot_last_width=True,
@@ -623,15 +683,15 @@ def plot_linear_speed_PF_examples(speed_data, Ag=None, color=None, PF_type="weig
         )
         sub_ax.text(5, ymax * 0.83, f"{speed_mean:.2f} m/s", ha="center", fontsize=12)
 
-        width = speed_data["PF_widths"][i]
-        width = np.around(width, 2)
         rect = mpl_patches.Rectangle(
             (4.59, ymax * 0.57), 0.8, ymax * 0.22, color=color, alpha=0.3, lw=0
         )
         sub_ax.add_patch(rect)
+
+        width = np.around(PF_widths[i], 2)
         sub_ax.text(5, ymax * 0.62, f"{width} m", ha="center", fontsize=12)
 
-    for sub_ax in ax1D:
+    for i, sub_ax in enumerate(ax1D):
         sub_ax.set_ylim([0, ymax])
         sub_ax.set_yticks([0, ytick_max])
         plot_util.expand_ticks(
@@ -639,7 +699,9 @@ def plot_linear_speed_PF_examples(speed_data, Ag=None, color=None, PF_type="weig
         )
         if Ag is not None:
             mark_1D_target(sub_ax, Ag=Ag)
-        format_1D_PF_xaxis(sub_ax)
+        format_1D_PF_xaxis(sub_ax, PF_type=PF_type)
+        if i != len(ax1D) // 2:
+            sub_ax.set_ylabel("")
 
     for sub_ax in ax1D[:-1]:
         sub_ax.set_xlabel("")
@@ -675,18 +737,21 @@ def plot_linear_speed_PF_widths(
 
     _, sub_ax = plt.subplots(figsize=(3.3, 3.3))
 
-    if PF_type == "weights":
-        data_key = "PC_weight_widths"
-        color = color or params_util.PC_COLOR
-        ytick_max = 1.6
-    elif PF_type == "history":
-        data_key = "PF_widths"
-        color = color or params_util.PYR_SOMA_COLOR
-        ytick_max = 0.9
+    xtick_max = np.ceil(speed_data["speed_means"].max() * 10) / 10
 
-    sub_ax.scatter(
-        speed_data["speed_means"], speed_data[data_key], s=20, alpha=0.5, color="k"
-    )
+    _, _, PF_widths = retrieve_PF_data(speed_data, PF_type=PF_type)
+    if "weights" in PF_type:
+        color = color or params_util.PC_COLOR
+        ytick_min, ytick_max, num_yticks = 0.2, 0.8, 5
+        start_y_idx = 0
+    elif PF_type == "history":
+        color = color or params_util.PYR_SOMA_COLOR
+        ytick_min, ytick_max, num_yticks = 0.2, 0.6, 5
+        start_y_idx = 0
+    else:
+        raise ValueError(f"PF_type '{PF_type}' not recognized.")
+
+    sub_ax.scatter(speed_data["speed_means"], PF_widths, s=20, alpha=0.5, color="k")
 
     # Format axes
     for axis in ["x", "y"]:
@@ -694,15 +759,33 @@ def plot_linear_speed_PF_widths(
     sub_ax.spines[["top", "right"]].set_visible(False)
 
     sub_ax.set_xlabel("Speed mean (m/s)")
-    sub_ax.set_xticks([0.05, 0.4])
+    if xtick_max < 0.4:
+        xtick_min = 0.05
+        num_xticks = (xtick_max - xtick_min) * 20 + 1
+        start_x_idx = 1
+    else:
+        xtick_min = 0
+        num_xticks = (xtick_max - xtick_min) * 10 + 1
+        start_x_idx = 0
+    sub_ax.set_xticks([xtick_min, xtick_max])
     plot_util.expand_ticks(
-        sub_ax, axis="x", num_ticks=8, alternating=True, round_dec=2, start_idx=1
+        sub_ax,
+        axis="x",
+        num_ticks=int(num_xticks),
+        alternating=True,
+        round_dec=2,
+        start_idx=start_x_idx,
     )
 
     sub_ax.set_ylabel("Place field width (m)")
-    sub_ax.set_yticks([0.2, ytick_max])
+    sub_ax.set_yticks([ytick_min, ytick_max])
     plot_util.expand_ticks(
-        sub_ax, axis="y", num_ticks=6, alternating=True, round_dec=1, start_idx=1
+        sub_ax,
+        axis="y",
+        num_ticks=num_yticks,
+        alternating=True,
+        round_dec=1,
+        start_idx=start_y_idx,
     )
 
     # Add regression line last
@@ -712,7 +795,9 @@ def plot_linear_speed_PF_widths(
     sub_ax.plot(x, y, alpha=0.6, color="k", ls="dashed", zorder=-5, lw=LW)
 
     regr_str = f"y = {regr.slope:.2f}x + {regr.intercept:.2f}"
-    sub_ax.text(0.11, ytick_max * 0.95, regr_str, fontsize=12)
+    x_text = sub_ax.get_xlim()[1] * 0.2
+    y_text = np.diff(sub_ax.get_ylim()) * 0.95 + sub_ax.get_ylim()[0]
+    sub_ax.text(x_text, y_text, regr_str, fontsize=12)
 
     regr_kwargs = {
         "color": color,
@@ -925,8 +1010,59 @@ def plot_PF_peak_shift(
         sub_ax.set_xlabel("Input place field center (m)")
 
 
+def get_shift_baseline_idx(target_shifts, num_BTSP=None, seeds=None):
+    """
+    get_shift_baseline_idx(shift_data)
+
+    Gets the index of the baseline (0 target shift) in the shift data dictionary.
+    Optionally checks whether the number of BTSP events are as expected
+    (minimum 1, maximum 2, with one 1 for the baseline) and whether all shifts have the
+    same random seed.
+
+    Args:
+    - target_shifts (1D np.ndarray): Array of target shifts.
+    - num_BTSP (1D np.ndarray, optional): Array of number of BTSP events per shift.
+        Default is None.
+    - seeds (1D np.ndarray, optional): Array of random seeds used for each shift.
+        Default is None.
+
+    Returns:
+    - base_idx (int): Index of the baseline (0 target shift) in the shift data
+        dictionary.
+    """
+
+    if num_BTSP is not None:
+        if len(num_BTSP) != len(target_shifts):
+            raise ValueError("num_BTSP and target_shifts must have the same length.")
+        if num_BTSP.min() != 1 and num_BTSP.max() != 2:
+            raise RuntimeError(
+                "Expected at least 1 and at most 2 BTSP events per shift."
+            )
+
+    if seeds is not None:
+        if len(seeds) != len(target_shifts):
+            raise ValueError("seeds and target_shifts must have the same length.")
+        if len(np.unique(seeds)) != 1:
+            raise RuntimeError("Expected all shifts to use the same seed.")
+
+    if np.isclose(target_shifts, 0).sum() == 0:
+        raise NotImplementedError(
+            "Plotting not implemented if shift of 0 is not in the data dictionary."
+        )
+    base_idx = np.where(np.isclose(target_shifts, 0))[0][0]
+
+    if num_BTSP is not None and num_BTSP[base_idx] != 1:
+        raise RuntimeError("Expected exactly 1 BTSP event for 0 target shift.")
+
+    return base_idx
+
+
 def plot_linear_shift_PF_examples(
-    shift_data, Ag=None, PC_color=params_util.PC_COLOR, plot_cmap=False
+    shift_data,
+    Ag=None,
+    PC_color=params_util.PC_COLOR,
+    plot_cmap=False,
+    PF_type="weights",
 ):
     """
     plot_linear_shift_PF_examples()
@@ -942,12 +1078,13 @@ def plot_linear_shift_PF_examples(
         params_util.PC_COLOR.
     - plot_cmap (bool): Whether to plot the place field colormap instead of a peak shift
         plot. Default is False.
+    - PF_type (str, optional): PF evaluation method to plot. Default is "weights".
 
     Returns:
     - axes (2D np.ndarray of plt.Axes): Subplots with example place fields plotted.
     """
 
-    height = 1.2 * len(shift_data["target_shifts"])
+    height = 1.2 * (len(shift_data["target_shifts"]) - 1)
     figsize = (8.7, height) if plot_cmap else (10.01, height)
     width_ratios = [1.7, 1] if plot_cmap else [2, 1]
 
@@ -962,16 +1099,27 @@ def plot_linear_shift_PF_examples(
         squeeze=False,
     )
 
-    base = shift_data["PF_weights"][0][1]
+    base_idx = get_shift_baseline_idx(
+        shift_data["target_shifts"],
+        num_BTSP=shift_data["num_BTSP"],
+        seeds=shift_data["seeds"],
+    )
+
+    PFs, PF_centers, _ = retrieve_PF_data(shift_data, PF_type=PF_type)
+
+    base = PFs[base_idx]
     peak_idx = np.argmax(base)
-    vmax = np.nanmax(shift_data["PF_weights"])
+    vmax = np.nanmax(PFs)
+    sub_ax_idx = 0
     for i, target_shift in enumerate(shift_data["target_shifts"]):
-        if target_shift not in shift_data["target_shifts"]:
-            raise RuntimeError(f"{target_shift} shift not found in data dictionary.")
+        if np.isclose(target_shift, 0):
+            continue
+
         idx = np.where(shift_data["target_shifts"] == target_shift)[0][0]
+
         plot_1D_PF_weights(
-            shift_data["PC_place_centers"],
-            shift_data["PF_weights"][idx][-1],
+            PF_centers,
+            PFs[idx],
             scale_y=1,
             base=base,
             PC_color=PC_color,
@@ -985,29 +1133,30 @@ def plot_linear_shift_PF_examples(
         if Ag is not None:
             mark_1D_target(axes[i, 0], Ag=Ag, target_shift=target_shift)
 
-        data = shift_data["PF_weights"][idx : idx + 1, -1]
         if plot_cmap:
             plot_PF_cmap(
-                data,
+                PFs[idx],
                 sub_ax=axes[i, 1],
                 vmax=vmax,
-                x_vals=shift_data["PC_place_centers"],
+                x_vals=PF_centers,
                 plot_colorbar=False,
             )
             mark_1D_target(axes[i, 1], Ag=Ag, target_shift=target_shift)
 
         else:
             plot_PF_peak_shift(
-                data.reshape(1, -1),
+                PFs[idx].reshape(1, -1),
                 sub_ax=axes[i, 1],
                 initial_peak_idx=peak_idx,
                 # initial_peak_value=base[peak_idx],
                 s=35,
                 lw=LW,
-                x_vals=shift_data["PC_place_centers"],
+                x_vals=PF_centers,
                 head_width=0.1,
                 head_length=0.1,
             )
+
+        sub_ax_idx += 1
 
     for sub_ax in axes[:, 0]:
         sub_ax.set_ylim([0, 0.28])
@@ -1018,7 +1167,7 @@ def plot_linear_shift_PF_examples(
         )
 
     for sub_ax in axes.ravel():
-        format_1D_PF_xaxis(sub_ax)
+        format_1D_PF_xaxis(sub_ax, PF_type=PF_type)
 
     axes[-1, 0].set_ylabel("Input weight", va="top", labelpad=15)
 
@@ -1044,6 +1193,7 @@ def plot_target_shift_PFs(
     mark_examples=list(),
     plot_cmap=False,
     PC_color=params_util.PC_COLOR,
+    PF_type="weights",
 ):
     """
     plot_target_shift_PFs()
@@ -1061,6 +1211,7 @@ def plot_target_shift_PFs(
     - plot_cmap (bool): Whether to plot the place field colormap instead of a peak shift
         plot. Default is False.
     - PC_color (str): Color to use for place cell plots. Default is params_util.PC_COLOR.
+    - PF_type (str, optional): PF evaluation method to plot. Default is "weights".
 
     Returns:
     - ax1D (1D np.ndarray of plt.Axes): Subplots with target shifts and place field
@@ -1080,13 +1231,21 @@ def plot_target_shift_PFs(
 
     ax1D = axes[0, :]
 
-    base = shift_data["PF_weights"][0][1]
+    base_idx = get_shift_baseline_idx(
+        shift_data["target_shifts"],
+        num_BTSP=shift_data["num_BTSP"],
+        seeds=shift_data["seeds"],
+    )
+
+    PFs, PF_centers, _ = retrieve_PF_data(shift_data, PF_type=PF_type)
+
+    base = PFs[base_idx][-1]
     base_shift = np.nanmin(base)
     base_shifted = base - base_shift
 
     scale_y = 4
     plot_1D_PF_weights(
-        shift_data["PC_place_centers"],
+        PF_centers,
         base_shifted,
         lw=1.8,
         sub_ax=ax1D[0],
@@ -1096,10 +1255,10 @@ def plot_target_shift_PFs(
 
     peak_idx = np.argmax(base)
     for i, shift in enumerate(shift_data["target_shifts"]):
-        last_shifted = shift_data["PF_weights"][i, -1] - base_shift
+        last_shifted = PFs[i, -1] - base_shift
         if np.isfinite(last_shifted.all()):
             plot_1D_PF_weights(
-                shift_data["PC_place_centers"],
+                PF_centers,
                 last_shifted,
                 shift=shift,
                 base=base_shifted,
@@ -1109,7 +1268,7 @@ def plot_target_shift_PFs(
             )
 
     for sub_ax in ax1D:
-        format_1D_PF_xaxis(sub_ax)
+        format_1D_PF_xaxis(sub_ax, PF_type=PF_type)
     ax1D[0].set_ylabel("Target object shift (m)", labelpad=13)
 
     ymin = shift_data["target_shifts"].min()
@@ -1118,15 +1277,14 @@ def plot_target_shift_PFs(
     ax1D[0].spines["left"].set_bounds(ymin, ymax)
     ax1D[0].set_yticks(yticks)
 
-    data = shift_data["PF_weights"][:, -1]
     for idx in np.where(shift_data["target_shifts"] == 0)[0]:
-        data[idx] = shift_data["PF_weights"][idx, 1]
+        PFs[idx] = PFs[idx]
 
     if plot_cmap:
         plot_PF_cmap(
             data,
             sub_ax=ax1D[1],
-            x_vals=shift_data["PC_place_centers"],
+            x_vals=PF_centers,
             y_vals=shift_data["target_shifts"],
             keep_yticks=True,
         )
@@ -1136,7 +1294,7 @@ def plot_target_shift_PFs(
             sub_ax=ax1D[1],
             initial_peak_idx=peak_idx,
             # initial_peak_value=base[peak_idx] * scale_y,
-            x_vals=shift_data["PC_place_centers"],
+            x_vals=PF_centers,
             y_vals=shift_data["target_shifts"],
             lw=LW * 0.8,
             head_width=0.04,
@@ -1144,7 +1302,7 @@ def plot_target_shift_PFs(
             keep_yticks=True,
         )
 
-        x_loc = gen_util.get_proportion_edges(shift_data["PC_place_centers"], 0.01)
+        x_loc = gen_util.get_proportion_edges(PF_centers, 0.01)
         for target_shift in mark_examples:
             if target_shift not in shift_data["target_shifts"]:
                 raise RuntimeError(
@@ -1297,6 +1455,6 @@ def plot_openfield_weights(Pyrs, fig_side=2.7, s=79.35, lw=LW, alpha=0.8):
     )
 
     cax = fig.axes[-1]
-    cax.set_ylabel("Input weights")
+    cax.set_ylabel("Input weight")
 
     return sub_ax

@@ -5,6 +5,44 @@ from predhpc.util import signal_util
 WIDTH = 0.5  # symmetical width (m) around PC peak to use for pre/post weight ratio
 
 
+def get_smoothed_weights(all_weights, PF_centers, PC_widths):
+    """
+    get_smoothed_weights(all_weights, PF_centers, PC_widths)
+
+    Apply a Gaussian smoothing kernel to the weights to take into account the spatial
+    structure of the place fields.
+
+    Args:
+    - all_weights (2D np.ndarray): Weights from place cells to pyramidal neurons
+        (weights x place cells).
+    - PF_centers (1D or 2D np.ndarray): Place field centers (place cells x D).
+    - PC_widths (float): Width of the place cells (same unit as PF_centers).
+
+    Returns:
+    - sm_weights (2D np.ndarray): Smoothed weights (neurons x place cells).
+    - PF_centers (1D np.ndarray): Place field centers (place cells).
+    """
+
+    if len(PF_centers.shape) == 2:
+        PF_centers = PF_centers[:, 0]
+
+    sorter = np.argsort(PF_centers)
+    PF_centers = PF_centers[sorter]
+    all_weights = all_weights[..., sorter]
+
+    dist = np.absolute(np.diff(PF_centers)).mean()
+
+    sigma_in_steps = float(PC_widths) / dist
+    sm_weights = list()
+    for weights in all_weights.reshape((-1, PF_centers.shape[0])):
+        sm_weights.append(
+            signal_util.gaussian_smooth_kernel(weights, sigma_in_steps, circular=True)
+        )
+    sm_weights = np.asarray(sm_weights).reshape(all_weights.shape)
+
+    return sm_weights, PF_centers
+
+
 def evaluate_PFs(Pyrs, PC_name="PCs", method="weights", t_start=None, t_end=None):
     """
     evaluate_PFs(Pyrs)
@@ -16,9 +54,9 @@ def evaluate_PFs(Pyrs, PC_name="PCs", method="weights", t_start=None, t_end=None
     - PC_name (str, optional): Name of the place cell layer. Default is "PCs".
     - method (str, optional): Method to use for evaluating place fields.
         "weights" returns the input weights from the place cell layer.
-        "weights_applied" calculates Pyramidal neuron activity considering only place
+        "applied_weights" calculates Pyramidal neuron activity considering only place
             cell input.
-        "weights_smoothed" applies a Gaussian smoothing kernel to the weights to take
+        "smoothed_weights" applies a Gaussian smoothing kernel to the weights to take
             into account the spatial structure of the place fields.
         "history" uses firingrate history to compute place field.
         Default is "weights".
@@ -47,9 +85,7 @@ def evaluate_PFs(Pyrs, PC_name="PCs", method="weights", t_start=None, t_end=None
     sorter = np.argsort(PF_centers)
     PF_centers = PF_centers[sorter]
 
-    dist = np.absolute(np.diff(PF_centers)).mean()
-
-    if method in ["weights", "weights_applied"]:
+    if method in ["weights", "applied_weights", "smoothed_weights"]:
 
         PFs = Pyrs.inputs["PCs"]["w"][:, sorter]
 
@@ -61,17 +97,9 @@ def evaluate_PFs(Pyrs, PC_name="PCs", method="weights", t_start=None, t_end=None
                     "PCs must have a Gaussian description and a single numeric width "
                     "to use 'smoothed_weights' method."
                 )
-            sigma_in_steps = float(PCs.widths) / dist
-            sm_PFs = list()
-            for neuron_PF in PFs:
-                sm_PFs.append(
-                    signal_util.gaussian_smooth_kernel(
-                        neuron_PF, sigma_in_steps, circular=True
-                    )
-                )
-            PFs = np.asarray(sm_PFs)
+            PFs, PF_centers = get_smoothed_weights(PFs, PF_centers, PCs.widths)
 
-        if method == "weights_applied":
+        if method == "applied_weights":
             PC_inputs = PCs.get_state(evaluate_at="pos", pos=PF_centers.reshape(-1, 1))
             V = np.matmul(PFs, PC_inputs)
             if Pyrs.biases.shape != V.shape:
@@ -83,6 +111,7 @@ def evaluate_PFs(Pyrs, PC_name="PCs", method="weights", t_start=None, t_end=None
             PFs = Pyrs.activation_function(V, deriv=False)
 
     elif method == "history":
+        dist = np.absolute(np.diff(PF_centers)).mean()
         PFs, PF_centers = Pyrs.get_history_ratemap(
             t_start=t_start, t_end=t_end, bin_size=dist
         )
@@ -206,7 +235,7 @@ def get_PF_ratio(Pyrs, width=WIDTH, **kwargs):
     return pre_post_ratio
 
 
-def compute_PF_width(Pyrs, k=1, prop_peak=0.15, **kwargs):
+def compute_PF_width(Pyrs, k=1, prop_peak=signal_util.DFT_PROP_PEAK, **kwargs):
     """
     compute_PF_width(Pyrs)
 
@@ -217,7 +246,7 @@ def compute_PF_width(Pyrs, k=1, prop_peak=0.15, **kwargs):
     - Pyrs (two_comp_neurons.TwoCompLayer): Pyr. layer.
     - k (int, optional): Kernel size for circular smoothing. Default is 1.
     - prop_peak (float, optional): Proportion of peak to use for width calculation.
-        Default is 0.15.
+        Default is signal_util.DFT_PROP_PEAK.
 
     Keyword args:
     - **kwargs: Keyword arguments passed to get_PF_info().

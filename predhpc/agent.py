@@ -466,6 +466,33 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         self.velocity = new_velocity
 
+    def set_speed(self, mean=None, std=None):
+        """
+        Set the speed mean and/or standard deviation of the agent.
+
+        Args:
+        - mean (float, optional): Mean speed to set. If None, current value is kept.
+            Default is None.
+        - std (float, optional): Standard deviation of speed to set. If None, current
+            value is kept. Default is None.
+        """
+
+        if mean is not None:
+            self.speed_mean = mean
+
+            if (
+                self.Environment.dimensionality == "1D"
+                and self.Environment.boundary_conditions == "solid"
+                and self.speed_mean != 0
+            ):
+                warnings.warn(
+                    "Warning: You have solid 1D boundary conditions and non-zero "
+                    "speed mean."
+                )
+
+        if std is not None:
+            self.speed_std = std
+
     def get_step_and_time(self, step=None, min=False, as_str=False):
         """
         self.get_step_and_time()

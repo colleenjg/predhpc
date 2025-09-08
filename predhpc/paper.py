@@ -18,8 +18,11 @@ from predhpc.experiments import metrics
 PAPER_SEED = 18
 gen_util.seed_all(PAPER_SEED)
 
+SPEED_MEANS = gen_util.get_rounded_linspace(0.05, 0.4, 29)  # (0.05, 0.55, 41)
 SPEED_EXAMPLES = [0.15, 0.25, 0.35]
-SHIFT_EXAMPLES = [1.0, -0.4, -3.0]
+
+TARGET_SHIFTS = gen_util.get_rounded_linspace(-3.6, 2.4, 61)
+SHIFT_EXAMPLES = [1.0, 0, -0.4, -3.0]
 
 SMOOTH_K = 1
 
@@ -49,6 +52,65 @@ def initialize_paper_parameters(**kwargs):
 
     suppress_warnings()
     paper_plot_fcts.initialize_paper_parameters(**kwargs)
+
+
+def gather_PF_info(learner, k=SMOOTH_K, t_start=None):
+    """
+    gather_PF_info(learner)
+
+    Gathers information about place fields (PFs) from the given learner object using
+    various metrics ("weights", "smoothed_weights", "history").
+
+    Args:
+    - learner (Learner): The learner object to gather information from.
+    - k (int): The smoothing factor for place field width computation.
+        Default is SMOOTH_K.
+    - t_start (float): The start time for history evaluation. Default is None.
+
+    Returns:
+    - PF_info (dict): A dictionary containing gathered PF information:
+        - "PC_place_centers": Place cell centers.
+        - "PC_weights": Place cell input weights.
+        - "PC_weight_widths": Place cell input weight widths.
+        - "PC_smoothed_weights": Smoothed place cell input weights.
+        - "PC_smoothed_weight_widths": Smoothed place cell input weight widths.
+        - "PFs": Place fields computed from history.
+        - "PF_centers": Place field centers.
+        - "PF_widths": Place field widths.
+    """
+
+    _, _, PCs, _ = ext_util.extract_objects_from_Pyrs(learner.Pyrs)
+
+    PF_info = dict()
+
+    # from input weights
+    PC_place_centers = PCs.place_cell_centers[:, 0]
+    sorter = np.argsort(PC_place_centers)
+    PF_info["PC_place_centers"] = PC_place_centers[sorter]
+
+    PF_info["PC_weights"] = learner.get_recorded_weights()["weights"][:, 0, sorter]
+    PF_info["PC_weight_widths"] = metrics.compute_PF_width(learner.Pyrs, k=k)
+
+    # from input weights, smoothed
+    PF_info["PC_smoothed_weights"], _ = metrics.get_smoothed_weights(
+        PF_info["PC_weights"], PF_info["PC_place_centers"], PCs.widths
+    )
+    PF_info["PC_smoothed_weight_widths"] = metrics.compute_PF_width(
+        learner.Pyrs, k=k, method="smoothed_weights"
+    )
+
+    # from history
+    _, _, PCs, _ = ext_util.extract_objects_from_Pyrs(learner.Pyrs)
+    PFs, PF_centers = metrics.evaluate_PFs(
+        learner.Pyrs, method="history", t_start=t_start
+    )
+    PF_info["PFs"] = PFs
+    PF_info["PF_centers"] = PF_centers
+    PF_info["PF_widths"] = metrics.compute_PF_width(
+        learner.Pyrs, k=k, method="history", t_start=t_start
+    )
+
+    return PF_info
 
 
 def get_linear_Pyrs(
@@ -306,6 +368,9 @@ def plot_linear_binned_rates(learner, max_time_min=1.8, **kwargs):
 def run_linear_speed(
     speed_mean=params_util.SPEED_MEAN_LINEAR,
     i=0,
+    speed_std=params_util.SPEED_STD,
+    test_speed_mean=None,
+    test_speed_std=None,
     max_time_min=20,
     max_num_traj=20,
     k=SMOOTH_K,
@@ -321,9 +386,12 @@ def run_linear_speed(
     - speed_mean (float): Mean speed for the experiment.
         Default is params_util.SPEED_MEAN_LINEAR.
     - i (int): Index for the experiment run. Default is 0.
-    - max_time_min (float): Maximum time in minutes to run the environment.
-        Default is 20.
-    - max_num_traj (int): Maximum number of trajectories to run. Default is 20.
+    - max_time_min (float): Maximum time in minutes to run the environment for
+        assessing place field. Default is 20.
+    - max_num_traj (int): Maximum number of trajectories to run for assessing place
+        field. Default is 20.
+    - BTSP_on (int): Trajectory on which to enable. Later trajectories allow more
+        time Default is 5.
     - k (int): Smoothing factor for measuring place field width from firingrate history.
         Default is SMOOTH_K.
     - no_logs (bool): Whether to disable logging. Default is True.
@@ -336,60 +404,70 @@ def run_linear_speed(
     Returns:
     - data_dict (dict): Dictionary containing the results of the experiment under keys:
         - "speed_mean": Mean speed for the experiment.
-        - "PFs": Place fields computed from history.
-        - "PF_widths": Place field widths.
-        - "PF_centers": Place field centers.
+        - "PC_place_centers": Place cell centers.
         - "PC_weights": Place cell input weights.
         - "PC_weight_widths": Place cell input weight widths.
-        - "PC_place_centers": Place cell centers.
+        - "PC_smoothed_weights": Smoothed place cell input weights.
+        - "PC_smoothed_weight_widths": Smoothed place cell input weight widths.
+        - "PFs": Place fields computed from history.
+        - "PF_centers": Place field centers.
+        - "PF_widths": Place field widths.
+        - "num_BTSP": Number of BTSP events that the neuron layer has experienced.
         if seed:
         - "seed": Seed for the experiment.
     """
 
     if seed:
-        gen_util.seed_all(PAPER_SEED + i)
+        seed_value = PAPER_SEED + i
+        gen_util.seed_all(seed_value)
 
     Pyrs = get_linear_Pyrs(
         speed_mean=speed_mean,
-        speed_std=0,
+        speed_std=speed_std,
         log_BTSP=False,
         wait_at_end=0,
         seed=False,
     )
-    learner = run_linear(
+
+    for i in range(5):
+        learner = run_linear(
+            Pyrs,
+            max_time_min=max_time_min,
+            max_num_traj=2,
+            max_num_target_reaches=2,
+            no_logs=no_logs,
+            seed=False,
+        )
+
+        num_applied_BTSP = len(
+            Pyrs.SomaCompartment.get_BTSP_steps(applied_only=True, apply_step=True)
+        )
+        if num_applied_BTSP:
+            break
+
+    if num_applied_BTSP == 0:
+        raise RuntimeError("No BTSP occurred.")
+
+    t_start = Pyrs.Agent.t
+    Pyrs.Agent.set_speed(mean=test_speed_mean, std=test_speed_std)
+    run_linear(
         Pyrs,
         max_time_min=max_time_min,
         max_num_traj=max_num_traj,
         max_num_target_reaches=max_num_traj,
         no_logs=no_logs,
-        BTSP_on=5,  # to ensure sufficient time before BTSP with very high running speeds
         seed=False,
     )
 
-    # compute place fields from history
-    history_kwargs = {
-        "method": "history",
-        "t_start": ext_util.choose_t_start_after_BTSP(
-            Pyrs.SomaCompartment, next_trajectory=True
-        ),
-    }
+    data_dict = gather_PF_info(learner, k=k, t_start=t_start)
 
-    _, _, PCs, _ = ext_util.extract_objects_from_Pyrs(Pyrs)
-    PFs, PF_centers = metrics.evaluate_PFs(Pyrs, **history_kwargs)
-
-    data_dict = {
-        "speed_mean": speed_mean,
-        "PFs": PFs,
-        "PF_widths": metrics.compute_PF_width(Pyrs, k=k, **history_kwargs),
-        "PF_centers": PF_centers,
-        "PC_weight_widths": metrics.compute_PF_width(Pyrs),
-        "PC_weights": learner.get_recorded_weights()["weights"][:, 0],
-        "PC_place_centers": PCs.place_cell_centers[:, 0],
-        "PF_smoothing": k,
-    }
+    data_dict["speed_mean"] = speed_mean
+    data_dict["num_BTSP"] = len(
+        Pyrs.SomaCompartment.get_BTSP_steps(applied_only=True, apply_step=True)
+    )
 
     if seed:
-        data_dict["seed"] = PAPER_SEED + i
+        data_dict["seed"] = seed_value
 
     return data_dict
 
@@ -416,18 +494,20 @@ def run_linear_speeds(
     Returns:
     - speed_data (dict): Dictionary containing:
         - "speed_means": Array of speed means used in the experiment.
-        - "PFs": List of place fields computed from history for each speed mean.
-        - "PF_widths": List of place field widths for each speed mean.
-        - "PF_centers": List of place field centers.
-        - "PC_weights": List of place cell input weights for each speed mean.
-        - "PC_weight_widths": List of place cell input weight widths for each speed mean.
         - "PC_place_centers": Array of place cell centers.
-        - "PF_smoothing": Smoothing factor for place fields.
+        - "PC_weights": Array of place cell input weights.
+        - "PC_weight_widths": Array of place cell input weight widths.
+        - "PC_smoothed_weights": Array of smoothed place cell input weights.
+        - "PC_smoothed_weight_widths": Array of smoothed place cell input weight widths.
+        - "PFs": Array of place fields computed from history.
+        - "PF_centers": Array of place field centers.
+        - "PF_widths": Array of place field widths.
+        - "num_BTSP": Number of BTSP events for each speed.
         if seed:
         - "seeds": Array of seeds for each run.
     """
 
-    speed_means = gen_util.get_rounded_linspace(0.05, 0.55, 41)
+    speed_means = SPEED_MEANS
 
     # product of means and seeds
     total = num_repeats * len(speed_means)
@@ -435,7 +515,10 @@ def run_linear_speeds(
     iterations = itertools.product(speed_means, range(num_repeats))
 
     kwargs = {
+        "speed_std": 0,
         "max_time_min": max_time_min,
+        "test_speed_mean": params_util.SPEED_MEAN_LINEAR,
+        "test_speed_std": params_util.SPEED_MEAN_LINEAR,
         "k": k,
         "no_logs": True,
         "seed": seed,
@@ -461,6 +544,7 @@ def run_linear_speeds(
                 [speed_dict[key] for speed_dict in speed_dicts]
             )
     speed_data["speed_means"] = speed_data.pop("speed_mean")
+
     if "seed" in speed_data.keys():
         speed_data["seeds"] = speed_data.pop("seed")
 
@@ -493,7 +577,7 @@ def plot_linear_speed_PF_examples(
     if speed_data is None:
         speed_data = run_linear_fct("linear_speeds", overwrite=False)
 
-    for key, vals in [("speed_means", to_plot), ("seeds", [PAPER_SEED])]:
+    for key, vals in [("seeds", [PAPER_SEED]), ("speed_means", to_plot)]:
         speed_data = gen_util.get_filtered_np_data_dict(
             speed_data,
             key,
@@ -546,7 +630,127 @@ def plot_linear_speed_PF_widths(
     return sub_ax
 
 
-def run_linear_shifts(seed=True):
+def run_linear_shift(
+    target_shift=0,
+    i=0,
+    speed_std=0,
+    max_time_min=20,
+    max_num_traj=20,
+    k=SMOOTH_K,
+    no_logs=True,
+    seed=True,
+):
+    """
+    run_linear_speed()
+
+    Runs and collects data for a single linear speed experiment.
+
+    Args:
+    - target_shift (float): Target shift for the experiment.
+        Default is 0.
+    - i (int): Index for the experiment run. Default is 0.
+    - speed_std (float): Standard deviation of speed for the experiment.
+        Default is 0.
+    - max_time_min (float): Maximum time in minutes to run the environment for
+        assessing place field. Default is 20.
+    - max_num_traj (int): Maximum number of trajectories to run for assessing place
+        field. Default is 20.
+    - BTSP_on (int): Trajectory on which to enable. Later trajectories allow more
+        time Default is 5.
+    - k (int): Smoothing factor for measuring place field width from firingrate history.
+        Default is SMOOTH_K.
+    - no_logs (bool): Whether to disable logging. Default is True.
+    - seed (bool): Whether to seed the random number generator with the paper seed.
+        Default is True.
+
+    Keyword Args:
+    - **kwargs: Additional keyword arguments passed to run_manager.learn_1D_BTSP().
+
+    Returns:
+    - data_dict (dict): Dictionary containing the results of the experiment under keys:
+        - "speed_mean": Mean speed for the experiment.
+        - "PC_place_centers": Place cell centers.
+        - "PC_weights": Place cell input weights.
+        - "PC_weight_widths": Place cell input weight widths.
+        - "PC_smoothed_weights": Smoothed place cell input weights.
+        - "PC_smoothed_weight_widths": Smoothed place cell input weight widths.
+        - "PFs": Place fields computed from history.
+        - "PF_centers": Place field centers.
+        - "PF_widths": Place field widths.
+        - "num_BTSP": Number of BTSP events that the neuron layer has experienced.
+        if seed:
+        - "seed": Seed for the experiment.
+    """
+
+    if seed:
+        seed_value = PAPER_SEED + i
+        gen_util.seed_all(seed_value)
+
+    Pyrs = get_linear_Pyrs(
+        speed_std=speed_std,
+        log_BTSP=False,
+        wait_at_end=0,
+        seed=False,
+    )
+
+    shifted = False
+    for i in range(20):
+        run_linear(
+            Pyrs,
+            max_time_min=max_time_min,
+            max_num_traj=2,
+            max_num_target_reaches=2,
+            no_logs=no_logs,
+            seed=False,
+        )
+
+        num_applied_BTSP = len(
+            Pyrs.SomaCompartment.get_BTSP_steps(applied_only=True, apply_step=True)
+        )
+        if num_applied_BTSP == 1 and not shifted:
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore", category=UserWarning, message="Target position"
+                )
+                Pyrs.Agent.move_target_position(target_shift)
+            shifted_i = i
+            shifted = True
+
+        elif num_applied_BTSP == 2 or i > shifted_i * 2.5:
+            break
+
+    if num_applied_BTSP == 0:
+        raise RuntimeError("No BTSP occurred.")
+
+    if not shifted:
+        raise RuntimeError("Target was never shifted.")
+
+    t_start = Pyrs.Agent.t
+    learner = run_linear(
+        Pyrs,
+        max_time_min=max_time_min,
+        max_num_traj=max_num_traj,
+        max_num_target_reaches=max_num_traj,
+        no_logs=no_logs,
+        seed=False,
+    )
+
+    data_dict = gather_PF_info(learner, k=k, t_start=t_start)
+
+    data_dict["target_shift"] = target_shift
+    data_dict["num_BTSP"] = len(
+        Pyrs.SomaCompartment.get_BTSP_steps(applied_only=True, apply_step=True)
+    )
+
+    if seed:
+        data_dict["seed"] = seed_value
+
+    return data_dict
+
+
+def run_linear_shifts(
+    seed=True, max_time_min=20, num_repeats=1, k=SMOOTH_K, num_jobs=1
+):
     """
     run_linear_shifts()
 
@@ -560,47 +764,57 @@ def run_linear_shifts(seed=True):
     Returns:
     - shift_data (dict): Dictionary containing:
         - "target_shifts": Array of target position shifts used in the experiment.
-        - "PF_widths": List of place field widths for each target shift.
-        - "PF_weights": List of place field weights for each target shift.
-        - "PC_place_centers": Array of place cell centers for each target shift.
+        - "PC_place_centers": Array of place cell centers.
+        - "PC_weights": Array of place cell input weights.
+        - "PC_weight_widths": Array of place cell input weight widths.
+        - "PC_smoothed_weights": Array of smoothed place cell input weights.
+        - "PC_smoothed_weight_widths": Array of smoothed place cell input weight widths.
+        - "PFs": Array of place fields computed from history.
+        - "PF_centers": Array of place field centers.
+        - "PF_widths": Array of place field widths.
+        - "num_BTSP": Number of BTSP events that occurred for each target shift.
+        if seed:
+        - "seeds": Array of seeds for each run.
     """
 
-    if seed:
-        gen_util.seed_all(PAPER_SEED)
+    target_shifts = TARGET_SHIFTS
 
-    shift_data = {
-        "target_shifts": gen_util.get_rounded_linspace(-3.6, 2.4, 61),
-        "PF_widths": list(),
-        "PF_weights": list(),
+    # product of means and seeds
+    total = num_repeats * len(target_shifts)
+    n_jobs = min(num_jobs, total)
+    iterations = itertools.product(target_shifts, range(num_repeats))
+
+    kwargs = {
+        "max_time_min": max_time_min,
+        "k": k,
+        "no_logs": True,
+        "seed": seed,
     }
 
-    Pyrs = get_linear_Pyrs(speed_std=0, log_BTSP=False, wait_at_end=0)
-    orig_learner = run_linear(Pyrs, max_time_min=1.2, no_logs=True)
-    for shift in tqdm(shift_data["target_shifts"]):
-        if seed:
-            gen_util.seed_all(PAPER_SEED)
-        learner = copy.deepcopy(orig_learner)
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", category=UserWarning, message="Target position"
+    if num_jobs > 1:
+        shifts_dicts = Parallel(n_jobs=n_jobs)(
+            delayed(run_linear_shift)(target_shift=target_shift, i=i, **kwargs)
+            for target_shift, i in tqdm(iterations, total=total)
+        )
+    else:
+        shifts_dicts = list()
+        for target_shift, i in tqdm(iterations, total=total):
+            shift_dict = run_linear_shift(target_shift=target_shift, i=i, **kwargs)
+            shifts_dicts.append(shift_dict)
+
+    shift_dict = dict()
+    for key in shifts_dicts[0].keys():
+        if key in ["PF_centers", "PC_place_centers"]:
+            shift_dict[key] = shifts_dicts[0][key]
+        else:
+            shift_dict[key] = np.asarray(
+                [shift_dict[key] for shift_dict in shifts_dicts]
             )
-            learner.Pyrs.Agent.move_target_position(shift)
-        learner = run_linear(learner, max_time_min=1.2, no_logs=True)
-        shift_data["PF_widths"].append(metrics.compute_PF_width(Pyrs))
-        shift_data["PF_weights"].append(learner.get_recorded_weights()["weights"][:, 0])
+    shift_dict["target_shifts"] = shift_dict.pop("target_shift")
+    if "seed" in shift_dict.keys():
+        shift_dict["seeds"] = shift_dict.pop("seed")
 
-    num = max([len(wei) for wei in shift_data["PF_weights"]])
-    shift_data["PF_weights"] = [
-        np.pad(wei, ((0, num - len(wei)), (0, 0)), "constant", constant_values=np.nan)
-        for wei in shift_data["PF_weights"]
-    ]
-
-    shift_data = {key: np.asarray(val) for key, val in shift_data.items()}
-
-    _, _, PCs, _ = ext_util.extract_objects_from_Pyrs(Pyrs)
-    shift_data["PC_place_centers"] = PCs.place_cell_centers[:, 0]
-
-    return shift_data
+    return shift_dict
 
 
 def plot_linear_shift_PF_examples(
