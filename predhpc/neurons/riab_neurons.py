@@ -166,7 +166,8 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         Returns:
         - rate_maps (2D np.ndarray): Rate maps for the chosen neurons. Unvisited bins
             are set to NaN.
-        - centers (1D np.ndarray): center positions for the bins.
+        - centers (1D or 2D np.ndarray): Center positions for the bins, where the first
+            dimension matches the number of bins.
         """
 
         _, startid, endid = self.get_plotting_times(t_start, t_end)
@@ -200,12 +201,22 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
 
         rate_maps = np.asarray(rate_maps)
 
-        xedges = np.arange(extent[0], extent[1] + bin_size, bin_size)
-        centers = (xedges[1:] + xedges[:-1]) / 2
         if self.Agent.Environment.D == 2:
-            yedges = np.arange(extent[2], extent[3] + bin_size, bin_size)
+            rate_maps = rate_maps[:, ::-1]
+
+        xedges = np.arange(extent[0], extent[1] + bin_size / 2, bin_size)
+        centers = (xedges[1:] + xedges[:-1]) / 2
+        if rate_maps.shape[1] == len(centers) + 1:
+            rate_maps = rate_maps[:, :-1]
+
+        if self.Agent.Environment.D == 2:
+            yedges = np.arange(extent[2], extent[3] + bin_size / 2, bin_size)
             ycenters = (yedges[1:] + yedges[:-1]) / 2
-            centers = np.asarray([centers, ycenters])
+            centers = np.asarray(np.meshgrid(centers, ycenters)).reshape(2, -1).T
+            if rate_maps.shape[2] == len(ycenters) + 1:
+                rate_maps = rate_maps[:, :, :-1]
+
+        rate_maps = rate_maps.reshape(len(chosen_neurons), -1)
 
         return rate_maps, centers
 

@@ -364,10 +364,10 @@ def plot_linear_track(
         ax1D[0].legend(ncol=ncol, frameon=False, loc="upper right")
 
         # plot place cell input weights to Pyr.
-        plot_fcts.plot_recorded_1D_input_place_cell_weights(
+        plot_fcts.plot_recorded_1D_PFs(
             np.asarray(Pyrs_weights)[:, target_Pyr_idx],
-            input_centers=PCs.place_cell_centers,
-            weights_t=Pyrs_weights_t,
+            PCs.place_cell_centers,
+            PFs_t=Pyrs_weights_t,
             color=PCs.color,
             sub_ax=ax1D[1],
             t_start=t_start,
@@ -545,7 +545,7 @@ def plot_openfield(
         current_sorter = PCs._current_sorter
 
     with TemporarilyReshufflePlaceCells(PCs, current_sorter):
-        plot_fcts.plot_2D_input_place_cell_weights(
+        plot_fcts.plot_2D_PFs(
             Pyrs.SomaCompartment,
             PCs_input_name="PCs",
             place_weights=Pyrs_weights[weight_idx][target_Pyr_idx : target_Pyr_idx + 1],
