@@ -111,7 +111,7 @@ def evaluate_PFs(Pyrs, PC_name="PCs", method="weights", t_start=None, t_end=None
             PFs = Pyrs.activation_function(V, deriv=False)
 
     elif method == "history":
-        dist = np.absolute(np.diff(PF_centers)).mean()
+        dist = np.absolute(np.diff(PF_centers)).mean() / 2
         PFs, PF_centers = Pyrs.get_history_ratemap(
             t_start=t_start, t_end=t_end, bin_size=dist
         )

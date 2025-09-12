@@ -2411,7 +2411,7 @@ def plot_2D_PFs(
                     np.absolute(np.diff(np.sort(np.unique(PF_positions[:, i])))).min(),
                 )
             PFs, PF_positions = target_neurons.get_history_ratemap(
-                t_start=PF_t_start, bin_size=dist
+                t_start=PF_t_start, bin_size=dist / 2
             )
         else:
             raise ValueError("PF_type must be either 'weights' or 'history'.")
