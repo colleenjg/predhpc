@@ -1552,10 +1552,12 @@ def plot_recorded_1D_PFs(
     marker="o",
     ms=2,
     lw=1.2,
+    ls=None,
     t_start=None,
     t_end=None,
     plot_last_width=False,
     k=1,
+    plot_smoothed=False,
     no_legend=False,
     sub_ax=None,
 ):
@@ -1574,12 +1576,15 @@ def plot_recorded_1D_PFs(
     - marker (str, optional): Marker style. Default is "o".
     - ms (int, optional): Marker size. Default is 2.
     - lw (float, optional): Line width. Default is 1.2.
+    - ls (str, optional): Line style. Default is None.
     - t_start (float, optional): Start timepoint for which to plot PFs.
         Default is None.
     - t_end (float, optional): End timepoint for which to plot PFs. Default is None.
     - plot_last_width (bool, optional): Whether to plot the last width of the PFs.
         Default is False.
-    - k (int, optional): Smoothing factor for width of PFs. Default is 1.
+    - k (int, optional): Smoothing factor for calculating width of PFs. Default is 1.
+    - plot_smoothed (bool, optional): Whether to plot a smoothed version of the PFs.
+        Default is False.
     - no_legend (bool, optional): Whether to not plot the legend. Default is False.
     - sub_ax (plt.Axes, optional): Subplot. Default is None.
 
@@ -1633,22 +1638,29 @@ def plot_recorded_1D_PFs(
         "lw": lw,
         "marker": marker,
         "ms": ms,
+        "ls": ls,
     }
 
     num_plotted = 0
-    prev_PFs = None
+    prev_PF = None
     for a, alpha in enumerate(alphas):
-        plot_PFs = PFs[a + start_idx]
-        if prev_PFs is not None and (prev_PFs == plot_PFs).all():
+        plot_PF = PFs[a + start_idx]
+        if prev_PF is not None and (prev_PF == plot_PF).all():
             continue
+        prev_PF = plot_PF
+
+        if plot_smoothed and k != 1:
+            plot_PF = signal_util.smooth_circularly(plot_PF, k=k)
+
         sub_ax.plot(
             PF_positions,
-            plot_PFs,
+            plot_PF,
             alpha=alpha,
             **place_PF_kwargs,
         )
-        prev_PFs = plot_PFs
+
         num_plotted += 1
+        last_PF = plot_PF
 
     if num_plotted == 0:
         sub_ax.plot(list(), list())
@@ -1656,14 +1668,14 @@ def plot_recorded_1D_PFs(
     elif num_plotted == 1:  # only one
         sub_ax.plot(
             PF_positions,
-            prev_PFs,
+            last_PF,
             alpha=0.9,
             **place_PF_kwargs,
         )
 
     if plot_last_width and num_plotted > 0:
         width, edges = signal_util.compute_signal_width(
-            prev_PFs, PF_positions, k=k, return_edges=True
+            last_PF, PF_positions, k=k, return_edges=True
         )
         label = f"width={width:.2f} m"
 

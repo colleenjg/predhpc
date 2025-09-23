@@ -24,7 +24,7 @@ SPEED_EXAMPLES = [0.15, 0.25, 0.35]
 TARGET_SHIFTS = gen_util.get_rounded_linspace(-3.6, 2.4, 61)
 SHIFT_EXAMPLES = [1.0, 0, -0.4, -3.0]
 
-SMOOTH_K = 1
+SMOOTH_K = 5  # across 120 samples
 
 
 def suppress_warnings():
@@ -63,8 +63,8 @@ def gather_PF_info(learner, k=SMOOTH_K, t_start=None):
 
     Args:
     - learner (Learner): The learner object to gather information from.
-    - k (int): The smoothing factor for place field width computation.
-        Default is SMOOTH_K.
+    - k (int): The smoothing factor for place field width computation from firingrate
+        history. Default is SMOOTH_K.
     - t_start (float): The start time for history evaluation. Default is None.
 
     Returns:
@@ -89,14 +89,14 @@ def gather_PF_info(learner, k=SMOOTH_K, t_start=None):
     PF_info["PC_place_centers"] = PC_place_centers[sorter]
 
     PF_info["PC_weights"] = learner.get_recorded_weights()["weights"][:, 0, sorter]
-    PF_info["PC_weight_widths"] = metrics.compute_PF_width(learner.Pyrs, k=k)
+    PF_info["PC_weight_widths"] = metrics.compute_PF_width(learner.Pyrs, k=1)
 
     # from input weights, smoothed
     PF_info["PC_smoothed_weights"], _ = metrics.get_smoothed_weights(
         PF_info["PC_weights"], PF_info["PC_place_centers"], PCs.widths
     )
     PF_info["PC_smoothed_weight_widths"] = metrics.compute_PF_width(
-        learner.Pyrs, k=k, method="smoothed_weights"
+        learner.Pyrs, k=1, method="smoothed_weights"
     )
 
     # from history
@@ -591,8 +591,10 @@ def plot_linear_speed_PF_examples(
     Pyrs = get_linear_Pyrs()
     _, Ag, _, _ = ext_util.extract_objects_from_Pyrs(Pyrs)  # to add plot markers
 
+    k = SMOOTH_K if PF_type == "history" else 1
+
     ax1D = paper_plot_fcts.plot_linear_speed_PF_examples(
-        speed_data, Ag=Ag, PF_type=PF_type, **kwargs
+        speed_data, Ag=Ag, PF_type=PF_type, k=k, **kwargs
     )
 
     return ax1D

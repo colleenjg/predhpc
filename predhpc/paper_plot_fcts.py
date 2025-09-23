@@ -10,7 +10,7 @@ import ratinabox
 
 from predhpc import plot_fcts
 from predhpc.experiments import metrics
-from predhpc.util import gen_util, params_util, plot_util, ext_util
+from predhpc.util import gen_util, params_util, plot_util, ext_util, signal_util
 
 LW = 1.6
 
@@ -112,7 +112,13 @@ def format_1D_PF_xaxis(
     plot_util.expand_ticks(
         sub_ax, axis="x", num_ticks=num_ticks, alternating=True, round_dec=0
     )
-    sub_ax.set_xlabel("Input place field center (m)")
+
+    if "weights" in PF_type:
+        xlabel = "Input place field center (m)"
+    else:
+        xlabel = "Position (m)"
+
+    sub_ax.set_xlabel(xlabel)
 
     ylabel = get_PF_label(PF_type, title=False)
 
@@ -581,7 +587,7 @@ def plot_linear_binned_rates(learner, num_bins=100):
     - ax1D (1D np.ndarray of plt.Axes): Subplots with linear binned rates plotted.
     """
 
-    _, ax1D = plt.subplots(3, 1, figsize=(3.7, 5), squeeze=True)
+    _, ax1D = plt.subplots(3, 1, figsize=(3.5, 4.8), squeeze=True)
 
     kwargs = {
         "num_bins": num_bins,
@@ -654,11 +660,14 @@ def retrieve_PF_data(data_dict, PF_type="weights"):
     return PFs, PF_centers, PF_widths
 
 
-def plot_linear_speed_PF_examples(speed_data, Ag=None, color=None, PF_type="weights"):
+def plot_linear_speed_PF_examples(
+    speed_data, Ag=None, color=None, PF_type="weights", k=1, show_unsmoothed=True
+):
     """
     plot_linear_speed_PF_examples()
 
-    Plots examples of place fields for different speeds on the linear track.
+    Plots examples of place fields for different speeds on the linear track. If k is
+    not 1, smoothed signal is visualized.
 
     Args:
     - speed_data (dict): Dictionary containing speed-related data
@@ -667,6 +676,9 @@ def plot_linear_speed_PF_examples(speed_data, Ag=None, color=None, PF_type="weig
         subplot. Default is None.
     - color (str, optional): Color for PF lines. Default is None.
     - PF_type (str, optional): PF evaluation method to plot. Default is "weights".
+    - k (int, optional): Smoothing factor for visualizing the place fields. Default is 1.
+    - show_unsmoothed (bool, optional): If True, the unsmoothed place fields are also
+        plotted. Default is True.
 
     Returns:
     - ax1D (1D np.ndarray of plt.Axes): Subplots with example place fields plotted.
@@ -685,7 +697,6 @@ def plot_linear_speed_PF_examples(speed_data, Ag=None, color=None, PF_type="weig
     )
     ax1D = axes[:, 0]
 
-    ks = np.ones(len(speed_data["speed_means"]))
     PFs, PF_centers, PF_widths = retrieve_PF_data(speed_data, PF_type=PF_type)
     if "weights" in PF_type:
         color = color or params_util.PC_COLOR
@@ -698,19 +709,32 @@ def plot_linear_speed_PF_examples(speed_data, Ag=None, color=None, PF_type="weig
     else:
         raise ValueError(f"PF_type '{PF_type}' not recognized.")
 
+    show_unsmoothed = show_unsmoothed and k > 1
     for i, speed_mean in enumerate(speed_data["speed_means"]):
         sub_ax = ax1D[i]
-        plot_fcts.plot_recorded_1D_PFs(
-            PFs[i],
-            PF_centers,
-            color=color,
-            marker="none",
-            plot_last_width=True,
-            k=ks[i],
-            lw=LW,
-            no_legend=True,
-            sub_ax=sub_ax,
-        )
+        for j in range(int(show_unsmoothed) + 1):
+            if show_unsmoothed and j == 0:
+                use_k = 1
+                plot_last_width = False
+                ls, lw = "dashed", LW * 0.85
+            else:
+                use_k = k
+                plot_last_width = True
+                ls, lw = None, LW
+
+            plot_fcts.plot_recorded_1D_PFs(
+                PFs[i],
+                PF_centers,
+                color=color,
+                marker="none",
+                plot_last_width=plot_last_width,
+                k=use_k,
+                plot_smoothed=True,
+                lw=lw,
+                ls=ls,
+                no_legend=True,
+                sub_ax=sub_ax,
+            )
         sub_ax.text(5, ymax * 0.83, f"{speed_mean:.2f} m/s", ha="center", fontsize=12)
 
         rect = mpl_patches.Rectangle(
