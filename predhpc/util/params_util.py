@@ -42,14 +42,14 @@ NOVEL_COLOR = "#22772E"  # dark green
 
 OBJ_COLOR = TARGET_COLOR
 PC_COLOR = "#99193A"  # dark red
-PYR_SOMA_COLOR = "#8787C9"  # light purple
-PYR_DEND_COLOR = "#3D3D79"  # dark purple
+PYR_SOMATIC_COLOR = "#8787C9"  # light purple
+PYR_APICAL_COLOR = "#3D3D79"  # dark purple
 
 LINEAR_SIGMOID_ACTIVATION_PARAMS = ext_util.get_standard_sigmoid_params(
     min_fr=0.0, max_fr=10.0, mid_x=6.0, width_x=8.0
 )
 
-DEND_SIGMOID_ACTIVATION_PARAMS = ext_util.get_standard_sigmoid_params(
+APICAL_SIGMOID_ACTIVATION_PARAMS = ext_util.get_standard_sigmoid_params(
     min_fr=0.0, max_fr=10.0, mid_x=5.0, width_x=6.0
 )
 
@@ -520,48 +520,48 @@ def get_Pyr_params(
             "name": "Pyr_TwoComp",
             "n": n,
             "biases": BIASES,
-            "dend_init_weights_zero": False,
-            "soma_init_weights_zero": INIT_WEIGHTS_ZERO,
-            "soma_activation_function": LINEAR_SIGMOID_ACTIVATION_PARAMS,
-            "dend_activation_function": DEND_SIGMOID_ACTIVATION_PARAMS,
-            "inhibit_activation_function": LINEAR_SIGMOID_ACTIVATION_PARAMS,
-            "soma_apply_Ojas_rule": False,  # subtractive normalization may blow up with high clamping
-            "soma_color": PYR_SOMA_COLOR,
-            "dend_color": PYR_DEND_COLOR,
-            "inhibit_dend": True,
-            "dend_first": True,
-            "soma_single_BTSP": False,
-            "soma_BTSP_distance_prop": None,
-            "dend_w_init_loc": 0.4,
-            "soma_w_init_loc": W_INIT_LOC,
-            "dend_w_init_scale": 0,
-            "soma_w_init_scale": W_INIT_SCALE,
-            "soma_to_dend_weight": 0.2,
-            "dend_to_soma_weight": 1.0,
-            "soma_normalize_weights_divisively": NORM_WEIGHTS_DIV,
-            "soma_regularization_alpha": REG_ALPHA,
-            "soma_p": P,
-            "soma_lr": LR,  # basic learning rate
-            "soma_BTSP_lr": BTSP_LR,  # BTSP learning rate
-            "soma_NMDA_activation_threshold": 2,  # threshold for NMDA activation
-            "soma_BTSP_induction_threshold": 8,  # sustained required for BTSP
-            "soma_BTSP_plateau_length": 0.12,  # plateau length required for BTSP
-            "inhibit_weight": 1.0,  # strength of dendritic inhibition from soma
-            "inhibit_input_filter_tau": 0.3,
-            "inhibit_input_trend_tau": None,
-            "mutual_inhibition_weight": None,
+            "apical_init_weights_zero": False,
+            "somatic_init_weights_zero": INIT_WEIGHTS_ZERO,
+            "somatic_activation_function": LINEAR_SIGMOID_ACTIVATION_PARAMS,
+            "apical_activation_function": APICAL_SIGMOID_ACTIVATION_PARAMS,
+            "inhibitory_activation_function": LINEAR_SIGMOID_ACTIVATION_PARAMS,
+            "somatic_apply_Ojas_rule": False,  # subtractive normalization may blow up with high clamping
+            "somatic_color": PYR_SOMATIC_COLOR,
+            "apical_color": PYR_APICAL_COLOR,
+            "inhibitory_apical": True,
+            "apical_first": True,
+            "somatic_single_BTSP": False,
+            "somatic_BTSP_distance_prop": None,
+            "apical_w_init_loc": 0.4,
+            "somatic_w_init_loc": W_INIT_LOC,
+            "apical_w_init_scale": 0,
+            "somatic_w_init_scale": W_INIT_SCALE,
+            "somatic_to_apical_weight": 0.2,
+            "apical_to_somatic_weight": 1.0,
+            "somatic_normalize_weights_divisively": NORM_WEIGHTS_DIV,
+            "somatic_regularization_alpha": REG_ALPHA,
+            "somatic_p": P,
+            "somatic_lr": LR,  # basic learning rate
+            "somatic_BTSP_lr": BTSP_LR,  # BTSP learning rate
+            "somatic_NMDA_activation_threshold": 2,  # threshold for NMDA activation
+            "somatic_BTSP_induction_threshold": 8,  # sustained required for BTSP
+            "somatic_BTSP_plateau_length": 0.12,  # plateau length required for BTSP
+            "inhibitory_weight": 1.0,  # strength of apical inhibition from somatic compartment
+            "inhibitory_input_filter_tau": 0.3,
+            "inhibitory_input_trend_tau": None,
+            "lateral_inhibition_weight": None,
             "lateral_tau": 0.3,
         }
 
         BTSP_filter_param_dict = get_default_BTSP_filter_param_dict()
         for key, value in BTSP_filter_param_dict.items():
-            Pyr_params[f"soma_{key}"] = value
+            Pyr_params[f"somatic_{key}"] = value
 
     else:
         Pyr_params = {
             "name": "Pyr",
             "n": n,
-            "color": PYR_SOMA_COLOR,
+            "color": PYR_SOMATIC_COLOR,
             "biases": BIASES,
             "init_weights_zero": INIT_WEIGHTS_ZERO,
             "w_init_loc": W_INIT_LOC,

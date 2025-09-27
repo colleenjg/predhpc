@@ -273,19 +273,19 @@ def plot_linear_track(
     Plots linear track experiment for a specific timepoint. The plot consists of
     the following subplots:
         (1) 1D environment with agent's trajectory and target position.
-        (2) Place cell input weights to first Pyr. soma.
+        (2) Place cell input weights to first Pyr. somatic compartment.
         (3) (Blank subplot.)
-        (3) Time series of Pyr. soma.
-        (4) Time series of Pyr. apical dendrite.
-        (5) Time series of Pyr. interneuron.
+        (3) Time series of Pyr. somatic compartment.
+        (4) Time series of Pyr. apical compartment.
+        (5) Time series of Pyr. inhibitory interneuron.
 
 
     Args:
     - Pyrs (two_comp_neurons.TwoComp): Pyr. neurons.
-    - Pyrs_weights (list): List of input weights from place cells to Pyr. somata,
-        across time, where input weights have shape (n_Pyrs, n_PCs).
+    - Pyrs_weights (list): List of input weights from place cells to Pyr. somatic
+        compartments, across time, where input weights have shape (n_Pyrs, n_PCs).
     - Pyrs_weights_t (list): List of timepoints for the input weights from place
-        cells to Pyr. somata.
+        cells to Pyr. somatic compartments.
     - target_Pyr_idx (int, optional): Index of the target Pyr. neuron for which to plot
         timeseries and input place cell weights. If "all", max across weights is
         plotted. Default is 0.
@@ -318,7 +318,7 @@ def plot_linear_track(
 
     fig.suptitle(suptitle, fontweight="bold", y=0.95)
 
-    PCs = Pyrs.SomaCompartment.inputs["PCs"]["layer"]
+    PCs = Pyrs.SomaticCompartment.inputs["PCs"]["layer"]
 
     Ag = Pyrs.Agent
     current_target_position, previous_target_positions = get_previous_values(
@@ -348,7 +348,7 @@ def plot_linear_track(
             ncol += 1
 
         agent_kwargs = plot_util.get_plot_marker_kwargs("agent")
-        agent_kwargs["color"] = Pyrs.SomaCompartment.color
+        agent_kwargs["color"] = Pyrs.SomaticCompartment.color
         ax1D[0].scatter(
             Ag.history["pos"][t_idx_end],
             0,
@@ -391,7 +391,7 @@ def plot_linear_track(
         ax1D[1].set_xticks([])
         ax1D[1].set_yticks([])
         ax1D[1].set_ylabel(
-            f"Input weights\nplace cells to Pyr. soma{target_Pyr_idx_str}"
+            f"Input weights\nplace cells to Pyr. somatic comp.{target_Pyr_idx_str}"
         )
         plot_util.pad_axis(ax1D[1], axis="y", pad_prop=0.2)
 
@@ -419,7 +419,7 @@ def plot_linear_track(
             **Pyr_kwargs,
         )
 
-        t = Pyrs.SomaCompartment.get_plotting_times(t_start, t_end)[0]
+        t = Pyrs.SomaticCompartment.get_plotting_times(t_start, t_end)[0]
         actual_t_end = t[-1] if len(t) else None
         fix_xlims_and_ticks(
             ax1D[3:],
@@ -431,9 +431,9 @@ def plot_linear_track(
             ticks_last_only=True,
         )
 
-        ax1D[3].set_ylabel("Soma")
-        ax1D[4].set_ylabel("Apical dendrite")
-        ax1D[5].set_ylabel("Interneuron")
+        ax1D[3].set_ylabel("Somatic compartment")
+        ax1D[4].set_ylabel("Apical compartment")
+        ax1D[5].set_ylabel("Inhibitory interneuron")
 
     return axes
 
@@ -457,10 +457,10 @@ def plot_openfield(
     Plots open field experiment for a specific timepoint. The plot consists of
     the following subplots:
         (1) Agent's trajectory (top left).
-        (2) Place cell input weights to Pyr. soma (top right).
-        (3) Time series of Pyr. soma (next top, full width).
-        (4) Time series of Pyr. apical dendrite (mid, full width).
-        (5) Time series of Pyr. interneuron (bottom, full width).
+        (2) Place cell input weights to Pyr. somatic compartment (top right).
+        (3) Time series of Pyr. somatic compartment (next top, full width).
+        (4) Time series of Pyr. apical compartment (mid, full width).
+        (5) Time series of Pyr. inhibitory interneuron (bottom, full width).
 
     Args:
     - Pyrs (Resetable.Neuron): Pyr. neuron.
@@ -535,7 +535,7 @@ def plot_openfield(
     weight_idx = np.where(np.asarray(Pyrs_weights_t) < t_end)[0][-1]
 
     # handle any reshuffling of place cells
-    PCs = Pyrs.SomaCompartment.inputs["PCs"]["layer"]
+    PCs = Pyrs.SomaticCompartment.inputs["PCs"]["layer"]
 
     previous_values = ([np.arange(PCs.n)] + PCs.shuffle_sorters)[:-1]
     current_sorter, _ = get_previous_values(
@@ -546,7 +546,7 @@ def plot_openfield(
 
     with TemporarilyReshufflePlaceCells(PCs, current_sorter):
         plot_fcts.plot_2D_PFs(
-            Pyrs.SomaCompartment,
+            Pyrs.SomaticCompartment,
             PCs_input_name="PCs",
             place_weights=Pyrs_weights[weight_idx][target_Pyr_idx : target_Pyr_idx + 1],
             alpha=0.3,
@@ -558,7 +558,9 @@ def plot_openfield(
             ax=ax1D[1],
         )
     ax1D[1].set_ylabel("")
-    ax1D[1].set_title(f"Input weights from PCs to Pyr. soma{target_Pyr_idx_str}")
+    ax1D[1].set_title(
+        f"Input weights from PCs to Pyr. somatic comp.{target_Pyr_idx_str}"
+    )
 
     # plot time series
     Pyrs.plot_rate_timeseries(
@@ -574,7 +576,7 @@ def plot_openfield(
         **Pyr_kwargs,
     )
 
-    t = Pyrs.SomaCompartment.get_plotting_times(t_start, t_end)[0]
+    t = Pyrs.SomaticCompartment.get_plotting_times(t_start, t_end)[0]
     actual_t_end = t[-1] if len(t) else None
     fix_xlims_and_ticks(
         ax1D[2:],
@@ -587,9 +589,9 @@ def plot_openfield(
     )
 
     ax1D[0].set_xlabel("")
-    ax1D[2].set_ylabel("Soma")
-    ax1D[3].set_ylabel("Apical dendrite")
-    ax1D[4].set_ylabel("Interneuron")
+    ax1D[2].set_ylabel("Somatic compartment")
+    ax1D[3].set_ylabel("Apical compartment")
+    ax1D[4].set_ylabel("Inhibitory interneuron")
 
     return axes
 
@@ -617,10 +619,10 @@ def animate(
 
     Args:
     - Pyrs (two_comp_neurons.TwoComp): Pyr. neurons.
-    - Pyrs_weights (list): List of input weights from place cells to Pyr. somata,
-        across time, where input weights have shape (n_Pyrs, n_PCs).
+    - Pyrs_weights (list): List of input weights from place cells to Pyr. somatic
+        compartments, across time, where input weights have shape (n_Pyrs, n_PCs).
     - Pyrs_weights_t (list): List of timepoints for the input weights from place
-        cells to Pyr. somata.
+        cells to Pyr. somatic compartments.
     - target_Pyr_idx (int, optional): Index of the target Pyr. neuron for which to plot
         timeseries and input place cell weights. If "all", max across weights is
         plotted. Default is 0.

@@ -26,6 +26,8 @@ SHIFT_EXAMPLES = [1.0, 0, -0.4, -3.0]
 
 SMOOTH_K = 5  # across 120 samples
 
+NUM_TRAJ_SPEED = 20
+
 
 def suppress_warnings():
     """
@@ -371,8 +373,8 @@ def run_linear_speed(
     speed_std=params_util.SPEED_STD,
     test_speed_mean=None,
     test_speed_std=None,
-    max_time_min=20,
-    max_num_traj=20,
+    max_time_min=NUM_TRAJ_SPEED,
+    max_num_traj=NUM_TRAJ_SPEED,
     k=SMOOTH_K,
     no_logs=True,
     seed=True,
@@ -387,9 +389,9 @@ def run_linear_speed(
         Default is params_util.SPEED_MEAN_LINEAR.
     - i (int): Index for the experiment run. Default is 0.
     - max_time_min (float): Maximum time in minutes to run the environment for
-        assessing place field. Default is 20.
+        assessing place field. Default is NUM_TRAJ_SPEED.
     - max_num_traj (int): Maximum number of trajectories to run for assessing place
-        field. Default is 20.
+        field. Default is NUM_TRAJ_SPEED.
     - BTSP_on (int): Trajectory on which to enable. Later trajectories allow more
         time Default is 5.
     - k (int): Smoothing factor for measuring place field width from firingrate history.
@@ -442,7 +444,7 @@ def run_linear_speed(
         )
 
         num_BTSP_applied = len(
-            Pyrs.SomaCompartment.get_BTSP_steps(applied_only=True, apply_step=True)
+            Pyrs.SomaticCompartment.get_BTSP_steps(applied_only=True, apply_step=True)
         )
         if num_BTSP_applied:
             break
@@ -465,7 +467,7 @@ def run_linear_speed(
 
     data_dict["speed_mean"] = speed_mean
     data_dict["num_BTSP_applied"] = len(
-        Pyrs.SomaCompartment.get_BTSP_steps(applied_only=True, apply_step=True)
+        Pyrs.SomaticCompartment.get_BTSP_steps(applied_only=True, apply_step=True)
     )
 
     if seed:
@@ -475,7 +477,7 @@ def run_linear_speed(
 
 
 def run_linear_speeds(
-    seed=True, max_time_min=20, num_repeats=1, k=SMOOTH_K, num_jobs=1
+    seed=True, max_time_min=NUM_TRAJ_SPEED, num_repeats=1, k=SMOOTH_K, num_jobs=1
 ):
     """
     run_linear_speeds()
@@ -487,7 +489,7 @@ def run_linear_speeds(
     - seed (bool): Whether to seed the random number generator with the paper seed.
         Default is True.
     - max_time_min (float): Maximum time in minutes to run the environment.
-        Default is 20.
+        Default is NUM_TRAJ_SPEED.
     - num_repeats (int): Number of repeats for the experiment. Default is 1.
     - k (int): Smoothing factor for measuring place field width from firingrate history.
         Default is SMOOTH_K.
@@ -640,8 +642,8 @@ def run_linear_shift(
     target_shift=0,
     i=0,
     speed_std=0,
-    max_time_min=20,
-    max_num_traj=20,
+    max_time_min=5,
+    max_num_traj=5,
     k=SMOOTH_K,
     no_logs=True,
     seed=True,
@@ -660,9 +662,9 @@ def run_linear_shift(
     - speed_std (float): Standard deviation of speed for the experiment.
         Default is 0.
     - max_time_min (float): Maximum time in minutes to run the environment for
-        assessing place field. Default is 20.
+        assessing place field. Default is 5.
     - max_num_traj (int): Maximum number of trajectories to run for assessing place
-        field. Default is 20.
+        field. Default is 5.
     - BTSP_on (int): Trajectory on which to enable. Later trajectories allow more
         time Default is 5.
     - k (int): Smoothing factor for measuring place field width from firingrate history.
@@ -708,7 +710,9 @@ def run_linear_shift(
         )
 
     num_BTSP_applied = len(
-        learner.Pyrs.SomaCompartment.get_BTSP_steps(applied_only=True, apply_step=True)
+        learner.Pyrs.SomaticCompartment.get_BTSP_steps(
+            applied_only=True, apply_step=True
+        )
     )
     if num_BTSP_applied != 1:
         raise RuntimeError("Learner does not have exactly one BTSP event.")
@@ -730,7 +734,7 @@ def run_linear_shift(
         )
 
         num_BTSP_applied = len(
-            learner.Pyrs.SomaCompartment.get_BTSP_steps(
+            learner.Pyrs.SomaticCompartment.get_BTSP_steps(
                 applied_only=True, apply_step=True
             )
         )
@@ -754,7 +758,9 @@ def run_linear_shift(
     )
 
     num_BTSP_applied_after = len(
-        learner.Pyrs.SomaCompartment.get_BTSP_steps(applied_only=True, apply_step=True)
+        learner.Pyrs.SomaticCompartment.get_BTSP_steps(
+            applied_only=True, apply_step=True
+        )
     )
 
     additional = num_BTSP_applied_after - num_BTSP_applied
@@ -791,9 +797,7 @@ def run_linear_shift(
     return learner, data_dict
 
 
-def run_linear_shifts(
-    seed=True, max_time_min=20, num_repeats=1, k=SMOOTH_K, num_jobs=1
-):
+def run_linear_shifts(seed=True, max_time_min=5, num_repeats=1, k=SMOOTH_K, num_jobs=1):
     """
     run_linear_shifts()
 
@@ -803,6 +807,12 @@ def run_linear_shifts(
     Args:
     - seed (bool): Whether to seed the random number generator with the paper seed.
         Default is True.
+    - max_time_min (float): Maximum time in minutes to run the environment.
+        Default is 5.
+    - num_repeats (int): Number of repeats for the experiment. Default is 1.
+    - k (int): Smoothing factor for measuring place field width from firingrate history.
+        Default is SMOOTH_K.
+    - num_jobs (int): Number of parallel jobs to run. Default is 1.
 
     Returns:
     - shift_data (dict): Dictionary containing:
@@ -1191,7 +1201,7 @@ def plot_openfield_corridor_timeseries(Pyrs=None, **kwargs):
         Pyrs = learner.Pyrs
 
     sub_ax = paper_plot_fcts.plot_single_neuron_rate_timeseries(
-        Pyrs.SomaCompartment, **kwargs
+        Pyrs.SomaticCompartment, **kwargs
     )
 
     return sub_ax
@@ -1260,6 +1270,6 @@ def plot_figure_panel(*args, fig=1, panel="A", save=True, **kwargs):
     if save and ax is not None:
         key = f"{fig}{panel}"
         fig = ax.ravel()[0].figure if isinstance(ax, np.ndarray) else ax.figure
-        plot_util.save_figure(fig, key, no_timestamp=True)
+        plot_util.save_figure(fig, key, no_timestamp=True, dpi=600)
 
     return ax

@@ -48,12 +48,12 @@ def extract_objects_from_Pyrs(Pyrs):
 
     Ag = Pyrs.Agent
 
-    if hasattr(Pyrs, "SomaCompartment"):  # two compartment
-        Obj_key = list(Pyrs.DendriteCompartment.inputs.keys())[-1]
-        Objs = Pyrs.DendriteCompartment.inputs[Obj_key]["layer"]
+    if hasattr(Pyrs, "SomaticCompartment"):  # two compartment
+        Obj_key = list(Pyrs.ApicalCompartment.inputs.keys())[-1]
+        Objs = Pyrs.ApicalCompartment.inputs[Obj_key]["layer"]
 
-        PC_key = list(Pyrs.SomaCompartment.inputs.keys())[0]
-        PCs = Pyrs.SomaCompartment.inputs[PC_key]["layer"]
+        PC_key = list(Pyrs.SomaticCompartment.inputs.keys())[0]
+        PCs = Pyrs.SomaticCompartment.inputs[PC_key]["layer"]
     else:
         Objs = None
         PC_key = list(Pyrs.inputs.keys())[0]

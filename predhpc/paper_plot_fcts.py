@@ -10,7 +10,7 @@ import ratinabox
 
 from predhpc import plot_fcts
 from predhpc.experiments import metrics
-from predhpc.util import gen_util, params_util, plot_util, ext_util, signal_util
+from predhpc.util import gen_util, params_util, plot_util, ext_util
 
 LW = 1.6
 
@@ -201,7 +201,9 @@ def add_1D_position_markers(
         )
 
 
-def configure_neural_activity_axis(sub_ax, ymin=0, ymax=10, right=False, label=True):
+def configure_neural_activity_axis(
+    sub_ax, ymin=0, ymax=10, norm=1, right=False, label=True
+):
     """
     configure_neural_activity_axis(sub_ax)
 
@@ -211,12 +213,15 @@ def configure_neural_activity_axis(sub_ax, ymin=0, ymax=10, right=False, label=T
     - sub_ax (plt.Axes): Subplot for which to configure axis.
     - ymin (float, optional): Minimum value for y axis spine. Default is 0.
     - ymax (float, optional): Maximum value for y axis spine. Default is 10.
+    - norm (float, optional): Normalization factor for y axis ticks. Default is 1.
     - right (bool, optional): IF True, y axis spine and labels are moved to the right.
         Default is False.
     - label (bool, optional): If True, y axis label is added. Default is True.
     """
 
-    sub_ax.set_yticks([ymin, ymax])
+    sub_ax.set_yticks([ymin / norm, ymax / norm])
+    if norm != 1:
+        sub_ax.set_yticklabels([ymin, ymax])
 
     spine = "left"
     labelpad = 0
@@ -227,7 +232,7 @@ def configure_neural_activity_axis(sub_ax, ymin=0, ymax=10, right=False, label=T
         labelpad = 6
 
     sub_ax.spines[spine].set_visible(True)
-    sub_ax.spines[spine].set_bounds(ymin, ymax)
+    sub_ax.spines[spine].set_bounds(ymin / norm, ymax / norm)
     sub_ax.spines["bottom"].set_bounds(0, sub_ax.get_xlim()[1])
     if label:
         sub_ax.set_ylabel("Neural activity", labelpad=labelpad)
@@ -296,6 +301,7 @@ def plot_1D_PFs(
                 alpha=alphas[i],
                 lw=0,
                 where=cond,
+                rasterized=True,  # for hatches to export
             )
     if mark_original:
         sub_ax.plot(
@@ -332,7 +338,7 @@ def plot_single_neuron_rate_timeseries(
     """
 
     if sub_ax is None:
-        _, sub_ax = plt.subplots(figsize=(10.4, 1.7))
+        _, sub_ax = plt.subplots(figsize=(10, 1.7))
     NeuronLayer.plot_rate_timeseries(
         sub_ax=sub_ax,
         lw=lw,
@@ -341,7 +347,7 @@ def plot_single_neuron_rate_timeseries(
         chosen_neurons=[chosen_neuron],
     )
 
-    ymin = min(sub_ax.get_ylim()[0], -1) - 1
+    ymin = min(sub_ax.get_ylim()[0], -0.2) - 0.2
     ymax = max(sub_ax.get_ylim()[1], 11) * 1.3
     sub_ax.set_ylim(ymin, ymax)
 
@@ -447,7 +453,7 @@ def plot_linear_summary(learner):
 
     plot_kwargs = {
         "hspace": 0.35,
-        "height_ratios": [0.1, 0.12, 0.36, 0.14, 0.14, 0.14],
+        "height_ratios": [0.1, 0.1, 0.4, 0.14, 0.14, 0.14],
         "figsize": (5.8, 8.3),
         "lw": LW,
         "s": 1.2,
@@ -489,21 +495,24 @@ def plot_linear_summary(learner):
         if i > 0:
             ax1D[i].set_ylabel("")
 
-    for i, comp in enumerate(["soma", "dend", "inhibit"]):
+    for i, comp in enumerate(["somatic", "apical"]):
         learner.Pyrs.add_compartment_legend(
             ax1D[3 + i],
             compartment=comp,
             lw=plot_kwargs["lw"],
-            loc=(0.74, 0.65),
-            handlelength=1.2,
+            loc=(0.725, 0.65),
+            handlelength=0.8,
             frameon=False,
             fontsize=11,
         )
 
+    ax1D[-1].set_title("Inhibitory interneuron", y=1.02)
+
     # mark axes for neural activity
     for i, sub_ax in enumerate(ax1D[1:]):
         label = True if i == 2 else False
-        configure_neural_activity_axis(sub_ax, label=label)
+        norm = PCs.n / plot_fcts.DIV_MULTI_NEURON if i == 1 else 1
+        configure_neural_activity_axis(sub_ax, label=label, norm=norm)
 
     return ax1D
 
@@ -538,12 +547,12 @@ def plot_linear_place_fields(learner):
                 raise ValueError(f"PF_type '{PF_type}' not recognized.")
         else:
             t_start = ext_util.choose_t_start_after_BTSP(
-                learner.Pyrs.SomaCompartment, next_trajectory=True
+                learner.Pyrs.SomaticCompartment, next_trajectory=True
             )
             data, PF_centers = metrics.evaluate_PFs(
                 learner.Pyrs, method="history", t_start=t_start
             )
-            color = learner.Pyrs.SomaCompartment.color
+            color = learner.Pyrs.SomaticCompartment.color
 
         plot_fcts.plot_recorded_1D_PFs(
             data,
@@ -609,7 +618,7 @@ def plot_linear_binned_rates(learner, num_bins=100):
             pos_shift=-0.5,
         )
 
-    labels = ["Soma", "Apical dend.", "Dend. inhib."]
+    labels = ["Somatic", "Apical", "Inhibitory"]
     for i, sub_ax in enumerate(ax1D):
         sub_ax.set_title("")
         sub_ax.set_ylabel(labels[i])
@@ -703,7 +712,7 @@ def plot_linear_speed_PF_examples(
         ytick_max, ymax = 0.25, 0.28
         round_dec = 2
     elif PF_type == "history":
-        color = color or params_util.PYR_SOMA_COLOR
+        color = color or params_util.PYR_SOMATIC_COLOR
         ytick_max, ymax = 6, 6.5
         round_dec = 0
     else:
@@ -799,7 +808,7 @@ def plot_linear_speed_PF_widths(
         ytick_min, ytick_max, num_yticks = 0.2, 0.8, 5
         start_y_idx = 0
     elif PF_type == "history":
-        color = color or params_util.PYR_SOMA_COLOR
+        color = color or params_util.PYR_SOMATIC_COLOR
         ytick_min, ytick_max, num_yticks = 0.2, 0.6, 5
         start_y_idx = 0
     else:
@@ -812,7 +821,7 @@ def plot_linear_speed_PF_widths(
         plot_util.pad_axis(sub_ax=sub_ax, axis=axis)
     sub_ax.spines[["top", "right"]].set_visible(False)
 
-    sub_ax.set_xlabel("Speed mean (m/s)")
+    sub_ax.set_xlabel("Running velocity (m/s)")
     if xtick_max < 0.4:
         xtick_min = 0.05
         num_xticks = (xtick_max - xtick_min) * 20 + 1
@@ -1199,7 +1208,7 @@ def plot_linear_shift_PF_examples(
     elif PF_type == "history":
         ytick_max, ymax = 6, 6.5
         round_dec = 0
-        color = color or params_util.PYR_SOMA_COLOR
+        color = color or params_util.PYR_SOMATIC_COLOR
         alpha = 1.0
     else:
         raise ValueError(f"PF_type '{PF_type}' not recognized.")
@@ -1353,7 +1362,7 @@ def plot_target_shift_PFs(
         alpha = 0.8
     elif PF_type == "history":
         scale_y = 0.07
-        color = color or params_util.PYR_SOMA_COLOR
+        color = color or params_util.PYR_SOMATIC_COLOR
         alpha = 1.0
     else:
         raise ValueError(f"PF_type '{PF_type}' not recognized.")
@@ -1463,7 +1472,7 @@ def plot_target_shift_PFs(
     return ax1D
 
 
-def plot_openfield_components(Pyrs):
+def plot_openfield_components(Pyrs, titles=False):
     """
     plot_openfield_components(Pyrs)
 
@@ -1471,6 +1480,7 @@ def plot_openfield_components(Pyrs):
 
     Args:
     - Pyrs (Pyr): Pyr object containing the environment, agent, object and place cells.
+    - titles (bool, optional): Whether to add titles to each subplot. Default is False.
 
     Returns:
     - axes (np.ndarray of plt.Axes): Array of subplots with openfield components plotted.
@@ -1491,12 +1501,14 @@ def plot_openfield_components(Pyrs):
     Obj_sub_ax, PC_sub_ax = axes[1]
 
     # top row
-    env_sub_ax.set_title("Environment", y=y)
+    if titles:
+        env_sub_ax.set_title("Environment", y=y)
     Env.plot_environment(
         sub_ax=env_sub_ax, scale_loc=(1.62, 1.88), scale_length=0.5, **kwargs
     )
 
-    traj_sub_ax.set_title("Example trajectory", y=y)
+    if titles:
+        traj_sub_ax.set_title("Example trajectory", y=y)
     traj_idx = 4
     t_start = Ag.trajectory_df.loc[traj_idx, "start_time"] + 1
     t_end = Ag.trajectory_df.loc[traj_idx, "stop_time"]
@@ -1515,12 +1527,14 @@ def plot_openfield_components(Pyrs):
     )
 
     # bottom row
-    Obj_sub_ax.set_title("Object field", y=y, color=Objs.color)
+    if titles:
+        Obj_sub_ax.set_title("Object field", y=y, color=Objs.color)
     Objs.plot_rate_map(sub_ax=Obj_sub_ax, plot_objects=False, colorbar=False, **kwargs)
 
-    PC_sub_ax.set_title(
-        f"Place fields ({len(chosen_PCs)}/{PCs.n})", y=y, color=PCs.color
-    )
+    if titles:
+        PC_sub_ax.set_title(
+            f"Place fields ({len(chosen_PCs)}/{PCs.n})", y=y, color=PCs.color
+        )
     Env.plot_environment(sub_ax=PC_sub_ax, plot_objects=True, **kwargs)
     plot_fcts.plot_overlayed_rate_maps(
         PCs, sub_ax=PC_sub_ax, method="max", chosen_neurons=chosen_PCs, colorbar=False
@@ -1543,6 +1557,7 @@ def plot_openfield_components(Pyrs):
         vmin=vmin,
         vmax=vmax,
         label="Neural activity",
+        outline=True,
     )
 
     for sub_ax in axes.ravel()[:-1]:
@@ -1551,9 +1566,7 @@ def plot_openfield_components(Pyrs):
     return axes
 
 
-def plot_openfield_PFs(
-    Pyrs, fig_side=2.7, s=79.35, lw=LW, alpha=0.8, PF_type="weights"
-):
+def plot_openfield_PFs(Pyrs, fig_side=4.0, lw=LW, alpha=0.8, PF_type="weights"):
     """
     plot_openfield_PFs(Pyrs)
 
@@ -1561,8 +1574,7 @@ def plot_openfield_PFs(
 
     Args:
     - Pyrs (Pyr): Pyr object for openfield.
-    - fig_side (float, optional): Size of the figure. Default is 2.7.
-    - s (float, optional): Size of the markers. Default is 79.35.
+    - fig_side (float, optional): Size of the figure. Default is 3.3.
     - lw (float, optional): Line width. Default is LW.
     - alpha (float, optional): Transparency level. Default is 0.8.
 
@@ -1572,18 +1584,24 @@ def plot_openfield_PFs(
 
     fig, sub_ax = plt.subplots(figsize=(fig_side, fig_side))
 
-    round_dec = 2
     PF_t_start = None
     if PF_type == "history":
         round_dec = 0
-        BTSP_applied = Pyrs.SomaCompartment.get_BTSP_steps(
+        s = 44.08  # matched to default fig side
+        BTSP_applied = Pyrs.SomaticCompartment.get_BTSP_steps(
             applied_only=True, apply_step=True
         )
+        vmax = 10
         if len(BTSP_applied):
-            PF_t_start = BTSP_applied[-1] * Pyrs.SomaCompartment.Agent.dt
+            PF_t_start = BTSP_applied[-1] * Pyrs.SomaticCompartment.Agent.dt
+
+    else:
+        round_dec = 2
+        s = 176.3  # matched to default fig side
+        vmax = None
 
     plot_fcts.plot_2D_PFs(
-        Pyrs.SomaCompartment,
+        Pyrs.SomaticCompartment,
         PF_type=PF_type,
         PF_t_start=PF_t_start,
         alpha=alpha,
@@ -1596,9 +1614,11 @@ def plot_openfield_PFs(
         plot_BTSP_events=True,
         skip_object_types=["teleport"],
         no_legend=True,
+        vmax=vmax,
         ax=sub_ax,
         marker="s",
         cbar_side="right",
+        cbar_outline=True,
         vmin=0,
     )
 

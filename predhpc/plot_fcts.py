@@ -19,6 +19,9 @@ if TYPE_CHECKING:
     from predhpc.neurons import riab_neurons, learning_neurons, two_comp_neurons
 
 
+DIV_MULTI_NEURON = 30  # divisor for multi-neuron timeseries
+
+
 def get_PF_label(PF_type="weights", title=False):
     """
     get_PF_label(PF_type)
@@ -1564,7 +1567,8 @@ def plot_recorded_1D_PFs(
     """
     plot_recorded_1D_PFs(PFs, PF_positions)
 
-    Plots the place fields of a Pyr. soma, across time, for a linear track environment.
+    Plots the place fields of a Pyr. somatic compartment, across time, for a linear
+    track environment.
 
     Args:
     - PFs (2D np.ndarray): Place fields of a target neuron, for each timepoint,
@@ -1740,15 +1744,15 @@ def plot_1D_BTSP_stats(
     _, BTSP_ramp_ax1D = plt.subplots(3, 1, figsize=(7, 6))
     _, PCs_sub_ax = plt.subplots(figsize=(7, 2))
 
-    if hasattr(Pyrs, "DendriteCompartment"):
-        Pyrs.SomaCompartment.plot_BTSP_ramp(axes=BTSP_ramp_ax1D, in_min=in_min)
-        BTSP_ramp_ax1D[1].get_lines()[-1].set_label("soma")
-        for i, comp in enumerate([Pyrs.DendriteCompartment, Pyrs.DendriteInhibition]):
+    if hasattr(Pyrs, "ApicalCompartment"):
+        Pyrs.SomaticCompartment.plot_BTSP_ramp(axes=BTSP_ramp_ax1D, in_min=in_min)
+        BTSP_ramp_ax1D[1].get_lines()[-1].set_label("somatic")
+        for i, comp in enumerate([Pyrs.ApicalCompartment, Pyrs.ApicalInhibition]):
             t = np.asarray(comp.history["t"])
             if in_min:
                 t = t / 60
             alpha = 0.7 if i == 0 else 0.5
-            label = "dend" if i == 0 else "inhib."
+            label = "apical" if i == 0 else "inhibitory"
             BTSP_ramp_ax1D[1].plot(
                 t,
                 comp.history["firingrate"],
@@ -1832,7 +1836,7 @@ def plot_pre_post_responses(Pyrs, Objs, ref_time=0, pre=60, post=None, axes=None
     return axes
 
 
-def plot_pre_post_dendrite_peaks(
+def plot_pre_post_apical_peaks(
     Pyrs,
     ref_time=0,
     pre=60,
@@ -1844,9 +1848,10 @@ def plot_pre_post_dendrite_peaks(
     ax=None,
 ):
     """
-    plot_pre_post_dendrite_peaks(Pyrs)
+    plot_pre_post_apical_peaks(Pyrs)
 
-    Plot the Pyramidal dendrite response peaks before and after a reference time.
+    Plot the Pyramidal apical compartment response peaks before and after a reference
+    time.
 
     Args:
     - Pyrs (riab_neurons.Neurons): Pyramidal neurons.
@@ -1863,8 +1868,8 @@ def plot_pre_post_dendrite_peaks(
         Default is None.
 
     Returns:
-    - ax (plt.Axes or 1D np.ndarray): Subplot or array of subplots with Pyr. dendrite
-        response peaks plotted.
+    - ax (plt.Axes or 1D np.ndarray): Subplot or array of subplots with Pyr. apical
+        compartment response peaks plotted.
     """
 
     if ax is None:
@@ -1880,8 +1885,8 @@ def plot_pre_post_dendrite_peaks(
         fig = np.asarray(ax).ravel()[0].figure
 
     dt = Pyrs.Agent.dt
-    t = np.asarray(Pyrs.DendriteCompartment.history["t"])
-    firingrates = np.asarray(Pyrs.DendriteCompartment.history["firingrate"])
+    t = np.asarray(Pyrs.ApicalCompartment.history["t"])
+    firingrates = np.asarray(Pyrs.ApicalCompartment.history["firingrate"])
 
     # pre
     pre_ids = plot_util.get_plotting_times(
@@ -1971,7 +1976,8 @@ def plot_pre_post_dendrite_peaks(
 
     sub_ax.legend()
     fig.suptitle(
-        f"Comparing Pyr. dendrite response peaks before and after {label}", y=1.0
+        f"Comparing Pyr. apical compartment response peaks before and after {label}",
+        y=1.0,
     )
 
     return ax
@@ -2185,7 +2191,7 @@ def plot_1D_time_info(
     num_Pyr_ax = 1
     mark_all = True
     ax_key = "sub_ax"
-    if hasattr(Pyrs, "DendriteCompartment"):
+    if hasattr(Pyrs, "ApicalCompartment"):
         ax_key = "ax"
         if "separate_axes" in Pyr_kwargs.keys() and Pyr_kwargs["separate_axes"]:
             plot_lateral = "plot_lateral" in Pyr_kwargs and Pyr_kwargs["plot_lateral"]
@@ -2243,7 +2249,7 @@ def plot_1D_time_info(
         sub_ax=ax1D[i],
         lw=lw,
         autosave=False,
-        norm_by=PCs.n / 20,
+        norm_by=PCs.n / DIV_MULTI_NEURON,
         overlap=1,
         global_shift=-1,
         shade_kwargs={"rasterized": True},  # svg too big, othersize
@@ -2266,15 +2272,14 @@ def plot_1D_time_info(
     )
     ax1D[i + 1].set_title("Pyr. rate timeseries")
 
-    # set y axes so that y axis is comparable across subplots
-    ymin = min([sub_ax.get_ylim()[0] for sub_ax in ax1D[i + 1 :]])
+    # set y axes so that y axis is comparable across pyramidal neuron subplots
+    idxs = np.arange(i + 1, len(ax1D))
+    axlist = [ax1D[i] for i in idxs]
+
+    ymin = min([sub_ax.get_ylim()[0] for sub_ax in axlist])
     for sub_ax in ax1D[i + 1 :]:
         sub_ax.set_ylim(ymin, None)
 
-    idxs = np.arange(i + 1, len(ax1D))
-    if hasattr(Pyrs, "DendriteCompartment"):
-        idxs = np.insert(idxs, 0, [1])
-    axlist = [ax1D[i] for i in idxs]
     plot_util.match_y_axis_scales(axlist, [height_ratios[i] for i in idxs])
 
     for i, sub_ax in enumerate(ax1D):
@@ -2318,6 +2323,7 @@ def plot_2D_PFs(
     y: float = 1,
     single_colorbar: bool = False,
     cbar_side: str = "right",
+    cbar_outline: bool = False,
     plot_BTSP_events: bool = False,
     t_start: float | None = None,
     t_end: float | None = None,
@@ -2370,6 +2376,8 @@ def plot_2D_PFs(
     - single_colorbar (bool, optional): Whether to use a single colorbar. Default is
         False.
     - cbar_side (str, optional): Side of the colorbar. Default is "right".
+    - cbar_outline (bool, optional): Whether to draw an outline around the colorbar.
+        Default is False.
     - plot_BTSP_events (bool, optional): Whether to plot the BTSP events.
         Default is False.
     - t_start (float, optional): Start time of the plot. Default is None.
@@ -2522,6 +2530,7 @@ def plot_2D_PFs(
         label=clabel,
         end_only=single_colorbar,
         side=cbar_side,
+        outline=cbar_outline,
     )
 
     v_ticks = [np.around(vmin, 2), np.around(vmax, 2)]
@@ -2966,8 +2975,8 @@ def plot_interleaved_openfield_rate_maps(
     """
     plot_interleaved_openfield_rate_maps(Pyrs, Objs)
 
-    Plot interleaved open field rate maps for Pyr. neuron somata and the object neurons
-    thattarget their dendrites.
+    Plot interleaved open field rate maps for Pyr. neuron somatic compartments and the
+    object neurons that target their apical compartments.
 
     Rate maps are computed theoretically based on place cell inputs.
 
@@ -3009,7 +3018,7 @@ def plot_interleaved_openfield_rate_maps(
         ax=axes[::2].ravel()[: Objs.n], no_legend=no_legend, **obj_s_kwarg
     )
     plot_2D_PFs(
-        Pyrs.SomaCompartment,
+        Pyrs.SomaticCompartment,
         ax=axes[1::2].ravel()[: Objs.n],
         alpha=0.5,
         plot_BTSP_events=True,

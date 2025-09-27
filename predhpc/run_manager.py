@@ -182,11 +182,13 @@ class Learner:
 
         # BTSP settings
         if self.two_compartment:
-            self.Pyrs_for_weights = self.Pyrs.SomaCompartment
+            self.Pyrs_for_weights = self.Pyrs.SomaticCompartment
             self.BTSP_on = BTSP_on or 1
             self.BTSP_stopped = False
-            self.Pyrs.set_BTSP_learn(soma=False, dend=False)
-            self.Pyrs.set_learn(soma=self.use_Hebbian, dend=False, inhibit=False)
+            self.Pyrs.set_BTSP_learn(somatic=False, apical=False)
+            self.Pyrs.set_learn(
+                somatic=self.use_Hebbian, apical=False, inhibitory=False
+            )
         else:
             self.Pyrs_for_weights = self.Pyrs
             if self.one_comp_internal:
@@ -232,7 +234,7 @@ class Learner:
             return
 
         if self.two_compartment:
-            self.Pyrs.set_BTSP_learn(soma=True, dend=False)
+            self.Pyrs.set_BTSP_learn(somatic=True, apical=False)
         else:
             self.Pyrs.set_BTSP_learn()
 
@@ -253,7 +255,7 @@ class Learner:
             return
 
         if self.two_compartment:
-            self.Pyrs.set_BTSP_learn(soma=False, dend=False)
+            self.Pyrs.set_BTSP_learn(somatic=False, apical=False)
         else:
             self.Pyrs.set_BTSP_learn()
 
@@ -643,7 +645,9 @@ def init_env_objects(
     PCs = riab_neurons.PlaceCells(Ag, params=PC_params)
 
     # infer whether two-compartment model will be used or not
-    if Pyr_params is None or any(key.startswith("soma_") for key in Pyr_params.keys()):
+    if Pyr_params is None or any(
+        key.startswith("somatic_") for key in Pyr_params.keys()
+    ):
         two_compartment = True
     else:
         two_compartment = False
@@ -676,7 +680,7 @@ def init_env_objects(
         )
 
     if two_compartment:
-        Pyr_params["soma_input_layers"] = [PCs]  # type: ignore[assignment]
+        Pyr_params["somatic_input_layers"] = [PCs]  # type: ignore[assignment]
         if Pyr_params["n"] is None:
             Pyr_params["n"] = Objs.n
         elif Pyr_params["n"] != Objs.n:
@@ -695,11 +699,11 @@ def init_env_objects(
         Obj_to_Pyr_w = gen_util.get_weights(
             Objs.n,
             Pyrs.n,
-            loc=Pyr_params["dend_w_init_loc"],
-            scale=Pyr_params["dend_w_init_scale"],
+            loc=Pyr_params["apical_w_init_loc"],
+            scale=Pyr_params["apical_w_init_scale"],
         )
-        Pyrs.DendriteCompartment.add_input(Objs, w=Obj_to_Pyr_w)
-        Pyrs.set_BTSP_learn(soma=True, dend=False)
+        Pyrs.ApicalCompartment.add_input(Objs, w=Obj_to_Pyr_w)
+        Pyrs.set_BTSP_learn(somatic=True, apical=False)
     else:
         if "NMDA_activation_threshold" in Pyr_params.keys():
             Pyrs = learning_neurons.NMDALayer(Ag, params=Pyr_params)

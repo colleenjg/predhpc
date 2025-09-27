@@ -19,8 +19,8 @@ class TwoCompLayer(object):
     TwoCompLayer()
 
     This neuron layer class defines a population of neurons with two compartments
-    (somatic and dendritic), each of which is an NMDALayer. An additional HebbianLayer
-    dendritic inhibition compartment can optionally be included
+    (somatic and apical), each of which is an NMDALayer. An additional HebbianLayer
+    apical inhibition compartment can optionally be included
 
     Must be initialised with an Agent. A parameters dictionary can also be passed at
     initialisation, with, for example, input layers.
@@ -28,20 +28,20 @@ class TwoCompLayer(object):
     default_params = {
         "n": 2,
         "name": "TwoCompLayer",
-        "soma_input_layers": [],
-        "dend_input_layers": [],
-        "soma_to_dend_weight": 0.2,
-        "dend_to_soma_weight": 1.0,
-        "dend_first": True,
-        "soma_color": "C0",
-        "dend_color": "C1",
-        "inhibit_dend": True,
-        "inhibit_color": "k",
-        "inhibit_weight": 3.0,  # multiplied by -1 identity matrix
-        "inhibit_activation_function": params_util.LINEAR_SIGMOID_ACTIVATION_PARAMS,
-        "inhibit_input_filter_tau": 3,
-        "inhibit_input_trend_tau": None,
-        "mutual_inhibition_weight": None,
+        "somatic_input_layers": [],
+        "apical_input_layers": [],
+        "somatic_to_apical_weight": 0.2,
+        "apical_to_somatic_weight": 1.0,
+        "apical_first": True,
+        "somatic_color": "C0",
+        "apical_color": "C1",
+        "inhibitory_apical": True,
+        "inhibitory_color": "k",
+        "inhibitory_weight": 3.0,  # multiplied by -1 identity matrix
+        "inhibitory_activation_function": params_util.LINEAR_SIGMOID_ACTIVATION_PARAMS,
+        "inhibitory_input_filter_tau": 3,
+        "inhibitory_input_trend_tau": None,
+        "lateral_inhibition_weight": None,
         "lateral_tau": 0.3,
     }
 
@@ -50,9 +50,9 @@ class TwoCompLayer(object):
     List of methods:
         • self.set_learn()
         • self.set_BTSP_learn()
-        • self.get_place_cell_center_of_main_dendrite_input()
-        • self.get_vectors_to_place_cell_center_of_main_dendrite_input()
-        • self.get_distances_to_place_cell_center_of_main_dendrite_input()
+        • self.get_place_cell_center_of_main_apical_input()
+        • self.get_vectors_to_place_cell_center_of_main_apical_input()
+        • self.get_distances_to_place_cell_center_of_main_apical_input()
         • self.get_closest_steps_to_target()
         • self.match_closest_to_target_steps_to_BTSP_steps()
         • self.update()
@@ -67,20 +67,20 @@ class TwoCompLayer(object):
     default_params = {
         "n": 2,
         "name": "TwoCompLayer",
-        "soma_input_layers": [],
-        "dend_input_layers": [],
-        "soma_to_dend_weight": 0.2,
-        "dend_to_soma_weight": 1.0,
-        "dend_first": True,
-        "soma_color": "C0",
-        "dend_color": "C1",
-        "inhibit_dend": True,
-        "inhibit_color": "k",
-        "inhibit_weight": 3.0,  # multiplied by -1 identity matrix
-        "inhibit_activation_function": params_util.LINEAR_SIGMOID_ACTIVATION_PARAMS,
-        "inhibit_input_filter_tau": 3,
-        "inhibit_input_trend_tau": None,
-        "mutual_inhibition_weight": None,
+        "somatic_input_layers": [],
+        "apical_input_layers": [],
+        "somatic_to_apical_weight": 0.2,
+        "apical_to_somatic_weight": 1.0,
+        "apical_first": True,
+        "somatic_color": "C0",
+        "apical_color": "C1",
+        "inhibitory_apical": True,
+        "inhibitory_color": "k",
+        "inhibitory_weight": 3.0,  # multiplied by -1 identity matrix
+        "inhibitory_activation_function": params_util.LINEAR_SIGMOID_ACTIVATION_PARAMS,
+        "inhibitory_input_filter_tau": 3,
+        "inhibitory_input_trend_tau": None,
+        "lateral_inhibition_weight": None,
         "lateral_tau": 0.1,
     }
 
@@ -112,7 +112,7 @@ class TwoCompLayer(object):
         self._organize_params(params)
         self._create_compartments()
 
-        self.set_learn(soma=True, dend=True, inhibit=False)
+        self.set_learn(somatic=True, apical=True, inhibitory=False)
 
     def _organize_params(self, params: dict[str, Any]):
         """
@@ -122,16 +122,16 @@ class TwoCompLayer(object):
         compartment as appropriate.
 
         Attributes:
-        - dend_params (dict): Parameters for the dendrite compartment.
+        - apical_params (dict): Parameters for the apical compartment.
         - name (str): Name of the layer.
-        - soma_params (dict): Parameters for the soma compartment.
+        - somatic_params (dict): Parameters for the somatic compartment.
 
         Args:
         - params (dict): Parameters passed to the TwoCompLayer class.
         """
 
-        self.soma_params = {"name": "soma"}
-        self.dend_params = dict()
+        self.somatic_params = {"name": "somatic"}
+        self.apical_params = dict()
 
         all_params = copy.deepcopy(self.default_params)  # type: ignore[name-defined]
         all_params.update(params)
@@ -145,10 +145,10 @@ class TwoCompLayer(object):
             params[key] = value
 
         local_attributes = [
-            "soma_to_dend_weight",
-            "dend_to_soma_weight",
-            "dend_first",
-            "mutual_inhibition_weight",
+            "somatic_to_apical_weight",
+            "apical_to_somatic_weight",
+            "apical_first",
+            "lateral_inhibition_weight",
             "lateral_tau",
         ]
 
@@ -159,25 +159,25 @@ class TwoCompLayer(object):
                     "Will be ignored."
                 )
 
-            elif key in local_attributes or key.startswith("inhibit_"):
+            elif key in local_attributes or key.startswith("inhibitory_"):
                 setattr(self, key, value)
 
             elif key == "name":
                 self.name = value
-                if "dend_name" not in all_params.keys():
-                    self.dend_params["name"] = f"{value}_dend"
-                if "soma_name" not in all_params.keys():
-                    self.soma_params["name"] = f"{value}_soma"
+                if "apical_name" not in all_params.keys():
+                    self.apical_params["name"] = f"{value}_apical"
+                if "somatic_name" not in all_params.keys():
+                    self.somatic_params["name"] = f"{value}_somatic"
 
             elif key == "n":
                 self.n = value
-                self.soma_params["n"] = value
-                self.dend_params["n"] = value
+                self.somatic_params["n"] = value
+                self.apical_params["n"] = value
 
-            elif key.startswith("soma_") or key.startswith("dend_"):
+            elif key.startswith("somatic_") or key.startswith("apical_"):
                 for compartment, comp_dict in [
-                    ("soma", self.soma_params),
-                    ("dend", self.dend_params),
+                    ("somatic", self.somatic_params),
+                    ("apical", self.apical_params),
                 ]:
                     lead_str = f"{compartment}_"
                     if key.startswith(lead_str):
@@ -189,92 +189,96 @@ class TwoCompLayer(object):
                         comp_dict[key.replace(lead_str, "")] = value
 
             else:
-                self.soma_params[key] = value
-                self.dend_params[key] = value
+                self.somatic_params[key] = value
+                self.apical_params[key] = value
 
     def _create_compartments(self):
         """
         self._create_compartments()
 
-        Create the soma and dendrite compartments, and connect them to each other for
+        Create the somatic and apical compartments, and connect them to each other for
         each neuron.
 
         If applicable, an inhibitory compartment is also created for each neuron and
-        connected to the neuron's somatic and dendritic compartments.
+        connected to the neuron's somatic and apical compartments.
 
         Inter-compartment connections:
-            Soma <--> Dendrite
-            if self.inhibit_dend:
-                Soma -->* Dendritic inhibition --> Dendrite
+            Somatic <--> Apical
+            if self.inhibitory_apical:
+                Somatic -->* Apical inhibition --> Apical
             *: learning possible
 
         Attributes:
-        - DendriteCompartment (learning_neurons.NMDALayer): Dendrite compartment.
-        - DendriteInhibition (learning_neurons.HebbianLayer): Inhibitory compartment.
-        - SomaCompartment (learning_neurons.NMDALayer): Soma compartment.
+        - ApicalCompartment (learning_neurons.NMDALayer): Apical compartment.
+        - ApicalInhibition (learning_neurons.HebbianLayer): Inhibitory compartment.
+        - SomaticCompartment (learning_neurons.NMDALayer): Somatic compartment.
         """
 
-        self.SomaCompartment = learning_neurons.NMDALayer(self.Agent, self.soma_params)
-        self.DendriteCompartment = learning_neurons.NMDALayer(
-            self.Agent, self.dend_params
+        self.SomaticCompartment = learning_neurons.NMDALayer(
+            self.Agent, self.somatic_params
+        )
+        self.ApicalCompartment = learning_neurons.NMDALayer(
+            self.Agent, self.apical_params
         )
 
-        if self.SomaCompartment.n != self.n or self.DendriteCompartment.n != self.n:  # type: ignore[attr-defined]
+        if self.SomaticCompartment.n != self.n or self.ApicalCompartment.n != self.n:  # type: ignore[attr-defined]
             raise ValueError(
                 f"The two compartment layers must have same number of units ({self.n})."
             )
 
-        dend_to_soma_weight = np.eye(self.n) * self.dend_to_soma_weight  # type: ignore[attr-defined]
-        self.SomaCompartment.add_input_layers_with_no_learning(self.DendriteCompartment.name)  # type: ignore[attr-defined]
-        self.SomaCompartment.add_input(
-            self.DendriteCompartment,
-            w=dend_to_soma_weight,
-            recurrent=not (self.dend_first),
+        apical_to_somatic_weight = np.eye(self.n) * self.apical_to_somatic_weight  # type: ignore[attr-defined]
+        self.SomaticCompartment.add_input_layers_with_no_learning(self.ApicalCompartment.name)  # type: ignore[attr-defined]
+        self.SomaticCompartment.add_input(
+            self.ApicalCompartment,
+            w=apical_to_somatic_weight,
+            recurrent=not (self.apical_first),
         )
 
-        soma_to_dend_weight = np.eye(self.n) * self.soma_to_dend_weight  # type: ignore[attr-defined]
-        self.DendriteCompartment.add_input_layers_with_no_learning(
-            self.SomaCompartment.name  # type: ignore[attr-defined]
+        somatic_to_apical_weight = np.eye(self.n) * self.somatic_to_apical_weight  # type: ignore[attr-defined]
+        self.ApicalCompartment.add_input_layers_with_no_learning(
+            self.SomaticCompartment.name  # type: ignore[attr-defined]
         )
-        self.DendriteCompartment.add_input(
-            self.SomaCompartment, w=soma_to_dend_weight, recurrent=self.dend_first
+        self.ApicalCompartment.add_input(
+            self.SomaticCompartment,
+            w=somatic_to_apical_weight,
+            recurrent=self.apical_first,
         )
 
-        if self.inhibit_dend:  # type: ignore[attr-defined]
-            inhibit_params = {
-                "name": "SomaInhibitionOfDendrites",
+        if self.inhibitory_apical:  # type: ignore[attr-defined]
+            inhibitory_params = {
+                "name": "SomaticInhibitionOfApical",
                 "n": self.n,
-                "activation_function": self.inhibit_activation_function,  # type: ignore[attr-defined]
-                "color": self.inhibit_color,  # type: ignore[attr-defined]
-                "input_filter_tau": self.inhibit_input_filter_tau,  # type: ignore[attr-defined]
-                "input_trend_tau": self.inhibit_input_trend_tau,  # type: ignore[attr-defined]
+                "activation_function": self.inhibitory_activation_function,  # type: ignore[attr-defined]
+                "color": self.inhibitory_color,  # type: ignore[attr-defined]
+                "input_filter_tau": self.inhibitory_input_filter_tau,  # type: ignore[attr-defined]
+                "input_trend_tau": self.inhibitory_input_trend_tau,  # type: ignore[attr-defined]
             }
 
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", "No input layers", UserWarning)
-                self.DendriteInhibition = learning_neurons.HebbianLayer(
-                    self.Agent, params=inhibit_params
+                self.ApicalInhibition = learning_neurons.HebbianLayer(
+                    self.Agent, params=inhibitory_params
                 )
 
-            soma_input = np.eye(self.n) * self.inhibit_weight  # type: ignore[attr-defined]
-            self.DendriteInhibition.add_input(self.SomaCompartment, w=soma_input)
+            somatic_input = np.eye(self.n) * self.inhibitory_weight  # type: ignore[attr-defined]
+            self.ApicalInhibition.add_input(self.SomaticCompartment, w=somatic_input)
 
-            dend_inhibition = np.eye(self.n) * -1
-            self.DendriteCompartment.add_input_layers_with_no_learning(
-                self.DendriteInhibition.name  # type: ignore[attr-defined]
+            apical_inhibition = np.eye(self.n) * -1
+            self.ApicalCompartment.add_input_layers_with_no_learning(
+                self.ApicalInhibition.name  # type: ignore[attr-defined]
             )
-            self.DendriteCompartment.add_input(
-                self.DendriteInhibition, w=dend_inhibition, recurrent=self.dend_first
+            self.ApicalCompartment.add_input(
+                self.ApicalInhibition, w=apical_inhibition, recurrent=self.apical_first
             )
 
-        if self.mutual_inhibition_weight is not None:
+        if self.lateral_inhibition_weight is not None:
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", "No input layers", UserWarning)
 
                 lateral_params = {
                     "name": "LateralInhibition",
                     "n": self.n,
-                    "activation_function": self.SomaCompartment.activation_function,
+                    "activation_function": self.SomaticCompartment.activation_function,
                     "color": "gray",
                     "input_filter_tau": self.lateral_tau,
                 }
@@ -283,14 +287,16 @@ class TwoCompLayer(object):
                     self.Agent, params=lateral_params
                 )
 
-            self.LateralInhibition.add_input(self.SomaCompartment, w=np.eye(self.n))
-            mutual_inhibition = (np.eye(self.n) - 1) * self.mutual_inhibition_weight
-            self.SomaCompartment.add_input(self.LateralInhibition, w=mutual_inhibition)
-            self.SomaCompartment.add_input_layers_with_no_learning(
+            self.LateralInhibition.add_input(self.SomaticCompartment, w=np.eye(self.n))
+            lateral_inhibition = (np.eye(self.n) - 1) * self.lateral_inhibition_weight
+            self.SomaticCompartment.add_input(
+                self.LateralInhibition, w=lateral_inhibition
+            )
+            self.SomaticCompartment.add_input_layers_with_no_learning(
                 self.LateralInhibition.name
             )
 
-    def set_learn(self, learn=None, soma=None, dend=None, inhibit=None):
+    def set_learn(self, learn=None, somatic=None, apical=None, inhibitory=None):
         """
         self.set_learn()
 
@@ -300,44 +306,46 @@ class TwoCompLayer(object):
         Args:
         - learn (bool, optional): Whether to learn learnable weights into all
             compartments.  Default is None.
-        - soma (bool, optional): Whether to learn learnable weights into the
-            soma compartment.  Default is None.
-        - dend (bool, optional): Whether to learn learnable weights into the
-            dendrite compartment. Default is None.
+        - somatic (bool, optional): Whether to learn learnable weights into the
+            somatic compartment.  Default is None.
+        - apical (bool, optional): Whether to learn learnable weights into the
+            apical compartment. Default is None.
+        - inhibitory (bool, optional): Whether to learn learnable weights into the
+            inhibitory compartment. Default is None.
         """
 
         if learn is not None:
-            soma = learn if soma is None else soma
-            dend = learn if dend is None else dend
-            inhibit = learn if inhibit is None else inhibit
+            somatic = learn if somatic is None else somatic
+            apical = learn if apical is None else apical
+            inhibitory = learn if inhibitory is None else inhibitory
 
-        self.SomaCompartment.set_learn(soma)
-        self.DendriteCompartment.set_learn(dend)
-        if self.inhibit_dend:  # type: ignore[attr-defined]
-            self.DendriteInhibition.set_learn(inhibit)
+        self.SomaticCompartment.set_learn(somatic)
+        self.ApicalCompartment.set_learn(apical)
+        if self.inhibitory_apical:  # type: ignore[attr-defined]
+            self.ApicalInhibition.set_learn(inhibitory)
 
-    def set_BTSP_learn(self, learn=None, soma=None, dend=None):
+    def set_BTSP_learn(self, learn=None, somatic=None, apical=None):
         """
         self.set_BTSP_learn()
 
-        Set whether the soma and dendrite compartments should learn using BTSP during
+        Set whether the somatic and apical compartments should learn using BTSP during
         self.update() calls. Only affects input weights that are learnable.
 
         Args:
         - learn (bool, optional): Whether to learn learnable weights into both
             compartments. Default is None
-        - soma (bool, optional): Whether to learn learnable weights into the
-            soma compartment.  Default is None.
-        - dend (bool, optional): Whether to learn learnable weights into the
-            dendrite compartment. Default is None.
+        - somatic (bool, optional): Whether to learn learnable weights into the
+            somatic compartment.  Default is None.
+        - apical (bool, optional): Whether to learn learnable weights into the
+            apical compartment. Default is None.
         """
 
         if learn is not None:
-            soma = learn if soma is None else soma
-            dend = learn if dend is None else dend
+            somatic = learn if somatic is None else somatic
+            apical = learn if apical is None else apical
 
-        self.SomaCompartment.set_BTSP_learn(soma)
-        self.DendriteCompartment.set_BTSP_learn(dend)
+        self.SomaticCompartment.set_BTSP_learn(somatic)
+        self.ApicalCompartment.set_BTSP_learn(apical)
 
     def get_compartments(
         self,
@@ -348,32 +356,32 @@ class TwoCompLayer(object):
         self.get_compartments()
 
         - compartment (str, optional): Which compartments to retrieve
-            ("soma", "dend", "both", "inhibit", "all"). Default is "all".
+            ("somatic", "apical", "both", "inhibitory", "all"). Default is "all".
 
         Returns:
         - compartments (list): List of compartments.
         """
 
-        if compartment not in ["soma", "dend", "both", "inhibit", "all"]:
+        if compartment not in ["somatic", "apical", "both", "inhibitory", "all"]:
             raise ValueError(
-                "compartment must be 'soma', 'dend', 'both', 'inhibit' or 'all', "
+                "compartment must be 'somatic', 'apical', 'both', 'inhibitory' or 'all', "
                 f"not '{compartment}'."
             )
 
         compartments = list()
-        if compartment in ["soma", "both", "all"]:
-            compartments.append(self.SomaCompartment)
-        if compartment in ["dend", "both", "all"]:
-            compartments.append(self.DendriteCompartment)
-        if compartment in ["inhibit", "all"]:
-            if self.inhibit_dend:
-                compartments.append(self.DendriteInhibition)
-            elif compartment == "inhibit":  # type: ignore[attr-defined]
+        if compartment in ["somatic", "both", "all"]:
+            compartments.append(self.SomaticCompartment)
+        if compartment in ["apical", "both", "all"]:
+            compartments.append(self.ApicalCompartment)
+        if compartment in ["inhibitory", "all"]:
+            if self.inhibitory_apical:
+                compartments.append(self.ApicalInhibition)
+            elif compartment == "inhibitory":  # type: ignore[attr-defined]
                 raise ValueError(
                     "Cannot retrieve inhibition compartment, as inhibition is not enabled."
                 )
         if incl_lateral:
-            if self.mutual_inhibition_weight is None:
+            if self.lateral_inhibition_weight is None:
                 raise ValueError(
                     "Cannot retrieve lateral inhibition compartment, as mutual "
                     "inhibition is not enabled."
@@ -404,7 +412,7 @@ class TwoCompLayer(object):
         - chosen_neurons (str, int, list or np.ndarray, optional): Neurons to consider
             for min and max firing rates. Default is "all".
         - compartment (str, optional): Which compartment to obtain max for
-            ("soma", "dend", "both", "inhibit", "all"). Default is "all".
+            ("somatic", "apical", "both", "inhibitory", "all"). Default is "all".
         - incl_lateral (bool, optional): Whether to include the lateral inhibition
             compartment. Default is False.
 
@@ -426,13 +434,13 @@ class TwoCompLayer(object):
 
         return min_firingrate, max_firingrate
 
-    def get_index_of_main_dendrite_input(
+    def get_index_of_main_apical_input(
         self, neuron_idx: int = 0, src_name: str = "Obj"
     ):
         """
-        self.get_index_of_main_dendrite_input()
+        self.get_index_of_main_apical_input()
 
-        Get the index of the main input to the dendrite of a specified neuron.
+        Get the index of the main input to the apical compartment of a specified neuron.
 
         Args:
         - neuron_idx (int, optional): Neuron index. Default is 0.
@@ -440,13 +448,13 @@ class TwoCompLayer(object):
             (must be a place cell-derived layer). Default is "Obj".
 
         Returns:
-        - input_idx (int): Input of main dendrite input.
+        - input_idx (int): Index of main apical input.
         """
 
-        if src_name not in self.DendriteCompartment.inputs.keys():
-            raise ValueError(f"No '{src_name}' input to dendrite.")
+        if src_name not in self.ApicalCompartment.inputs.keys():
+            raise ValueError(f"No '{src_name}' input to apical compartment.")
 
-        input_dict = self.DendriteCompartment.inputs[src_name]
+        input_dict = self.ApicalCompartment.inputs[src_name]
 
         if not isinstance(input_dict["layer"], riab_neurons.PlaceCells):
             raise ValueError(f"Input layer '{src_name}' is not a PlaceCells layer.")
@@ -461,13 +469,14 @@ class TwoCompLayer(object):
 
         return input_idx
 
-    def get_place_cell_center_of_main_dendrite_input(
+    def get_place_cell_center_of_main_apical_input(
         self, neuron_idx: int = 0, src_name: str = "Obj"
     ):
         """
-        self.get_place_cell_center_of_main_dendrite_input()
+        self.get_place_cell_center_of_main_apical_input()
 
-        Get the place cell center input location for the dendrite of a specified neuron.
+        Get the place cell center input location for the apical compartment of a
+        specified neuron.
 
         Args:
         - neuron_idx (int, optional): Neuron index. Default is 0.
@@ -475,21 +484,21 @@ class TwoCompLayer(object):
             (must be a place cell-derived layer). Default is "Obj".
 
         Returns:
-        - place_cell_center (1D np.ndarray): Main dendrite input place cell center
+        - place_cell_center (1D np.ndarray): Main apical input place cell center
             location.
         """
 
-        input_idx = self.get_index_of_main_dendrite_input(
+        input_idx = self.get_index_of_main_apical_input(
             neuron_idx=neuron_idx, src_name=src_name
         )
 
-        input_layer = self.DendriteCompartment.inputs[src_name]["layer"]
+        input_layer = self.ApicalCompartment.inputs[src_name]["layer"]
 
         place_cell_center = input_layer.place_cell_centers[input_idx]
 
         return place_cell_center
 
-    def get_vectors_to_place_cell_center_of_main_dendrite_input(
+    def get_vectors_to_place_cell_center_of_main_apical_input(
         self,
         neuron_idx: int = 0,
         src_name: str = "Obj",
@@ -497,10 +506,10 @@ class TwoCompLayer(object):
         radians: bool = False,
     ):
         """
-        self.get_vectors_to_place_cell_center_of_main_dendrite_input()
+        self.get_vectors_to_place_cell_center_of_main_apical_input()
 
         Get the vectors from the agent's current position to the place cell center
-        input location for the dendrite of a specified neuron.
+        input location for the apical compartment of a specified neuron.
 
         Args:
         - neuron_idx (int, optional): Neuron index. Default is 0.
@@ -512,11 +521,11 @@ class TwoCompLayer(object):
             Default is False.
 
         Returns:
-        - vectors (2D np.ndarray): Vectors from agent's position to dendrite input
+        - vectors (2D np.ndarray): Vectors from agent's position to apical input
             place cell center.
         """
 
-        place_cell_center = self.get_place_cell_center_of_main_dendrite_input(
+        place_cell_center = self.get_place_cell_center_of_main_apical_input(
             neuron_idx=neuron_idx, src_name=src_name
         )
         pos = np.asarray(self.Agent.history["pos"])
@@ -527,14 +536,14 @@ class TwoCompLayer(object):
 
         return vectors
 
-    def get_distances_to_place_cell_center_of_main_dendrite_input(
+    def get_distances_to_place_cell_center_of_main_apical_input(
         self, neuron_idx: int = 0, src_name: str = "Obj"
     ):
         """
-        self.get_distances_to_place_cell_center_of_main_dendrite_input()
+        self.get_distances_to_place_cell_center_of_main_apical_input()
 
         Get the distances from the agent's current position to the place cell center
-        input location for the dendrite of a specified neuron.
+        input location for the apical compartment of a specified neuron.
 
         Args:
         - neuron_idx (int, optional): Neuron index. Default is 0.
@@ -542,11 +551,11 @@ class TwoCompLayer(object):
             (must be a place cell-derived layer). Default is "Obj".
 
         Returns:
-        - distances (1D np.ndarray): Distances from agent's position to dendrite input
+        - distances (1D np.ndarray): Distances from agent's position to apical input
             place cell center.
         """
 
-        vectors = self.get_vectors_to_place_cell_center_of_main_dendrite_input(
+        vectors = self.get_vectors_to_place_cell_center_of_main_apical_input(
             neuron_idx, src_name
         )
 
@@ -565,7 +574,7 @@ class TwoCompLayer(object):
         self.get_target_visits()
 
         Get the indices of the steps where the agent is closest to the target specified
-        by the place cell center of the main input to the neuron's dendrite.
+        by the place cell center of the main input to the neuron's apical compartment.
 
         Args:
         - neuron_idx (int, optional): Neuron index. Default is 0.
@@ -581,7 +590,7 @@ class TwoCompLayer(object):
             closest to the target.
         """
 
-        distances = self.get_distances_to_place_cell_center_of_main_dendrite_input(
+        distances = self.get_distances_to_place_cell_center_of_main_apical_input(
             neuron_idx=neuron_idx, src_name=target_src_name
         )
 
@@ -603,7 +612,7 @@ class TwoCompLayer(object):
         self.get_closest_steps_to_target()
 
         Get the steps where the agent is closest to the target specified by the place
-        cell center of the main input to the neuron's dendrite.
+        cell center of the main input to the neuron's apical compartment.
 
         Args:
         - target_src_name (str, optional): Name of the input layer
@@ -617,10 +626,11 @@ class TwoCompLayer(object):
             Default is False.
 
         Returns:
-        - closest_steps (1D np.ndarray): Steps identified as locally closest to the target.
+        - closest_steps (1D np.ndarray): Steps identified as locally closest to the
+            target.
         """
 
-        distances = self.get_distances_to_place_cell_center_of_main_dendrite_input(
+        distances = self.get_distances_to_place_cell_center_of_main_apical_input(
             neuron_idx, src_name=target_src_name
         )
         closest_steps = gen_util.get_minima_indices(
@@ -647,7 +657,7 @@ class TwoCompLayer(object):
         self.get_nbr_visits_per_target()
 
         Get the number of visits to the target specified by the place cell center of
-        the main input to the neuron's dendrite for each neuron in the layer.
+        the main input to the neuron's apical compartment for each neuron in the layer.
 
         Args:
         - target_src_name (str, optional): Name of the input layer
@@ -664,10 +674,10 @@ class TwoCompLayer(object):
         Returns:
         - nbr_visits_per_BTSP_target (1D np.ndarray): Number of visits to the target
             specified by the place cell center of the main input to the neuron's
-            dendrite for each neuron in the layer.
+            apical compartment for each neuron in the layer.
         """
 
-        _, startid, endid = self.SomaCompartment.get_plotting_times(
+        _, startid, endid = self.SomaticCompartment.get_plotting_times(
             t_start=t_start, t_end=t_end
         )
 
@@ -729,11 +739,11 @@ class TwoCompLayer(object):
                 f"neurons ({self.n})."
             )
 
-        _, start, end = self.SomaCompartment.get_plotting_times(
+        _, start, end = self.SomaticCompartment.get_plotting_times(
             t_start=t_start, t_end=t_end
         )
 
-        BTSP_steps = self.SomaCompartment.get_BTSP_step_dict()[neuron_idx]
+        BTSP_steps = self.SomaticCompartment.get_BTSP_step_dict()[neuron_idx]
         closest_steps = self.get_closest_steps_to_target(
             neuron_idx, target_src_name=target_src_name, min_dist=min_dist
         )
@@ -772,43 +782,43 @@ class TwoCompLayer(object):
 
         return steps_dict
 
-    def update(self, dend_first: bool | None = None):
+    def update(self, apical_first: bool | None = None):
         """
         self.update()
 
-        Update the somatic and dendritic compartments of the two compartment layer. If
-        there is an dendrite inhibition compartment, it is also updated.
+        Update the somatic and apical compartments of the two compartment layer. If
+        there is an apical inhibition compartment, it is also updated.
 
         Update order:
-            1. Dendrite inhibition compartment (if applicable)
-            if dend_first:
-                2. Dendrite compartment
-                3. Soma compartment
+            1. Apical inhibition compartment (if applicable)
+            if apical_first:
+                2. Apical compartment
+                3. Somatic compartment
             otherwise:
-                2. Soma compartment
-                3. Dendrite compartment
+                2. Somatic compartment
+                3. Apical compartment
 
         Args:
-        - dend_first (bool, optional): Whether to update the dendrite compartment
-            before the soma compartment. If None, the attribute is used.
+        - apical_first (bool, optional): Whether to update the apical compartment
+            before the somatic compartment. If None, the attribute is used.
             Default is None.
         """
 
-        if self.inhibit_dend:  # type: ignore[attr-defined]
-            self.DendriteInhibition.update()
+        if self.inhibitory_apical:  # type: ignore[attr-defined]
+            self.ApicalInhibition.update()
 
-        if dend_first is None:
-            dend_first = self.dend_first  # type: ignore[attr-defined]
+        if apical_first is None:
+            apical_first = self.apical_first  # type: ignore[attr-defined]
 
-        if dend_first:
-            self.DendriteCompartment.update()
-            self.SomaCompartment.update()
-            if self.mutual_inhibition_weight is not None:
+        if apical_first:
+            self.ApicalCompartment.update()
+            self.SomaticCompartment.update()
+            if self.lateral_inhibition_weight is not None:
                 self.LateralInhibition.update()
         else:
-            self.SomaCompartment.update()
-            self.DendriteCompartment.update()
-            if self.mutual_inhibition_weight is not None:
+            self.SomaticCompartment.update()
+            self.ApicalCompartment.update()
+            if self.lateral_inhibition_weight is not None:
                 self.LateralInhibition.update()
 
         return
@@ -819,9 +829,9 @@ class TwoCompLayer(object):
         compartment="all",
         plot_lateral=False,
         loc="best",
-        soma_color=None,
-        dend_color=None,
-        inhibit_color=None,
+        somatic_color=None,
+        apical_color=None,
+        inhibitory_color=None,
         lateral_color=None,
         lw=1.0,
         **kwargs,
@@ -834,12 +844,12 @@ class TwoCompLayer(object):
         Args:
         - sub_ax (plt.Axes): Subplot to add the legend to.
         - compartment (str, optional): Which compartments to include in the legend
-            ("soma", "dend", "inhibit", "all"). Default is "all".
+            ("somatic", "apical", "inhibitory", "all"). Default is "all".
         - plot_lateral (bool, optional): Whether to include the lateral inhibition
             compartment in the legend. Default is False.
-        - soma_color (str, optional): Color for soma compartment. Default is None.
-        - dend_color (str, optional): Color for dendrite compartment. Default is None.
-        - inhibit_color (str, optional): Color for inhibitory compartment.
+        - somatic_color (str, optional): Color for somatic compartment. Default is None.
+        - apical_color (str, optional): Color for apical compartment. Default is None.
+        - inhibitory_color (str, optional): Color for inhibitory compartment.
             Default is None.
         - lateral_color (str, optional): Color for lateral inhibition compartment.
             Default is None.
@@ -849,22 +859,22 @@ class TwoCompLayer(object):
         - **kwargs: Additional keyword arguments passed to plt.legend().
         """
 
-        if compartment not in ["soma", "dend", "both", "inhibit", "all"]:
+        if compartment not in ["somatic", "apical", "both", "inhibitory", "all"]:
             raise ValueError(
-                "compartment must be 'soma', 'dend', 'both', 'inhibit' or 'all', not "
-                f"'{compartment}'."
+                "compartment must be 'somatic', 'apical', 'both', 'inhibitory' or "
+                f"'all', not '{compartment}'."
             )
 
-        if compartment in ["all", "soma"]:
-            color = soma_color or self.SomaCompartment.color
-            sub_ax.plot([], [], color=color, lw=lw, label="soma")
-        if compartment in ["all", "dend"]:
-            color = dend_color or self.DendriteCompartment.color
-            sub_ax.plot([], [], color=color, lw=lw, label="dend")
-        if self.inhibit_dend and compartment in ["all", "inhibit"]:
-            color = inhibit_color or self.DendriteInhibition.color
-            sub_ax.plot([], [], color=color, lw=lw, label="inhib.")
-        if plot_lateral and self.mutual_inhibition_weight is not None:
+        if compartment in ["all", "somatic"]:
+            color = somatic_color or self.SomaticCompartment.color
+            sub_ax.plot([], [], color=color, lw=lw, label="somatic")
+        if compartment in ["all", "apical"]:
+            color = apical_color or self.ApicalCompartment.color
+            sub_ax.plot([], [], color=color, lw=lw, label="apical")
+        if self.inhibitory_apical and compartment in ["all", "inhibitory"]:
+            color = inhibitory_color or self.ApicalInhibition.color
+            sub_ax.plot([], [], color=color, lw=lw, label="inhibitory")
+        if plot_lateral and self.lateral_inhibition_weight is not None:
             color = lateral_color or self.LateralInhibition.color
             sub_ax.plot([], [], color=color, lw=lw, label="lat. inh.")
 
@@ -896,8 +906,8 @@ class TwoCompLayer(object):
         - ax (np.ndarray or plt.Axes, optional): Subplot or array of subplots to plot
             on (one per plotted ROI, if environment is 2D). Default is None.
         - compartment (str, optional): Which compartment to plot, if environment is
-            2D ("soma", "dend", "both", "inhibit", "all"). Default is None
-            (i.e., "soma" if environment is 2D, and "both" otherwise).
+            2D ("somatic", "apical", "both", "inhibitory", "all"). Default is None
+            (i.e., "somatic" if environment is 2D, and "both" otherwise).
         - norm_by (str, optional): Normalisation method for rate maps.
             Default is "shared_fr_max".
         - no_legend (bool, optional): Whether to remove the legend. Default is False.
@@ -916,7 +926,7 @@ class TwoCompLayer(object):
             if self.Agent.Environment.dimensionality == "1D":
                 compartment = "all"
             else:
-                compartment = "soma"
+                compartment = "somatic"
 
         if norm_by is None and compartment in ["both", "all"]:
             norm_by = "shared_fr_max"
@@ -934,7 +944,7 @@ class TwoCompLayer(object):
         if self.Agent.Environment.dimensionality == "2D" and compartment == "all":
             warnings.warn(
                 "Plotting rate maps for all compartments in a 2D environment will "
-                "result in only the soma compartment appearing."
+                "result in only the somatic compartment appearing."
             )
 
         for comp in self.get_compartments(compartment)[::-1]:
@@ -977,8 +987,8 @@ class TwoCompLayer(object):
             (number of ROIs, num_maps) or v.v.. If None, a new subplot array is created.
             Default is None.
         - compartment (str, optional): Which compartment to plot, if environment is
-            2D ("soma", "dend", "inhibit" or "both"). Default is None
-            (i.e., "soma" if environment is 2D, and "both" otherwise).
+            2D ("somatic", "apical", "inhibitory" or "both"). Default is None
+            (i.e., "somatic" if environment is 2D, and "both" otherwise).
         - no_legend (bool, optional): Whether to remove the legend. Default is False.
         - title (str, optional): Title for the figure. Default is None.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
@@ -989,8 +999,8 @@ class TwoCompLayer(object):
             NMDALayer.plot_rate_maps_across_learning().
 
         Raises:
-        - ValueError: If compartment is not "soma", "dend", "inhibit" or "all".
-        - ValueError: If compartment is "inhibit", but self.inhibit_dend is False.
+        - ValueError: If compartment is not "somatic", "apical", "inhibitory" or "all".
+        - ValueError: If compartment is "inhibitory", but self.inhibitory_apical is False.
 
         Returns:
         - axes (2D np.ndarray): Array of subplots. If input axes was None,
@@ -1001,12 +1011,12 @@ class TwoCompLayer(object):
             if self.Agent.Environment.dimensionality == "1D":
                 compartment = "all"
             else:
-                compartment = "soma"
+                compartment = "somatic"
 
         if self.Agent.Environment.dimensionality == "2D" and compartment == "both":
             warnings.warn(
                 "Plotting rate maps across learning for both compartments in a 2D "
-                "environment will result in only the soma compartment appearing."
+                "environment will result in only the somatic compartment appearing."
             )
 
         for comp in self.get_compartments(compartment)[::-1]:
@@ -1027,12 +1037,12 @@ class TwoCompLayer(object):
         if title is None:
             if compartment == "both":
                 title_start = "Rate maps"
-            elif compartment == "soma":
-                title_start = "Soma rate maps"
-            elif compartment == "inhibit":
+            elif compartment == "somatic":
+                title_start = "Somatic rate maps"
+            elif compartment == "inhibitory":
                 title_start = "Inhibition rate maps"
             else:
-                title_start = "Dendrite rate maps"
+                title_start = "Apical rate maps"
 
             title = f"{title_start} across learning"
 
@@ -1103,7 +1113,7 @@ class TwoCompLayer(object):
         """
 
         compartments = self.get_compartments("all", incl_lateral=plot_lateral)
-        chosen_neurons = self.SomaCompartment.get_chosen_neurons(chosen_neurons)
+        chosen_neurons = self.SomaticCompartment.get_chosen_neurons(chosen_neurons)
 
         num_rows = len(compartments)
         if axes is None:
@@ -1120,10 +1130,10 @@ class TwoCompLayer(object):
                 raise ValueError(
                     f"axes must have shape ({num_rows}, {num_cols}), not {ax_shape}."
                 )
-        titles = ["Soma", "Dendrite"]
-        if self.inhibit_dend:  # type: ignore[attr-defined]
-            titles.append("Dend. inhib.")
-        if plot_lateral and self.mutual_inhibition_weight is not None:
+        titles = ["Somatic comp.", "Apical comp."]
+        if self.inhibitory_apical:  # type: ignore[attr-defined]
+            titles.append("Inhib. interneuron")
+        if plot_lateral and self.lateral_inhibition_weight is not None:
             titles.append("Lateral inhib.")
 
         adjust_range = shared_range and (vmin is None or vmax is None)
@@ -1189,9 +1199,9 @@ class TwoCompLayer(object):
         t_end: float | None = None,
         chosen_neurons: str | int | list | np.ndarray = "all",
         ax: plt.Axes | np.ndarray | None = None,
-        soma_color: str | None = None,
-        dend_color: str | None = None,
-        inhibit_color: str | None = None,
+        somatic_color: str | None = None,
+        apical_color: str | None = None,
+        inhibitory_color: str | None = None,
         lateral_color: str | None = None,
         separate_axes: bool = False,
         plot_lateral: bool = False,
@@ -1217,9 +1227,9 @@ class TwoCompLayer(object):
             Default is "all".
         - ax (1D np.ndarray or plt.Axes, optional): Subplot or 1D array of subplots
             if separate_axes (one per compartment). Default is None.
-        - soma_color (str, optional): Color for soma compartment. Default is None.
-        - dend_color (str, optional): Color for dendrite compartment. Default is None.
-        - inhibit_color (str, optional): Color for inhibitory compartment.
+        - somatic_color (str, optional): Color for somatic compartment. Default is None.
+        - apical_color (str, optional): Color for apical compartment. Default is None.
+        - inhibitory_color (str, optional): Color for inhibitory compartment.
             Default is None.
         - lateral_color (str, optional): Color for lateral inhibition compartment.
             Default is None.
@@ -1290,14 +1300,14 @@ class TwoCompLayer(object):
                 chosen_neurons=chosen_neurons,
             )[1]
 
-        colors = [soma_color, dend_color]
-        separate_titles = ["Soma compartment", "Dendrite compartment"]
-        if self.inhibit_dend:  # type: ignore[attr-defined]
-            colors.append(inhibit_color)
+        colors = [somatic_color, apical_color]
+        separate_titles = ["Somatic compartment", "Apical compartment"]
+        if self.inhibitory_apical:  # type: ignore[attr-defined]
+            colors.append(inhibitory_color)
             separate_titles.append("Inhibitory interneuron")
-        if plot_lateral and self.mutual_inhibition_weight is not None:
+        if plot_lateral and self.lateral_inhibition_weight is not None:
             colors.append(lateral_color)
-            separate_titles.append("Lateral inhibitor")
+            separate_titles.append("Lateral inhibition")
 
         if len(compartments) != len(colors):
             raise NotImplementedError(
@@ -1346,9 +1356,9 @@ class TwoCompLayer(object):
                     sub_ax,
                     compartment="all",
                     plot_lateral=plot_lateral,
-                    soma_color=soma_color,
-                    dend_color=dend_color,
-                    inhibit_color=inhibit_color,
+                    somatic_color=somatic_color,
+                    apical_color=apical_color,
+                    inhibitory_color=inhibitory_color,
                     lateral_color=lateral_color,
                     lw=lw,
                 )
@@ -1363,7 +1373,7 @@ class TwoCompLayer(object):
         neuron_idx=0,
         target_src_name="Obj",
         sub_ax=None,
-        mark_soma_BTSP=True,
+        mark_somatic_BTSP=True,
         mark_teleport=True,
         mark_closest=True,
         min_dist=0.1,
@@ -1376,15 +1386,15 @@ class TwoCompLayer(object):
         self.plot_distances_to_target()
 
         Plot the distances from the agent's current position to the place cell center
-        of the main input to the neuron's dendrite, over time.
+        of the main input to the neuron's apical compartment, over time.
 
         Args:
         - neuron_idx (int, optional): Neuron index. Default is 0.
         - target_src_name (str, optional): Name of the input layer
             (must be a place cell-derived layer). Default is "Obj".
         - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
-        - mark_soma_BTSP (bool, optional): Whether to mark the soma compartment BTSP
-            points. Default is True.
+        - mark_somatic_BTSP (bool, optional): Whether to mark the somatic compartment
+            BTSP points. Default is True.
         - mark_teleport (bool, optional): Whether to mark the teleport points.
             Default is True.
         - mark_closest (bool, optional): Whether to mark the closest points to the
@@ -1407,7 +1417,7 @@ class TwoCompLayer(object):
         t = np.asarray(self.Agent.history["t"])
         if in_min:
             t = t / 60
-        distances = self.get_distances_to_place_cell_center_of_main_dendrite_input(
+        distances = self.get_distances_to_place_cell_center_of_main_apical_input(
             neuron_idx, src_name=target_src_name
         )
 
@@ -1416,8 +1426,8 @@ class TwoCompLayer(object):
 
         sub_ax.plot(t, distances)
 
-        if mark_soma_BTSP:
-            self.SomaCompartment.add_BTSP_markers_to_plots(
+        if mark_somatic_BTSP:
+            self.SomaticCompartment.add_BTSP_markers_to_plots(
                 sub_ax, chosen_neurons=[neuron_idx], timeseries=True
             )
             plot_util.pad_axis(sub_ax, prop_high=1.0)
@@ -1450,7 +1460,7 @@ class TwoCompLayer(object):
                     lw=0,
                     marker="o",
                     ms=2,
-                    color=self.SomaCompartment.color,
+                    color=self.SomaticCompartment.color,
                 )
 
         sub_ax.spines[["right", "top"]].set_visible(False)
@@ -1468,7 +1478,7 @@ class TwoCompLayer(object):
         self,
         target_src_name="Obj",
         num_neurons="all",
-        mark_soma_BTSP=True,
+        mark_somatic_BTSP=True,
         mark_teleport=True,
         mark_closest=True,
         min_dist=0.1,
@@ -1484,7 +1494,7 @@ class TwoCompLayer(object):
         self.plot_distances_to_targets()
 
         Plot the distances from the agent's current position to the place cell center
-        of the main input to the neuron's dendrite, over time.
+        of the main input to the neuron's apical compartment, over time.
 
         Args:
         - target_src_name (str, optional): Name of the input layer
@@ -1492,8 +1502,8 @@ class TwoCompLayer(object):
         - axes (2D np.ndarray): Array of subplots to plot on (one per neuron).
             Default is None.
         - neuron_idx (int, optional): Neuron index. Default is 0.
-        - mark_soma_BTSP (bool, optional): Whether to mark the soma compartment BTSP
-            points. Default is True.
+        - mark_somatic_BTSP (bool, optional): Whether to mark the somatic compartment
+            BTSP points. Default is True.
         - mark_teleport (bool, optional): Whether to mark the teleport points.
             Default is True.
         - mark_closest (bool, optional): Whether to mark the closest points to the
@@ -1555,7 +1565,7 @@ class TwoCompLayer(object):
                         neuron_idx=i,
                         target_src_name=target_src_name,
                         sub_ax=sub_ax,
-                        mark_soma_BTSP=mark_soma_BTSP,
+                        mark_somatic_BTSP=mark_somatic_BTSP,
                         mark_teleport=use_mark_teleport,
                         mark_closest=mark_closest,
                         min_dist=min_dist,
@@ -1642,15 +1652,15 @@ class TwoCompLayer(object):
         elif len(axes.ravel()) != 4:
             raise ValueError("axes must have length 4.")
 
-        distances = self.get_distances_to_place_cell_center_of_main_dendrite_input(
+        distances = self.get_distances_to_place_cell_center_of_main_apical_input(
             neuron_idx, src_name=target_src_name
         )
-        firingrates = np.asarray(self.SomaCompartment.history["firingrate"]).T[
+        firingrates = np.asarray(self.SomaticCompartment.history["firingrate"]).T[
             neuron_idx
         ]
 
         velocities = np.sqrt(np.sum(np.asarray(self.Agent.history["vel"]) ** 2, axis=1))
-        angles = self.get_vectors_to_place_cell_center_of_main_dendrite_input(
+        angles = self.get_vectors_to_place_cell_center_of_main_apical_input(
             neuron_idx, src_name=target_src_name, polar=True
         )[:, 1]
 
@@ -1743,7 +1753,7 @@ class TwoCompLayer(object):
         sorter = np.arange(self.n)
         if sort_by_num_BTSP:
             num_BTSP = [
-                len(self.SomaCompartment.get_BTSP_step_dict()[i]) for i in sorter
+                len(self.SomaticCompartment.get_BTSP_step_dict()[i]) for i in sorter
             ]
             sorter = np.argsort(num_BTSP)
 
@@ -1831,7 +1841,7 @@ class TwoCompLayer(object):
             t_end=t_end,
         )
 
-        BTSP_counts = self.SomaCompartment.get_BTSP_counts(
+        BTSP_counts = self.SomaticCompartment.get_BTSP_counts(
             applied_only=applied_only, t_start=t_start, t_end=t_end
         )
 
@@ -1847,7 +1857,7 @@ class TwoCompLayer(object):
         sub_ax.scatter(
             nbr_visits_per_target,
             BTSP_counts,
-            color=self.SomaCompartment.color,
+            color=self.SomaticCompartment.color,
             alpha=0.5,
             s=10,
         )

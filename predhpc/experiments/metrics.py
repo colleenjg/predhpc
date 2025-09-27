@@ -73,8 +73,8 @@ def evaluate_PFs(Pyrs, PC_name="PCs", method="weights", t_start=None, t_end=None
             "Place field analysis tools only implemented for 1D environments."
         )
 
-    if hasattr(Pyrs, "SomaCompartment"):
-        Pyrs = Pyrs.SomaCompartment
+    if hasattr(Pyrs, "SomaticCompartment"):
+        Pyrs = Pyrs.SomaticCompartment
 
     if PC_name not in Pyrs.inputs.keys():
         raise KeyError(f"PC name '{PC_name}' not found in Pyrs inputs.")
@@ -296,17 +296,17 @@ def compute_BTSP_metrics(Pyrs, t_start=0, bins=21, width=WIDTH, k=1, **kwargs):
     if Pyrs.Agent.Environment.D != 1:
         raise NotImplementedError("BTSP metrics only implemented for 1D environments.")
 
-    num_BTSP_events = Pyrs.SomaCompartment.get_BTSP_counts(t_start=t_start)[0]
+    num_BTSP_events = Pyrs.SomaticCompartment.get_BTSP_counts(t_start=t_start)[0]
 
     if num_BTSP_events:
-        first_BTSP_info = Pyrs.SomaCompartment.get_BTSP_info(
+        first_BTSP_info = Pyrs.SomaticCompartment.get_BTSP_info(
             t_start=t_start, neuron_idx=0
         )
         first_BTSP_time = first_BTSP_info["time"]
         first_BTSP_relative_position = (
             first_BTSP_info["position"][0] - Pyrs.Agent.target_position[0]
         )
-        num_BTSP_positions = Pyrs.SomaCompartment.get_nbr_BTSP_position_bins(
+        num_BTSP_positions = Pyrs.SomaticCompartment.get_nbr_BTSP_position_bins(
             t_start=t_start, bins=bins
         )[0]
     else:
@@ -314,7 +314,7 @@ def compute_BTSP_metrics(Pyrs, t_start=0, bins=21, width=WIDTH, k=1, **kwargs):
         first_BTSP_relative_position = np.nan
         num_BTSP_positions = 0
 
-    BTSP_ramp_max = Pyrs.SomaCompartment.get_BTSP_ramp_peaks(t_start=t_start)[0]
+    BTSP_ramp_max = Pyrs.SomaticCompartment.get_BTSP_ramp_peaks(t_start=t_start)[0]
 
     PC_weight_ratio_pre_post = get_PF_ratio(Pyrs, width=width, **kwargs)
     PC_weight_peak_relative_position = get_PF_weight_peak_relative_position(

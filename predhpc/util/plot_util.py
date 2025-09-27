@@ -886,7 +886,6 @@ def add_colorbars(
     label=None,
     end_only=False,
     round=2,
-    length=0,
     outline=False,
     side="right",
     size="5%",
@@ -906,7 +905,6 @@ def add_colorbars(
     - end_only (bool, optional): Whether to add colorbars only to the end of each row.
         Default is False.
     - round (int, optional): Number of decimal places to round to. Default is 2.
-    - length (int, optional): Length of the colorbar ticks. Default is 0.
     - outline (bool, optional): Whether to show the colorbar outline. Default is False.
     - side (str, optional): Side of the axes to add the colorbar to. Default is "right".
     - size (str, optional): Size of the colorbar. Default is "5%".
@@ -937,8 +935,8 @@ def add_colorbars(
     for divider in dividers:
         cax = divider.append_axes(side, size=size, pad=pad)
         cbar = plt.colorbar(im, cax=cax, location=side)
-        if length is not None:
-            cbar.ax.tick_params(length=length)
+        if not outline:
+            cbar.ax.tick_params(length=0)
         if label is not None:
             cbar.set_label(label, labelpad=-10)
 

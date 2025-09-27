@@ -126,10 +126,10 @@ def get_search_space(search_space="full"):
         if search_space == "full":
             # in to out, col to row
             search_kwargs = {
-                # "soma_regularization_alpha": [2, 5, 5],
-                "soma_BTSP_lr": [0.12, 0.24, 5],
-                "inhibit_input_filter_tau": [0.2, 0.4, 5],
-                "inhibit_weight": [0.8, 1.2, 5],
+                # "somatic_regularization_alpha": [2, 5, 5],
+                "somatic_BTSP_lr": [0.12, 0.24, 5],
+                "inhibitory_input_filter_tau": [0.2, 0.4, 5],
+                "inhibitory_weight": [0.8, 1.2, 5],
             }
         else:
             raise ValueError(f"search_space must be 'full', but is {search_space}")
@@ -291,8 +291,8 @@ def run_hyperparameter_search(
         kwargs_use = kwargs.copy()
 
         kwargs_use.update(config)
-        if "soma_regularization_alpha" in kwargs_use.keys():
-            kwargs_use["soma_normalize_weights_divisively"] = True
+        if "somatic_regularization_alpha" in kwargs_use.keys():
+            kwargs_use["somatic_normalize_weights_divisively"] = True
 
         output_dict = run_linear_track(
             speed_std=speed_std,
