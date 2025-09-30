@@ -133,7 +133,7 @@ def get_interp_x(x, partway_idx, max_x=None):
         if max_x is None:
             right_pos = left_pos + x[0]
         else:
-            right_pos = max_x + x[0]
+            right_pos = max_x
 
     else:
         right_pos = x[idx + 1]
@@ -230,8 +230,17 @@ def compute_signal_width(
 
     if x is None:
         x = np.arange(len(signal))
+        if max_x is None:
+            max_x = len(signal)
+    elif max_x is None:
+        max_x = x.max()
 
-    elif len(signal) != len(x):
+    if x.max() > max_x:
+        raise RuntimeError(f"max_x ({max_x}) is smaller than x max ({x.max()}).")
+    elif x.min() < 0:
+        raise RuntimeError(f"min x ({x.min()}) cannot be negative.")
+
+    if len(signal) != len(x):
         raise ValueError("Signal and x must have the same length.")
 
     sorter = np.argsort(x)
@@ -247,20 +256,18 @@ def compute_signal_width(
     left_idx = get_partway_idx_of_prop_max_crossing_on_right(
         smoothed_signal[::-1], prop_peak=prop_peak
     )
-
-    if max_x is None:
-        max_x = x.max()
+    left_idx = len(x) - 1 - left_idx
 
     width_edges = np.full(2, np.nan)
     if np.isnan(right_idx) or np.isnan(left_idx):
         width = max_x
 
-    elif np.isclose(right_idx, len(x) - 1 - left_idx):
+    elif np.isclose(right_idx, left_idx):
         width = max_x
 
     else:
         right_pos = get_interp_x(x, right_idx, max_x=max_x)
-        left_pos = get_interp_x(x[::-1], left_idx, max_x=max_x)
+        left_pos = get_interp_x(x, left_idx, max_x=max_x)
 
         if right_pos == left_pos:
             width = max_x
@@ -1150,7 +1157,6 @@ def get_2D_Gaussian_kernel(sigma, aperture_prop=8, max_aperture=np.inf):
     """
 
     aperture = int(np.ceil(min(sigma * aperture_prop, max_aperture)) // 2 * 2 + 1)
-    print(aperture)
 
     x = np.linspace(-(aperture // 2), aperture // 2, aperture)
     xx, yy = np.meshgrid(x, x)

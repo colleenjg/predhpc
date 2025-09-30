@@ -14,6 +14,9 @@ from predhpc.util import gen_util, params_util, plot_util, ext_util
 
 LW = 1.6
 
+BTSP_ASTERISK = (5, 2, 0)  # asterisk
+BTSP_S = 35  # size of BTSP markers
+
 
 def stylize_plots_for_paper(fs=12, lw=1.7, tick_length=6, notebook=False):
     """
@@ -352,7 +355,7 @@ def plot_single_neuron_rate_timeseries(
     sub_ax.set_ylim(ymin, ymax)
 
     NeuronLayer.add_BTSP_markers_to_plots(
-        ax=sub_ax, s=35, prop_y=0.8, lw=lw, marker=(5, 2, 0), timeseries=True
+        ax=sub_ax, s=BTSP_S, prop_y=0.8, lw=lw, marker=BTSP_ASTERISK, timeseries=True
     )
     sub_ax.set_ylabel("")
     plot_util.expand_ticks(sub_ax, axis="x", num_ticks=7, alternating=True, round_dec=1)
@@ -452,8 +455,8 @@ def plot_linear_summary(learner):
     _, _, PCs, _ = ext_util.extract_objects_from_Pyrs(learner.Pyrs)
 
     plot_kwargs = {
-        "hspace": 0.35,
-        "height_ratios": [0.1, 0.1, 0.4, 0.14, 0.14, 0.14],
+        "hspace": 0.37,
+        "height_ratios": [0.1, 0.1, 0.42, 0.14, 0.14, 0.14],
         "figsize": (5.8, 8.3),
         "lw": LW,
         "s": 1.2,
@@ -461,9 +464,9 @@ def plot_linear_summary(learner):
     }
 
     Pyr_kwargs = {
-        "BTSP_s": 35,
+        "BTSP_s": BTSP_S,
         "BTSP_lw": LW,
-        "BTSP_marker": (5, 2, 0),  # asterisk
+        "BTSP_marker": BTSP_ASTERISK,
         "separate_axes": True,
         "no_legend": True,
     }
@@ -502,6 +505,7 @@ def plot_linear_summary(learner):
             lw=plot_kwargs["lw"],
             loc=(0.725, 0.65),
             handlelength=0.8,
+            handletextpad=0.5,
             frameon=False,
             fontsize=11,
         )
@@ -1566,6 +1570,71 @@ def plot_openfield_components(Pyrs, titles=False):
     return axes
 
 
+def get_s_openfield_PFs(fig_side=4.0, PF_type="weights"):
+    """
+    get_s_openfield_PFs(fig_side=4.0, num_x=60)
+
+    Returns the place field square size (s) needed to contiguously plot openfield place
+    fields without overlap, based on the figure size and type of place field to plot.
+
+    For weights, expects the place field plot to consist of a square grid of 60x60
+    input place fields. For history, expects a square grid of 120x120 positions.
+
+    Sizes were identified manually.
+
+    Args:
+    - fig_side (float, optional): Size of the figure. Default is 4.
+    - PF_type (str, optional): PF evaluation method to plot. Default is "weights".
+
+    Returns:
+    - s (float): Suggested starting estimate for the place field square size.
+    """
+
+    approx = False
+    if "weights" in PF_type:
+        if fig_side == 1:
+            s = 10.2
+        elif fig_side == 2:
+            s = 42.8
+        elif fig_side == 3:
+            s = 99
+        elif fig_side == 4:
+            s = 176.3
+        elif fig_side == 5:
+            s = 278
+        else:
+            s = max(1, 66.8 * np.exp(fig_side * 0.34) - 85.6)
+            approx = True
+
+    elif PF_type == "history":
+        if fig_side == 1:
+            s = 2.55
+        elif fig_side == 2:
+            s = 10.7
+        elif fig_side == 3:
+            s = 24.5
+        elif fig_side == 4:
+            s = 44.08
+        elif fig_side == 5:
+            s = 69
+        else:
+            s = max(1, 17 * np.exp(fig_side * 0.34) - 21.8)
+            approx = True
+
+    else:
+        raise NotImplementedError(
+            f"No proposed place field square size available for {PF_type} PF_type."
+        )
+
+    if approx:
+        print(
+            f"No place field square size recorded for fig_side of {fig_side}. "
+            f"Starting estimate of {s} suggested."
+        )
+
+    return s
+
+
 def plot_openfield_PFs(Pyrs, fig_side=4.0, lw=LW, alpha=0.8, PF_type="weights"):
     """
     plot_openfield_PFs(Pyrs)
@@ -1584,21 +1653,23 @@ def plot_openfield_PFs(Pyrs, fig_side=4.0, lw=LW, alpha=0.8, PF_type="weights"):
 
     fig, sub_ax = plt.subplots(figsize=(fig_side, fig_side))
 
+    if Pyrs.SomaticCompartment.n != 1:
+        raise ValueError("Only single neuron plotting is supported.")
+
     PF_t_start = None
     if PF_type == "history":
         round_dec = 0
-        s = 44.08  # matched to default fig side
         BTSP_applied = Pyrs.SomaticCompartment.get_BTSP_steps(
             applied_only=True, apply_step=True
         )
         vmax = 10
         if len(BTSP_applied):
             PF_t_start = BTSP_applied[-1] * Pyrs.SomaticCompartment.Agent.dt
-
     else:
         round_dec = 2
-        s = 176.3  # matched to default fig side
         vmax = None
+
+    s = get_s_openfield_PFs(fig_side=fig_side, PF_type=PF_type)
 
     plot_fcts.plot_2D_PFs(
         Pyrs.SomaticCompartment,

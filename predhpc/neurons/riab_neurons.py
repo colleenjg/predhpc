@@ -952,8 +952,8 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
         if self.description != "gaussian":
             raise ValueError("FWHM is only available for gaussian place fields.")
 
-        FWHM = self.place_cell_widths * np.sqrt(8 * np.log(2))
-
+        factor = 2 * np.sqrt(2 * np.log(2))  # approx 2.3548
+        FWHM = self.place_cell_widths * factor
         if average:
             FWHM = np.mean(FWHM)
 

@@ -5,7 +5,7 @@ from pathlib import Path
 import time
 
 from predhpc import run_manager
-from predhpc.experiments import linear_track, metrics
+from predhpc.experiments import metrics
 from predhpc.util import params_util, hyper_util, gen_util
 
 
@@ -50,11 +50,11 @@ def get_search_space(search_space="speed_PF"):
         if search_space == "speed_PF":
             # in to out, col to row
             search_kwargs = {"speed_mean": [0.05, 0.4, 29]}
-        elif search_space == "target_moved":
-            search_kwargs = {"target_moved": [-3.6, 2.4, 61]}
+        elif search_space == "target_shift":
+            search_kwargs = {"target_shift": [-3.6, 2.4, 61]}
         else:
             raise ValueError(
-                f"search_space must be 'speed_PF' or 'target_moved', but is {search_space}."
+                f"search_space must be 'speed_PF' or 'target_shift', but is {search_space}."
             )
     else:
         search_kwargs = search_space
@@ -78,9 +78,9 @@ def get_kwargs(experiment="speed_PF", speed_std=0):
         values for each parameter.
     """
 
-    if experiment in ["speed_PF", "target_moved"]:
+    if experiment in ["speed_PF", "target_shift"]:
         kwargs = {
-            "wait_at_end": 0,
+            "wait_after_trajectory": 0,
             "speed_std": speed_std,
             "max_num_steps": None,
             "max_num_traj": 5,
@@ -93,17 +93,49 @@ def get_kwargs(experiment="speed_PF", speed_std=0):
             kwargs["save_name"] = f"{kwargs['save_name']}_std_{speed_std}"
     else:
         raise ValueError(
-            f"experiment must be 'speed_PF' or 'target_moved', but is {experiment}"
+            f"experiment must be 'speed_PF' or 'target_shift', but is {experiment}"
         )
 
     return kwargs
+
+
+def get_param_str(experiment="speed_PF", speed_std=0, log=False):
+    """
+    get_param_str()
+
+    Get a parameter string based on the parameters used.
+
+    Args:
+    - experiment (str, optional): The experiment to run. Default is "speed_PF".
+    - speed_std (float, optional): The speed standard deviation to use. Default is 0.
+    - log (bool, optional): Whether to print the parameter string. Default is False.
+
+    Returns:
+    - param_str (str): Parameter string based on the parameters used.
+    """
+
+    if experiment == "speed_PF":
+        param_str = "speed vs PF width experiment"
+    elif experiment == "target_shift":
+        param_str = "target shift experiment"
+    else:
+        raise ValueError(
+            f"experiment must be 'speed_PF' or 'target_shift', but is {experiment}"
+        )
+
+    param_str = f"{param_str} (speed std: {speed_std} m/s)"
+
+    if log:
+        print(f"Running {param_str}.")
+
+    return param_str
 
 
 def get_Pyrs(
     scale=params_util.SCALE_LINEAR,
     speed_mean=params_util.SPEED_MEAN_LINEAR,
     speed_std=params_util.SPEED_STD,
-    wait_at_end=params_util.WAIT_LINEAR,
+    wait_after_trajectory=params_util.WAIT_LINEAR,
     **Pyr_kwargs,
 ):
     """
@@ -117,8 +149,8 @@ def get_Pyrs(
     - speed_std (float or str, optional): Standard deviation of the agent's speed.
         If a float, it is used as the standard deviation. If a string, it must be
         either "high" or "low". Default is params_util.SPEED_STD.
-    - wait_at_end (float, optional): Wait time after a track run. Default is
-        params_util.WAIT_LINEAR.
+    - wait_after_trajectory (float, optional): Number of steps to wait after completing
+        a trajectory. Default is params_util.WAIT_LINEAR.
 
     Keyword args:
     - **Pyr_kwargs (dict): Keyword arguments passed to params_util.get_Pyr_params().
@@ -151,7 +183,7 @@ def get_Pyrs(
         target_position=target_position,
         speed_mean=speed_mean,
         speed_std=speed_std,
-        wait_at_end=wait_at_end,
+        wait_after_trajectory=wait_after_trajectory,
     )
 
     Pyr_params = params_util.get_Pyr_params(environment="linear", **Pyr_kwargs)
@@ -172,10 +204,10 @@ def run_linear_track(
     max_num_traj=None,
     max_num_target_reaches=None,
     max_num_steps=5000,
-    wait_at_end=params_util.WAIT_LINEAR,
+    wait_after_trajectory=params_util.WAIT_LINEAR,
     speed_mean=params_util.SPEED_MEAN_LINEAR,
     speed_std=params_util.SPEED_STD,
-    target_moved=0,
+    target_shift=0,
     disable_tqdm=False,
     plot=True,
     PF_kwargs=dict(),
@@ -188,7 +220,7 @@ def run_linear_track(
     (consecutively).
 
     Args:
-    - skip_runs (int, optional): Number of track runs to skip before enabling BTSP.
+    - skip_runs (int, optional): Number of trajectories to skip before enabling BTSP.
         Default is 1.
     - max_num_traj (int, optional): Maximum number of trajectories to run.
         Default is None.
@@ -199,14 +231,14 @@ def run_linear_track(
         Pass None to avoid constraining these by number of steps, and learning will
         only stop when one of those conditions are reached, if provided.
         Default is 5000.
-    - wait_at_end (float, optional): Wait time after a track run. Default is
-        params_util.WAIT_LINEAR.
+    - wait_after_trajectory (float, optional): Number of steps to wait after completing
+        a trajectory. Default is params_util.WAIT_LINEAR.
     - speed_mean (float, optional): Mean speed of the agent. Default is
         params_util.SPEED_MEAN_LINEAR.
     - speed_std (float, optional): Standard deviation of the agent's speed.
         Default is params_util.SPEED_STD.
-    - target_moved (float, optional): Amount to move the target position after the
-        first set of trajectories or steps. If 0, no move is done.
+    - target_shift (float, optional): Amount to shift the target position after the
+        first set of trajectories or steps. If 0, no shift is done.
         Default is 0.
     - disable_tqdm (bool, optional): Whether to disable tqdm. Default is False.
     - plot (bool, optional): Whether to generate plots. Default is True.
@@ -226,15 +258,15 @@ def run_linear_track(
     """
 
     Pyrs = get_Pyrs(
-        wait_at_end=wait_at_end,
+        wait_after_trajectory=wait_after_trajectory,
         speed_mean=speed_mean,
         speed_std=speed_std,
         **Pyr_kwargs,
     )
 
     learning_runs = ["initial"]
-    if target_moved != 0:
-        learning_runs.append("moved")
+    if target_shift != 0:
+        learning_runs.append("shifted")
 
     run_kwargs = {
         "max_num_traj": max_num_traj,
@@ -251,8 +283,8 @@ def run_linear_track(
             if run_kwargs[key] is not None:
                 use_run_kwargs[key] = run_kwargs[key] * (i + 1)
 
-        if learning_run == "moved":
-            Pyrs.Agent.move_target_position(target_moved)
+        if learning_run == "shifted":
+            Pyrs.Agent.shift_target_position(target_shift)
 
         use_plot = plot and (i == len(learning_runs) - 1)
         outputs = run_manager.learn_1D_BTSP(
@@ -270,8 +302,8 @@ def run_linear_track(
         if num_traj_completed < skip_runs + 2:
             raise RuntimeError(f"Only {num_traj_completed} trajectories completed.")
 
-        if learning_run == "moved":
-            Pyrs.Agent.move_target_position(-target_moved)  # return
+        if learning_run == "shifted":
+            Pyrs.Agent.shift_target_position(-target_shift)  # return
 
     if plot:
         plot_dict = {
@@ -372,6 +404,39 @@ def run_linear_experiment_grid(
     )
 
 
+def yield_cycle_kwargs(experiment="speed_PF", speed_std=0, cycle_all=False):
+    """
+    yield_cycle_kwargs()
+
+    Yield keyword arguments for linear track simulations.
+
+    Args:
+    - experiment (str, optional): The experiment to run. Default is "speed_PF".
+    - speed_std (float, optional): The speed standard deviation to use. Default is 0.
+    - cycle_all (bool, optional): Whether to cycle through all possible combinations of
+        keyword arguments. Default is False.
+
+    Yields:
+    - kwargs (dict): Keyword arguments for linear track simulation.
+    """
+
+    if cycle_all:
+        for speed_std in [0, 0.05]:
+            for experiment in ["speed_PF", "target_shift"]:
+                kwargs = {
+                    "experiment": experiment,
+                    "speed_std": speed_std,
+                }
+                yield kwargs
+
+    else:
+        kwargs = {
+            "experiment": experiment,
+            "speed_std": speed_std,
+        }
+        yield kwargs
+
+
 def get_args():
     """
     get_args()
@@ -386,6 +451,7 @@ def get_args():
 
     parser.add_argument("--experiment", default="speed_PF")
     parser.add_argument("--speed_std", default=0, type=float)
+    parser.add_argument("--cycle_all", action="store_true")
     parser.add_argument("--direc", type=Path, default=None)
     parser.add_argument("--num_CPUs", type=int, default=2)
     parser.add_argument("--debug", action="store_true")
@@ -411,22 +477,31 @@ def main():
         gen_util.get_duration_str(start_time, log=True)
 
     else:
-        start_time = time.perf_counter()
-
-        search_space = get_search_space(search_space=args.experiment)
-        kwargs = get_kwargs(experiment=args.experiment, speed_std=args.speed_std)
-        direc = get_save_directory(direc=args.direc)
-
-        linear_track.run_linear_experiment_grid(
-            search_space=search_space,
-            direc=direc,
-            num_CPUs=args.num_CPUs,
-            debug=args.debug,
-            plot=False,
-            **kwargs,
+        all_run_kwargs = yield_cycle_kwargs(
+            experiment=args.experiment,
+            speed_std=args.speed_std,
+            cycle_all=args.cycle_all,
         )
 
-        gen_util.get_duration_str(start_time, log=True)
+        for run_kwargs in all_run_kwargs:
+            start_time = time.perf_counter()
+
+            search_space = get_search_space(search_space=run_kwargs["experiment"])
+            kwargs = get_kwargs(**run_kwargs)
+            direc = get_save_directory(direc=args.direc)
+
+            get_param_str(log=True, **run_kwargs)
+
+            run_linear_experiment_grid(
+                search_space=search_space,
+                direc=direc,
+                num_CPUs=args.num_CPUs,
+                debug=args.debug,
+                plot=False,
+                **kwargs,
+            )
+
+            gen_util.get_duration_str(start_time, log=True)
 
 
 if __name__ == "__main__":

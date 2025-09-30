@@ -43,11 +43,11 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         "start_position": None,  # position to start trajectories from
         "reset_position": None,  # position to reset trajectories from
         "target_position": None,  # position to use as target
-        "wait_between_targets": 10,  # number of steps to wait between target reaching
+        "wait_between_same_target": 10,  # number of steps to wait before a same target can be reached a second time
         "reset_reached_within_tol_prop_to_speed_dt": None,  # proportion of current expected step size to use as reset tolerance
         "target_reached_within_tol_prop_to_speed_dt": None,  # proportion of current expected step size to use as target tolerance
         "fixed_direction": False,  # keep same direction (1D environment only)
-        "wait_at_end": 0,  # number of steps to wait at the end of a trajectory (1D environment only)
+        "wait_after_trajectory": 0,  # number of steps to wait after completing a trajectory (1D environment only)
     }
 
     List of properties (in addition to ratinabox.Agent properties):
@@ -95,11 +95,11 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         "start_position": None,  # position to start trajectories from
         "reset_position": None,  # position to reset trajectories from
         "target_position": None,  # position to use as target
-        "wait_between_targets": 10,  # number of steps to wait between target reaching
+        "wait_between_same_target": 10,  # number of steps to wait before a same target can be reached a second time
         "reset_reached_within_tol_prop_to_speed_dt": None,  # proportion of current expected step size to use as reset tolerance
         "target_reached_within_tol_prop_to_speed_dt": None,  # proportion of current expected step size to use as target tolerance
         "fixed_direction": False,  # keep same direction (1D environment only)
-        "wait_at_end": 0,  # number of steps to wait at the end of a trajectory (1D environment only)
+        "wait_after_trajectory": 0,  # number of steps to wait after completing a trajectory (1D environment only)
     }
 
     ignored_param_keys = list()  # type: list[str]
@@ -146,8 +146,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         if self.Environment.dimensionality == "2D":
             self.fixed_direction = False
-            self.wait_at_end = 0
-        self._waiting_at_end = 0
+            self.wait_after_trajectory = 0
+        self._waiting_after_trajectory = 0
 
         self._init_tolerances()
 
@@ -354,7 +354,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         self.trajectory_df.loc[idx, "time_total"] = self.t - start_time
 
         if self.Environment.D == 2:
-            self.trajectory_df["stop_position_y"] = self.pos[1]
+            self.trajectory_df.loc[idx, "stop_position_y"] = self.pos[1]
 
     def _init_target_df(self):
         """
@@ -795,7 +795,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         Attributes:
         - _target_object_idx (int): Index of target object in environment objects.
         - steps_before_checking_for_target (int): Number of steps to wait before
-            checking for target.
+            checking for the same target again.
         - target_position (1D np.ndarray or None): Target position.
 
         Args:
@@ -837,20 +837,20 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         self.steps_before_checking_for_target = 0
 
-    def move_target_position(self, move=None, move_x=None, move_y=None, prop=False):
+    def shift_target_position(self, shift=None, shift_x=None, shift_y=None, prop=False):
         """
-        self.move_target_position()
+        self.shift_target_position()
 
-        Move the target position by a specified amount.
+        Shift the target position by a specified amount.
 
         Args:
-        - move (float, optional): Amount to move the target position by. Move is
+        - shift (float, optional): Amount to shift the target position by. Shift is
             applied to all dimensions. Default is None.
-        - move_x (float, optional): Amount to move the target position in the x
+        - shift_x (float, optional): Amount to shift the target position in the x
             direction only, if environment is 2D. Default is None.
-        - move_y (float, optional): Amount to move the target position in the y
+        - shift_y (float, optional): Amount to shift the target position in the y
             direction only, if environment is 2D. Default is None.
-        - prop (bool, optional): Whether to move the target position by a proportion
+        - prop (bool, optional): Whether to shift the target position by a proportion
             of the environment extent. Default is False.
 
         Raises:
@@ -862,40 +862,40 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         if self.target_position is None:
             raise RuntimeError(
-                "Cannot move target position, as it is not set. "
+                "Cannot shift target position, as it is not set. "
                 "Use set_target_position() first."
             )
 
         new_target_position = self.target_position.copy()
 
         if self.Environment.D == 1:
-            if move_x is not None or move_y is not None:
+            if shift_x is not None or shift_y is not None:
                 raise ValueError(
-                    "In 1D environment, only use 'move', not move_x or move_y."
+                    "In 1D environment, only use 'shift', not shift_x or shift_y."
                 )
-            move_x = move
-        elif move is not None:
-            if move_x is not None or move_y is not None:
+            shift_x = shift
+        elif shift is not None:
+            if shift_x is not None or shift_y is not None:
                 raise ValueError(
-                    "In 2D environment, if 'move' is provided, it should be alone "
-                    "and not with 'move_x' or 'move_y'."
+                    "In 2D environment, if 'shift' is provided, it should be alone "
+                    "and not with 'shift_x' or 'shift_y'."
                 )
-            move_x = move
-            move_y = move
+            shift_x = shift
+            shift_y = shift
 
-        for i, move in enumerate([move_x, move_y]):
-            if move is None:
+        for i, shift in enumerate([shift_x, shift_y]):
+            if shift is None:
                 continue
             new = new_target_position[i]
-            if move is not None:
+            if shift is not None:
                 min_val, max_val = [
                     fct(self.Environment.extent[int(i * 2) : int(i * 2 + 2)])
                     for fct in (min, max)
                 ]
                 width = max_val - min_val
                 if prop:
-                    move = move * width
-                new_target_position[i] = (new - min_val + move_x) % width + min_val
+                    shift = shift * width
+                new_target_position[i] = (new - min_val + shift_x) % width + min_val
 
         self.set_target_position(new_target_position)
 
@@ -1227,7 +1227,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         Attributes:
         - steps_before_checking_for_target (int): Number of steps to wait before
-            checking for target.
+            checking for the target again.
 
         Returns:
         - target_reached (bool): Whether the agent has reached the target position,
@@ -1246,7 +1246,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 self.target_position, self.target_reached_within_tol_prop_to_speed_dt  # type: ignore[attr-defined]
             )
             if target_reached:
-                self.steps_before_checking_for_target = self.wait_between_targets + 1  # type: ignore[attr-defined]
+                self.steps_before_checking_for_target = self.wait_between_same_target + 1  # type: ignore[attr-defined]
 
         return target_reached
 
@@ -1390,17 +1390,6 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         return reached_position_steps
 
-        # last_t_sec = -np.inf
-        # for step in steps:
-        #     if step == len(Pyrs.Agent.history["t"]):
-        #         if step - 1 in steps:
-        #             continue
-        #         else:
-        #             step = step - 1
-        #     t_sec = Pyrs.Agent.history["t"][step]
-        #     if t_sec < last_t_sec + min_t_sec:
-        #         continue
-
     def get_distances_from_target(self, norm=True):
         """
         self.get_distances_from_target()
@@ -1512,8 +1501,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         self.current_trajectory_length = 0
 
-        if self.wait_at_end > 0 and self._waiting_at_end == 0:
-            self._waiting_at_end = self.wait_at_end + 1
+        if self.wait_after_trajectory > 0 and self._waiting_after_trajectory == 0:
+            self._waiting_after_trajectory = self.wait_after_trajectory + 1
 
         self._add_new_trajectory_to_df()
 
@@ -1554,8 +1543,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             if self.check_if_trajectory_end_reached():
                 self.reset()
 
-        if self._waiting_at_end > 0:
-            self._waiting_at_end -= 1
+        if self._waiting_after_trajectory > 0:
+            self._waiting_after_trajectory -= 1
             new_pos = self.pos
 
         # check for a forced next position
@@ -2877,7 +2866,7 @@ class TAgent(ResetableAgent):
         - right_reset_position (1D np.ndarray): Right arm reset position for the agent.
         - start_position (1D np.ndarray): Start position of the agent.
         - steps_before_checking_for_target (int): Number of steps to wait before
-            checking for target.
+            checking for the target again.
         - target_position (1D np.ndarray): Target position of the agent.
         """
 
@@ -2972,18 +2961,18 @@ class TAgent(ResetableAgent):
                 else:
                     self.target_arm = None
 
-    def move_target_position(self, move, backward=False, prop=False):
+    def shift_target_position(self, shift, backward=False, prop=False):
         """
-        self.move_target_position()
+        self.shift_target_position(shift)
 
-        Move the target position by a specified amount.
+        Shifts the target position by a specified amount.
 
         Args:
-        - move (float, optional): Amount to move the target position by. Move is
+        - shift (float, optional): Amount to shift the target position by. Shift is
             applied to all dimensions. Default is None.
-        - backward (bool, optional): Whether to move the target position backwards
+        - backward (bool, optional): Whether to shift the target position backwards
             along the T-maze instead of forward. Default is False.
-        - prop (bool, optional): Whether to move the target position by a proportion
+        - prop (bool, optional): Whether to shift the target position by a proportion
             of the environment extent. Default is False.
 
         Raises:
@@ -2998,12 +2987,12 @@ class TAgent(ResetableAgent):
 
         if self.target_position is None:
             raise RuntimeError(
-                "Cannot move target position, as it is not set. "
+                "Cannot shift target position, as it is not set. "
                 "Use set_target_position() first."
             )
 
         if prop:
-            move = move * self.Environment.scale
+            shift = shift * self.Environment.scale
 
         new_target_position = self.target_position.copy()
 
@@ -3011,8 +3000,8 @@ class TAgent(ResetableAgent):
 
         if backward:
             if new_target_position[0] == mid_pt_x:
-                if new_target_position[1] - move >= self.start_position[1]:
-                    new_target_position[1] = new_target_position[1] - move
+                if new_target_position[1] - shift >= self.start_position[1]:
+                    new_target_position[1] = new_target_position[1] - shift
                 elif self.prev_target_arm == "left":
                     new_target_position = self.left_reset_position.copy()
                 elif self.prev_target_arm == "right":
@@ -3026,14 +3015,14 @@ class TAgent(ResetableAgent):
                         wrong_arm = True
                     else:
                         new_target_position[0] = min(
-                            mid_pt_x, new_target_position[0] + move
+                            mid_pt_x, new_target_position[0] + shift
                         )
                 elif self.target_arm == "right" or self.prev_target_arm == "right":
                     if new_target_position[0] < mid_pt_x:
                         wrong_arm = True
                     else:
                         new_target_position[0] = max(
-                            mid_pt_x, new_target_position[0] - move
+                            mid_pt_x, new_target_position[0] - shift
                         )
                 else:
                     raise RuntimeError(
@@ -3042,7 +3031,7 @@ class TAgent(ResetableAgent):
                     )
                 if wrong_arm:
                     raise RuntimeError(
-                        "Cannot move target position backwards, as it is not on the "
+                        "Cannot shift target position backwards, as it is not on the "
                         "correct arm. Use set_target_position() first."
                     )
         else:
@@ -3051,7 +3040,7 @@ class TAgent(ResetableAgent):
                     left_edge = self.left_reset_position[0]
                     if new_target_position[0] > left_edge:
                         new_target_position[0] = max(
-                            left_edge, new_target_position[0] - move
+                            left_edge, new_target_position[0] - shift
                         )
                     else:
                         new_target_position = self.start_position.copy()
@@ -3059,7 +3048,7 @@ class TAgent(ResetableAgent):
                     right_edge = self.right_reset_position[0]
                     if new_target_position[0] < right_edge:
                         new_target_position[0] = min(
-                            right_edge, new_target_position[0] + move
+                            right_edge, new_target_position[0] + shift
                         )
                     else:
                         new_target_position = self.start_position.copy()
@@ -3071,7 +3060,7 @@ class TAgent(ResetableAgent):
                         "recognized."
                     )
             else:
-                new_target_position[1] = min(mid_pt_y, new_target_position[1] + move)
+                new_target_position[1] = min(mid_pt_y, new_target_position[1] + shift)
 
         self.set_target_position(new_target_position)
 
@@ -3258,7 +3247,7 @@ class OpenFieldAgent(ResetableAgent):
     Must be initialised with an environment. A parameters dictionary can also be passed.
 
     default_params = {
-        "reward_factor": 5,  # factor for setting a reward object as a target for a trajectory
+        "reward_factor": 3,  # factor for setting a reward object as a target for a trajectory
         "no_target_factor": 1,  # factor for not setting any target for a trajectory
         "trajectory_length": 2000,  # int or iterable of ints
         "num_trajectories": 10,  # number of trajectory lengths to sample
@@ -3298,11 +3287,12 @@ class OpenFieldAgent(ResetableAgent):
     """
 
     default_params = {
-        "reward_factor": 5,  # factor for setting a reward object as a target for a trajectory
+        "reward_factor": 3,  # factor for setting a reward object as a target for a trajectory
         "no_target_factor": 1,  # factor for not setting any target for a trajectory
         "trajectory_length": 2000,  # int or iterable of ints
         "num_trajectories": 10,  # number of trajectory lengths to sample
         "num_random_walk_steps": 100,  # number of steps to random walk, if target is not in sight
+        "wait_between_same_target": 300,  # number of steps to wait before a target can be reached a second time
         "always_log_teleportation": False,  # whether to log teleportation events when they occur
     }
 
@@ -3427,22 +3417,34 @@ class OpenFieldAgent(ResetableAgent):
         """
         self._set_random_walk()
 
-        If there is no current target or it is not in sight, starts a random walk and
-        adds it to the current line of the target dataframe. Otherwise, sets the number
-        of random walk steps to 0.
+        Sets a random walk in one of two cases:
+        1) There is no current target or the current target is not in sight.
+        2) There is current number of steps to wait before checking for the target.
+
+        If a random walk is on-going, an error is raised.
 
         Attributes:
         - current_num_of_random_walk_steps (int): Number of steps in the current
             random walk.
         """
 
+        if not hasattr(self, "current_num_of_random_walk_steps"):
+            self.current_num_of_random_walk_steps = 0
+
+        if self.current_num_of_random_walk_steps > 0:
+            raise RuntimeError("Random walk already in progress.")
+
         if self.target_position is None or not self.check_if_target_is_in_sight():
             self.current_num_of_random_walk_steps = int(self.num_random_walk_steps)  # type: ignore[attr-defined]
+        elif self.steps_before_checking_for_target > 0:
+            self.current_num_of_random_walk_steps = int(
+                self.steps_before_checking_for_target
+            )
+
+        if self.current_num_of_random_walk_steps:
             df_idx = len(self.target_df) - 1
             column = "random_walk_periods"
             self.target_df.loc[df_idx, column].append([self.num_steps_total])  # type: ignore[has-method]
-        else:
-            self.current_num_of_random_walk_steps = 0
 
     def _end_random_walk(self):
         """
@@ -3512,7 +3514,7 @@ class OpenFieldAgent(ResetableAgent):
 
         Attributes:
         - steps_before_checking_for_target (int): Number of steps to wait before
-            checking for target.
+            checking for the target.
         - target_position (1D np.ndarray): Current target position for the agent.
 
         Args:
@@ -3563,14 +3565,20 @@ class OpenFieldAgent(ResetableAgent):
         new_idx = len(self.target_df)
         self.target_df.loc[new_idx] = target_data  # type: ignore[assignment]
 
-        self.steps_before_checking_for_target = 0
-
+        # set target position
         if target_row["object_type_name"] == "no_target":
             self.target_position = None
         else:
             self.target_position = np.asarray(
                 [target_data["position_x"], target_data["position_y"]]
             )
+
+        # skip pause between targets if new target
+        if len(self.target_df) > 1 and (
+            self.target_df.loc[new_idx, "object_idx"]
+            != self.target_df.loc[new_idx - 1, "object_idx"]
+        ):
+            self.steps_before_checking_for_target = 0
 
     def _init_target_df(self):
         """
@@ -3639,6 +3647,7 @@ class OpenFieldAgent(ResetableAgent):
         - manual_pos (bool): Whether the agent's position was set manually.
         - start_position (1D np.ndarray): Start position of the agent.
         - steps_before_checking_for_target (int): Number of steps to wait before
+            checking for the target again.
         - target_position (1D np.ndarray): Target position of the agent.
 
         Args:

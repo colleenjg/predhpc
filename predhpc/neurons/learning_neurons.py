@@ -1119,6 +1119,8 @@ class HebbianLayer(LearnLayer):
         • self.add_input()
         • self.get_regularization_alpha()
         • self.get_normalization_value_dict()
+        • self.get_normalization_values()
+        • self.log_max_normalization_value()
         • self.get_learning_kernel_kwargs()
         • self.get_learning_kernel()
         • self.save_to_history()
@@ -1360,6 +1362,31 @@ class HebbianLayer(LearnLayer):
             norm_values = norm_values[:, chosen_neurons]
 
         return steps, norm_values
+
+    def log_max_normalization_value(self, input_layer, **kwargs):
+        """
+        self.log_max_normalization_value()
+
+        Log the maximum normalization value of the weights and biases, if applicable.
+        """
+
+        _, norm_values = self.get_normalization_values(input_layer, **kwargs)
+
+        if len(norm_values) == 0:
+            log_str = "No weight normalization values recorded."
+
+        else:
+            max_norm = np.max(norm_values)
+
+            if self.normalize_weights_divisively and max_norm <= 1:
+                log_str = (
+                    "No weight normalization applied "
+                    f"(max value of {max_norm:.4f} <= 1)."
+                )
+            else:
+                log_str = f"Max. weight normalization value applied: {max_norm:.4f}."
+
+        print(log_str)
 
     def get_learning_kernel_kwargs(self):
         """

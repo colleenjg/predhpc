@@ -34,37 +34,88 @@ class AdjustMaxTraj:
 
 
 class VNUpdater:
+    """
+    VNUpdater
+
+    Class for updating agent position based on a value neuron with a field centered on
+    a target object or position.
+    """
 
     def __init__(
         self,
         Agent,
+        target="reward",
         thresh_gradV=0.2,
         drift_vel_fact=3,
         drift_to_random_strength_ratio=0.2,
     ):
+        """
+        VNUpdater()
+
+        Initialize a VNUpdater object.
+
+        Args:
+        - Agent (agent.Agent): Agent object.
+        - target (str or 1D array, optional): Name of target object in the environment
+            or position of the target. If a string is provided, there must be exactly
+            one object with that name in the environment. Default is "reward".
+        - thresh_gradV (float, optional): Threshold for the local gradient of the
+            ValueNeuron below which the drift velocity will be set to zero. Default is
+            0.2.
+        - drift_vel_fact (float, optional): Factor for scaling the drift velocity
+            relative to the agent's mean speed. Default is 3.
+        - drift_to_random_strength_ratio (float, optional): Ratio of the strength of
+            the drift velocity to the strength of the random velocity component. Default
+            is 0.2.
+        """
+
         self.Agent = Agent
 
-        rewards = Agent.Environment.get_object_locations("reward")
-        if len(rewards) != 1:
-            raise ValueError(
-                "VNUpdater requires exactly one reward object in the environment, "
-                f"but found {len(rewards)}."
-            )
+        if isinstance(target, str):
+            targets = self.Agent.Environment.get_object_locations(target)
+            if len(targets) != 1:
+                raise ValueError(
+                    "VNUpdater expects exactly one target object in the environment, "
+                    f"but found {len(targets)} '{target}' objects."
+                )
+            target = targets[0]
+        else:
+            target = self.Agent.format_position(target)
 
-        VN_params = params_util.get_VN_params(peak=rewards[0])
-        VN = value_neurons.SimpleValueNeuron(Agent, params=VN_params)
+        VN_params = params_util.get_VN_params(peak=target)
+        VN = value_neurons.SimpleValueNeuron(self.Agent, params=VN_params)
 
         self.VN = VN
         self.thresh_gradV = thresh_gradV
         self.drift_vel_fact = drift_vel_fact
         self.drift_to_random_strength_ratio = drift_to_random_strength_ratio
 
-    def get_update_kwargs(self):
+    def get_update_kwargs(self, ignore_agent_target=False):
+        """
+        self.get_update_kwargs()
+
+        Get keyword arguments for updating agent position. If the agent has a
+        target position that matches the VN peak, and the agent is not waiting to
+        check for the target, the drift velocity will be set based on the local
+        gradient of the ValueNeuron.
+
+        Args:
+        - ignore_agent_target (bool, optional): Whether to ignore the agent's target
+            position and status of waiting to check for the target when determining
+            whether to apply drift velocity. Default is False.
+
+        Returns:
+        - update_kwargs (dict): Dictionary with keyword arguments for updating agent
+            position. Contains keys "drift_velocity" and
+            "drift_to_random_strength_ratio".
+        """
+
         self.VN.update()
         drift_velocity = None
-        if (
+        if ignore_agent_target or (
             self.Agent.target_position is not None
             and (self.Agent.target_position == self.VN.peak).all()
+            and self.Agent.steps_before_checking_for_target == 0
         ):
             gradV = self.VN.get_local_gradient(thresh_gradV=self.thresh_gradV)
             if gradV is not None:
@@ -470,6 +521,11 @@ class Learner:
             )
         else:
             print("BTSP not allowed.")
+
+        learner_t_start = self.agent_start_step * self.Agent.dt
+        self.Pyrs_for_weights.log_max_normalization_value(
+            self.PCs.name, t_start=learner_t_start
+        )
 
     def update(self, updater=dict(), no_logs=False):
         """

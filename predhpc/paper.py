@@ -119,7 +119,7 @@ def get_linear_Pyrs(
     scale=params_util.SCALE_LINEAR,
     speed_mean=params_util.SPEED_MEAN_LINEAR,
     speed_std=params_util.SPEED_STD,
-    wait_at_end=0,
+    wait_after_trajectory=0,
     log_BTSP=True,
     seed=True,
 ):
@@ -134,8 +134,8 @@ def get_linear_Pyrs(
         params_util.SPEED_MEAN_LINEAR.
     - speed_std (float): Standard deviation of the agent's speed. Default is
         params_util.SPEED_STD.
-    - wait_at_end (int): Number of steps to wait at the end of the environment.
-        Default is 0.
+    - wait_after_trajectory (int): Number of steps to wait after completing a
+        trajectory. Default is 0.
     - log_BTSP (bool): Whether to log BTSP events. Default is True.
     - seed (bool): Whether to seed the random number generator with the paper seed.
         Default is True.
@@ -160,7 +160,7 @@ def get_linear_Pyrs(
         target_position=target_position,
         speed_mean=speed_mean,
         speed_std=speed_std,
-        wait_at_end=wait_at_end,
+        wait_after_trajectory=wait_after_trajectory,
     )
 
     PC_params = params_util.get_PC_params(
@@ -252,11 +252,13 @@ def run_linear(
     Args:
     - Pyrs (Pyr, optional): Pyr object with initialized parameters. If None,
         a new Pyr object is created with default parameters.
-    - max_num_steps (int): Maximum number of steps to run the environment.
-        Default is 3800.
+    - max_num_steps (int): Maximum number of steps to run the environment. Note that
+        if learner is set to finish final trajectory, max_num_steps will be exceeded
+        to complete any incomplete trajectories. Default is 3800.
     - max_time_min (float, optional): Maximum time in minutes to run the environment.
-        If specified, it overrides max_num_steps based on the agent's time step.
-        Default is None.
+        If specified, it overrides max_num_steps based on the agent's time step. Note
+        that if learner is set to finish final trajectory, max_time_min will be
+        exceeded to complete any incomplete trajectories. Default is None.
     - BTSP_on (int): Trajectory on which to turn on BTSP. 1 for first trajectory.
         Default is None.
     - seed (bool): Whether to seed the random number generator with the paper seed.
@@ -271,7 +273,9 @@ def run_linear(
         gen_util.seed_all(PAPER_SEED)
 
     if Pyrs is None:
-        Pyrs = get_linear_Pyrs(seed=False, wait_at_end=int(15 / params_util.DT))
+        Pyrs = get_linear_Pyrs(
+            seed=False, wait_after_trajectory=params_util.WAIT_LINEAR
+        )
 
     if max_time_min is not None:
         max_num_steps = int(max_time_min * 60 / Pyrs.Agent.dt)
@@ -283,7 +287,7 @@ def run_linear(
     return learner
 
 
-def plot_linear_summary(learner=None, max_time_min=1.8, **kwargs):
+def plot_linear_summary(learner=None, max_time_min=2.0, **kwargs):
     """
     plot_linear_summary()
 
@@ -292,8 +296,9 @@ def plot_linear_summary(learner=None, max_time_min=1.8, **kwargs):
     Args:
     - learner (Learner): Learner object.
     - max_time_min (float, optional): Maximum time in minutes to run the environment.
-        If specified, it overrides max_num_steps based on the agent's time step.
-        Default is 1.8.
+        If specified, it overrides max_num_steps based on the agent's time step. Note
+        that if learner is set to finish final trajectory, max_time_min will be
+        exceeded to complete any incomplete trajectories. Default is 2.0.
 
     Keywords args:
     - **kwargs: Additional keyword arguments passed to
@@ -311,7 +316,7 @@ def plot_linear_summary(learner=None, max_time_min=1.8, **kwargs):
     return ax1D
 
 
-def plot_linear_place_fields(learner, max_time_min=1.8, **kwargs):
+def plot_linear_place_fields(learner, max_time_min=2.0, **kwargs):
     """
     plot_linear_place_fields(learner)
 
@@ -320,8 +325,9 @@ def plot_linear_place_fields(learner, max_time_min=1.8, **kwargs):
     Args:
     - learner (Learner): Learner object.
     - max_time_min (float, optional): Maximum time in minutes to run the environment.
-        If specified, it overrides max_num_steps based on the agent's time step.
-        Default is 1.8.
+        If specified, it overrides max_num_steps based on the agent's time step. Note
+        that if learner is set to finish final trajectory, max_time_min will be
+        exceeded to complete any incomplete trajectories. Default is 2.0.
 
     Keywords args:
     - **kwargs: Additional keyword arguments passed to
@@ -339,7 +345,7 @@ def plot_linear_place_fields(learner, max_time_min=1.8, **kwargs):
     return ax1D
 
 
-def plot_linear_binned_rates(learner, max_time_min=1.8, **kwargs):
+def plot_linear_binned_rates(learner, max_time_min=2.0, **kwargs):
     """
     plot_linear_binned_rates(learner)
 
@@ -348,8 +354,9 @@ def plot_linear_binned_rates(learner, max_time_min=1.8, **kwargs):
     Args:
     - learner (Learner): Learner object.
     - max_time_min (float, optional): Maximum time in minutes to run the environment.
-        If specified, it overrides max_num_steps based on the agent's time step.
-        Default is 1.8.
+        If specified, it overrides max_num_steps based on the agent's time step. Note
+        that if learner is set to finish final trajectory, max_time_min will be
+        exceeded to complete any incomplete trajectories. Default is 2.0.
 
     Keywords args:
     - **kwargs: Additional keyword arguments passed to
@@ -388,8 +395,10 @@ def run_linear_speed(
     - speed_mean (float): Mean speed for the experiment.
         Default is params_util.SPEED_MEAN_LINEAR.
     - i (int): Index for the experiment run. Default is 0.
-    - max_time_min (float): Maximum time in minutes to run the environment for
-        assessing place field. Default is NUM_TRAJ_SPEED.
+    - max_time_min (float, optional): Maximum time in minutes to run the environment
+        for assessing place field. Note that if learner is set to complete all
+        trajectories, max_time_min will be exceeded to complete any incomplete
+        trajectories. Default is NUM_TRAJ_SPEED.
     - max_num_traj (int): Maximum number of trajectories to run for assessing place
         field. Default is NUM_TRAJ_SPEED.
     - BTSP_on (int): Trajectory on which to enable. Later trajectories allow more
@@ -417,6 +426,7 @@ def run_linear_speed(
         - "PF_widths": Last place field widths.
         - "num_BTSP_applied": Number of BTSP events that were applied in total for
             each target shift.
+        - "max_norm_value": Maximum weight normalization value used.
         if seed:
         - "seed": Seed for the experiment.
     """
@@ -429,7 +439,7 @@ def run_linear_speed(
         speed_mean=speed_mean,
         speed_std=speed_std,
         log_BTSP=False,
-        wait_at_end=0,
+        wait_after_trajectory=0,
         seed=False,
     )
 
@@ -465,10 +475,15 @@ def run_linear_speed(
 
     data_dict = gather_PF_info(learner, k=k, t_start=t_start)
 
-    data_dict["speed_mean"] = speed_mean
-    data_dict["num_BTSP_applied"] = len(
+    num_BTSP_applied = len(
         Pyrs.SomaticCompartment.get_BTSP_steps(applied_only=True, apply_step=True)
     )
+    norm_values = learner.Pyrs.SomaticCompartment.get_normalization_values("PCs")[1]
+    max_norm_value = norm_values.max() if len(norm_values) > 0 else np.nan
+
+    data_dict["speed_mean"] = speed_mean
+    data_dict["num_BTSP_applied"] = num_BTSP_applied
+    data_dict["max_norm_value"] = max_norm_value
 
     if seed:
         data_dict["seed"] = seed_value
@@ -488,8 +503,9 @@ def run_linear_speeds(
     Args:
     - seed (bool): Whether to seed the random number generator with the paper seed.
         Default is True.
-    - max_time_min (float): Maximum time in minutes to run the environment.
-        Default is NUM_TRAJ_SPEED.
+    - max_time_min (float): Maximum time in minutes to run the environment for. Note
+        that if learner is set to complete all trajectories, max_time_min will be
+        exceeded to complete any incomplete trajectories. Default is NUM_TRAJ_SPEED.
     - num_repeats (int): Number of repeats for the experiment. Default is 1.
     - k (int): Smoothing factor for measuring place field width from firingrate history.
         Default is SMOOTH_K.
@@ -507,6 +523,7 @@ def run_linear_speeds(
         - "PF_centers": Array of place field centers.
         - "PF_widths": Array of place field widths.
         - "num_BTSP_applied": Number of BTSP events applied for each speed.
+        - "max_norm_values": Maximum weight normalization value used for each speed.
         if seed:
         - "seeds": Array of seeds for each run.
     """
@@ -549,6 +566,7 @@ def run_linear_speeds(
                 [speed_dict[key] for speed_dict in speed_dicts]
             )
     speed_data["speed_means"] = speed_data.pop("speed_mean")
+    speed_data["max_norm_values"] = speed_data.pop("max_norm_value")
 
     if "seed" in speed_data.keys():
         speed_data["seeds"] = speed_data.pop("seed")
@@ -661,8 +679,9 @@ def run_linear_shift(
     - i (int): Index for the experiment run. Default is 0.
     - speed_std (float): Standard deviation of speed for the experiment.
         Default is 0.
-    - max_time_min (float): Maximum time in minutes to run the environment for
-        assessing place field. Default is 5.
+    - max_time_min (float): Maximum time in minutes to run the environment for. Note
+        that if learner is set to complete all trajectories, max_time_min will be
+        exceeded to complete any incomplete trajectories. Default is 5.
     - max_num_traj (int): Maximum number of trajectories to run for assessing place
         field. Default is 5.
     - BTSP_on (int): Trajectory on which to enable. Later trajectories allow more
@@ -678,7 +697,7 @@ def run_linear_shift(
 
     Returns:
     - data_dict (dict): Dictionary containing the results of the experiment under keys:
-        - "speed_mean": Mean speed for the experiment.
+        - "target_shift": Target shift for the experiment.
         - "PC_place_centers": Place cell centers.
         - "PC_weights": Place cell input weights.
         - "PC_weight_widths": Last place cell input weight widths.
@@ -689,6 +708,7 @@ def run_linear_shift(
         - "PF_widths": Last place field widths.
         - "num_BTSP_applied": Number of BTSP events that were applied in total for the
             neuron layer.
+        - "max_norm_value": Maximum weight normalization value used.
         if seed:
         - "seed": Seed for the experiment.
     """
@@ -721,7 +741,7 @@ def run_linear_shift(
         warnings.filterwarnings(
             "ignore", category=UserWarning, message="Target position"
         )
-        learner.Pyrs.Agent.move_target_position(target_shift)
+        learner.Pyrs.Agent.shift_target_position(target_shift)
 
     for i in range(5):
         learner = run_linear(
@@ -788,8 +808,12 @@ def run_linear_shift(
                 [initial_shift_dict[PF_key][:1], data_dict[PF_key]], axis=0
             )
 
+    norm_values = learner.Pyrs.SomaticCompartment.get_normalization_values("PCs")[1]
+    max_norm_value = norm_values.max() if len(norm_values) > 0 else np.nan
+
     data_dict["target_shift"] = target_shift
     data_dict["num_BTSP_applied"] = num_BTSP_applied
+    data_dict["max_norm_value"] = max_norm_value
 
     if seed:
         data_dict["seed"] = seed_value
@@ -807,8 +831,9 @@ def run_linear_shifts(seed=True, max_time_min=5, num_repeats=1, k=SMOOTH_K, num_
     Args:
     - seed (bool): Whether to seed the random number generator with the paper seed.
         Default is True.
-    - max_time_min (float): Maximum time in minutes to run the environment.
-        Default is 5.
+    - max_time_min (float): Maximum time in minutes to run the environment for. Note
+        that if learner is set to complete all trajectories, max_time_min will be
+        exceeded to complete any incomplete trajectories. Default is 5.
     - num_repeats (int): Number of repeats for the experiment. Default is 1.
     - k (int): Smoothing factor for measuring place field width from firingrate history.
         Default is SMOOTH_K.
@@ -827,6 +852,7 @@ def run_linear_shifts(seed=True, max_time_min=5, num_repeats=1, k=SMOOTH_K, num_
         - "PF_widths": Array of place field widths.
         - "num_BTSP_applied": Number of BTSP events that were applied in total for
             each target shift.
+        - "max_norm_value": Maximum weight normalization value used for each target shift.
         if seed:
         - "seeds": Array of seeds for each run.
     """
@@ -883,6 +909,8 @@ def run_linear_shifts(seed=True, max_time_min=5, num_repeats=1, k=SMOOTH_K, num_
         shift_dict[key] = np.concatenate([initial_data, shift_dict[key]], axis=1)
 
     shift_dict["target_shifts"] = shift_dict.pop("target_shift")
+    shift_dict["max_norm_values"] = shift_dict.pop("max_norm_value")
+
     if seed:
         shift_dict["seeds"] = np.full(len(target_shifts), PAPER_SEED)
 
@@ -972,6 +1000,36 @@ def plot_target_shift_PFs(
     return ax1D
 
 
+def log_max_normalization_value(norm_values):
+    """
+    log_max_normalization_value(norm_values)
+
+    Logs the maximum weight normalization value recorded.
+
+    Args:
+    - norm_values (np.ndarray): Array of normalization values to log.
+    """
+
+    finite = np.isfinite(norm_values)
+    if finite.any():
+        max_norm = np.nanmax(norm_values)
+        if max_norm > 1:
+            log_str = f"Max. weight normalization value applied: {max_norm:.4f}"
+            n = (norm_values[finite] > 1).sum()
+            if finite.sum() > 1:
+                log_str = f"{log_str} ({n}/{finite.sum()} values > 1)."
+            else:
+                log_str = f"{log_str}."
+        else:
+            log_str = (
+                "No weight normalization applied "
+                f"(max value of {max_norm:.4f} <= 1)."
+            )
+    else:
+        log_str = "No weight normalization values found."
+    print(log_str)
+
+
 def run_linear_fct(fct_name="linear_speeds", overwrite=False, seed=True, num_jobs=1):
     """
     run_linear_fct()
@@ -1010,6 +1068,9 @@ def run_linear_fct(fct_name="linear_speeds", overwrite=False, seed=True, num_job
         data_dict = fct(seed=seed, num_jobs=num_jobs)
         gen_util.save_np_dict(save_path, data_dict)
         gen_util.get_duration_str(start_time, log=True)
+
+    if "max_norm_values" in data_dict.keys():
+        log_max_normalization_value(data_dict["max_norm_values"])
 
     return data_dict
 
@@ -1070,11 +1131,13 @@ def run_openfield_corridor(
     Args:
     - Pyrs (Pyr, optional): Pyr object with initialized parameters. If None,
         a new Pyr object is created with default parameters.
-    - max_num_steps (int): Maximum number of steps to run the environment.
-        Default is 3800.
+    - max_num_steps (int): Maximum number of steps to run the environment. Note
+        that if learner is set to finish final trajectory, max_num_steps will be
+        exceeded to complete any incomplete trajectories. Default is 3800.
     - max_time_min (float, optional): Maximum time in minutes to run the environment.
-        If specified, it overrides max_num_steps based on the agent's time step.
-        Default is None.
+        If specified, it overrides max_num_steps based on the agent's time step. Note
+        that if learner is set to finish final trajectory, max_time_min will be
+        exceeded to complete any incomplete trajectories. Default is None.
     - seed (bool): Whether to seed the random number generator with the paper seed.
         Default is True.
 

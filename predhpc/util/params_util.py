@@ -5,24 +5,35 @@ from ratinabox import utils as rutils
 
 from predhpc.util import gen_util, ext_util
 
+# Scale parameters
 SCALE_LINEAR = 6.0
 SCALE_TMAZE = 4.0
 SCALE = 2.0
-DT = 0.03
 
-WAIT_LINEAR = int(16 / DT)  # 16 sec
-
+# Target parameters
 REL_TARGET_POS = 3 / 5
-MOVE_CLOSE = 0.2
-MOVE_MID = 0.7
-MOVE_FAR = 2.0
+SHIFT_CLOSE = 0.2
+SHIFT_MID = 0.7
+SHIFT_FAR = 2.0
 
+# Spatial proximity parameters
+TOLERANCE_LINEAR = 0.55
+TOLERANCE_2D = 5
+
+# Temporal parameters
+DT = 0.03
+WAIT_LINEAR_SEC = 20
+WAIT_LINEAR = int(WAIT_LINEAR_SEC / DT)
+
+# Speed parameters
 SPEED_MEAN_LINEAR = 0.25  # m/s
 SPEED_STD = 0.05  # m/s
-SPEED_MEAN_2D = 0.28  # m/s (mean tends to be undershot)
+SPEED_MEAN_2D = 0.28  # m/s (mean tends to be undershot in practice)
 
-PC_SIGMA = 0.1  # x2 for width at 50% of peak, x4 for 10% of peak
+# Place cell parameter
+PC_SIGMA = 0.1  # x2.35 for width at 50% of peak (FWHM), x4.29 for 10% of peak
 
+# BTSP filter parameters
 PRE_BTSP_FILTER_TAU_POS = 2.0
 PRE_BTSP_NEG_FILTER_DELTA = 0.010
 PRE_BTSP_NEG_FILTER_WEIGHT = 1.0010
@@ -34,9 +45,7 @@ POST_BTSP_NEG_FILTER_WEIGHT = 1.0006
 PRE_BTSP_FILTER_TAU_NEG = PRE_BTSP_FILTER_TAU_POS + PRE_BTSP_NEG_FILTER_DELTA
 POST_BTSP_FILTER_TAU_NEG = POST_BTSP_FILTER_TAU_POS + POST_BTSP_NEG_FILTER_DELTA
 
-TOLERANCE_LINEAR = 0.55
-TOLERANCE_2D = 5
-
+# Color parameters
 TARGET_COLOR = "#3C539B"  # blue
 NOVEL_COLOR = "#22772E"  # dark green
 
@@ -45,6 +54,7 @@ PC_COLOR = "#99193A"  # dark red
 PYR_SOMATIC_COLOR = "#8787C9"  # light purple
 PYR_APICAL_COLOR = "#3D3D79"  # dark purple
 
+# Activation function parameters
 LINEAR_SIGMOID_ACTIVATION_PARAMS = ext_util.get_standard_sigmoid_params(
     min_fr=0.0, max_fr=10.0, mid_x=6.0, width_x=8.0
 )
@@ -275,6 +285,7 @@ def get_agent_params(dt=DT, scale=None, environment="linear", **kwargs):
     agent_params = {
         "dt": dt,
         "head_direction_smoothing_timescale": dt * 2,
+        "wait_between_same_target": 30,
     }
 
     if environment == "linear":
@@ -286,8 +297,7 @@ def get_agent_params(dt=DT, scale=None, environment="linear", **kwargs):
         agent_params["reset_position"] = scale - dt
         agent_params["target_position"] = scale - dt * 8
         agent_params["fixed_direction"] = True
-        agent_params["wait_at_end"] = WAIT_LINEAR
-        agent_params["wait_between_targets"] = 30
+        agent_params["wait_after_trajectory"] = int(WAIT_LINEAR_SEC / dt)
         agent_params["target_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_LINEAR
         agent_params["reset_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_LINEAR
 
@@ -295,7 +305,6 @@ def get_agent_params(dt=DT, scale=None, environment="linear", **kwargs):
         agent_params["speed_mean"] = SPEED_MEAN_2D
         agent_params["thigmotaxis"] = 0.5
         agent_params["left_arm_prop"] = 0.5
-        agent_params["wait_between_targets"] = 30
         agent_params["target_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_2D
         agent_params["reset_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_2D
 
@@ -307,7 +316,7 @@ def get_agent_params(dt=DT, scale=None, environment="linear", **kwargs):
         agent_params["no_target_factor"] = 5
         agent_params["target_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_2D
         if environment == "openfield_corridor":
-            agent_params["reward_factor"] = 5
+            agent_params["reward_factor"] = 3
             agent_params["no_target_factor"] = 1
 
     for key, value in kwargs.items():
@@ -356,7 +365,7 @@ def get_Obj_params(n=None, environment="linear", vector=False, **kwargs):
         "description": "gaussian",
         "min_fr": 0,
         "max_fr": 10,
-        "widths": PC_SIGMA / 2,
+        "widths": PC_SIGMA / 2,  # for Gaussian fields, provide sigma (st. dev.)
         "color": OBJ_COLOR,
     }
 
@@ -405,7 +414,7 @@ def get_PC_params(n=None, environment="linear", **kwargs):
         "min_fr": 0,
         "max_fr": 10,
         "color": PC_COLOR,
-        "widths": PC_SIGMA,
+        "widths": PC_SIGMA,  # for Gaussian fields, provide sigma (st. dev.)
     }
 
     if environment == "linear":
@@ -508,7 +517,7 @@ def get_Pyr_params(
 
     if environment == "linear":
         W_INIT_LOC = 0.1
-        REG_ALPHA = 2.75
+        REG_ALPHA = 2.5
         BTSP_LR = 0.2
     else:
         W_INIT_LOC = 0.04
