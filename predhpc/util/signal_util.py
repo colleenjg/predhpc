@@ -805,7 +805,7 @@ def get_pre_post_exponential(
         pre_post_exp, align_pt = pad_and_convolve_exp(pre_exp, post_exp)
 
     if sigma_in_steps is not None:
-        pre_post_exp = gaussian_smooth_kernel(pre_post_exp, sigma_in_steps)[:, 0]
+        pre_post_exp = gaussian_smooth_kernel(pre_post_exp, sigma_in_steps)
 
     if return_AUC_only:
         AUC = np.sum(pre_post_exp)
@@ -1050,7 +1050,7 @@ def get_summed_exp(
     if sigma_in_steps is not None:
         summed_pre_post_exp = gaussian_smooth_kernel(
             summed_pre_post_exp, sigma_in_steps
-        )[:, 0]
+        )
 
     if norm_max:
         summed_pre_post_exp = summed_pre_post_exp / summed_pre_post_exp.max()

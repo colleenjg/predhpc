@@ -66,9 +66,10 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         • self.reverse()
         • self.set_position_and_velocity()
         • self.sample_position_within_tolerance()
-        • self.get_trajectory_lengths_to_date()
-        • self.log_trajectories_to_date()
-        • self.log_trajectory_stats_to_date()
+        • self.get_trajectory_lengths()
+        • self.log_target_reach_times()
+        • self.log_trajectories()
+        • self.log_trajectory_stats()
         • self.check_if_position_reached()
         • self.check_if_reset_position_reached()
         • self.check_if_target_position_reached()
@@ -78,7 +79,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         • self.get_reached_position_steps()
         • self.reset()
         • self.update()
-        • self.plot_trajectories_to_date()
+        • self.plot_trajectory_lengths()
         • self.add_position_across_time_to_plot()
         • self.plot_trajectories_across_time()
         • self.plot_trajectories()
@@ -114,7 +115,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         Initialise the agent.
 
         Attributes:
-        - _last_stop_step (int): Last step at which the agent stopped.
+        - _last_end_step (int): Last step at which the agent stopped.
         - _most_recent_target_reached_step (int): Last step at which the target was
             reached.
 
@@ -166,7 +167,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 )
 
         self._most_recent_target_reached_step = -1
-        self._last_stop_step = -1
+        self._last_end_step = -1
 
     @property
     def target_df_columns(self) -> list:
@@ -215,15 +216,13 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             if self.Environment.D == 2:
                 trajectory_df_columns.append("start_position_y")
 
-            trajectory_df_columns.extend(
-                ["start_step", "start_time", "stop_position_x"]
-            )
+            trajectory_df_columns.extend(["start_step", "start_time", "end_position_x"])
 
             if self.Environment.D == 2:
-                trajectory_df_columns.append("stop_position_y")
+                trajectory_df_columns.append("end_position_y")
 
             trajectory_df_columns.extend(
-                ["stop_step", "stop_time", "num_steps_total", "time_total"]
+                ["end_step", "end_time", "num_steps_total", "time_total"]
             )
 
             self._trajectory_df_columns = trajectory_df_columns
@@ -338,23 +337,23 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         """
         self._end_trajectory()
 
-        Add stop information for a trajectory that is ending to trajectory dataframe.
+        Add end information for a trajectory that is ending to trajectory dataframe.
         """
 
         idx = len(self.trajectory_df) - 1
         start_step = int(self.trajectory_df.loc[idx, "start_step"])  # type: ignore[assignment]
         start_time = self.trajectory_df.loc[idx, "start_time"]  # type: ignore[assignment]
 
-        self.trajectory_df.loc[idx, "stop_position_x"] = self.pos[0]
-        self.trajectory_df.loc[idx, "stop_step"] = self.num_steps_total
-        self.trajectory_df.loc[idx, "stop_time"] = self.t
+        self.trajectory_df.loc[idx, "end_position_x"] = self.pos[0]
+        self.trajectory_df.loc[idx, "end_step"] = self.num_steps_total
+        self.trajectory_df.loc[idx, "end_time"] = self.t
         self.trajectory_df.loc[idx, "num_steps_total"] = (
             self.num_steps_total - start_step
         )
         self.trajectory_df.loc[idx, "time_total"] = self.t - start_time
 
         if self.Environment.D == 2:
-            self.trajectory_df.loc[idx, "stop_position_y"] = self.pos[1]
+            self.trajectory_df.loc[idx, "end_position_y"] = self.pos[1]
 
     def _init_target_df(self):
         """
@@ -725,6 +724,63 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         return t, startid, endid
 
+    def get_trajectory_plotting_times(self, traj_idxs=None, t_start=None, t_end=None):
+        """
+        self.get_trajectory_plotting_times()
+
+        Obtain the times to plot for specific trajectories.
+
+        Args:
+        - traj_idxs (int or list of int, optional): Trajectory indices to plot.
+            Default is None.
+        - t_start (float, optional): Start time, used to further constrain the
+            plotting times. Default is None.
+        - t_end (float, optional): End time, used to further constrain the plotting
+            times. Default is None.
+
+        Returns:
+        - t (1D np.ndarray): Times to plot.
+        - startid (int): Index of the start time point.
+        - endid (int): Index of the end time point (exclusionary, add 1 for indexing).
+        """
+
+        t, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
+
+        if traj_idxs is not None:
+            if isinstance(traj_idxs, (int, np.int64)):
+                traj_idxs = [traj_idxs]
+            if not isinstance(traj_idxs, Sequence):
+                raise ValueError("traj_idxs must be an int or a list of ints.")
+            if -1 in list(traj_idxs):
+                traj_idxs = [
+                    len(self.trajectory_df) + idx if idx == -1 else idx
+                    for idx in traj_idxs
+                ]
+            if len(traj_idxs) == 2:
+                traj_idxs = list(range(traj_idxs[0], traj_idxs[1] + 1))
+
+            traj_idxs = np.sort(np.unique(np.asarray(traj_idxs)))
+            if traj_idxs[0] < 0 or traj_idxs[-1] >= len(self.trajectory_df):
+                raise ValueError(
+                    f"Trajectory indices must be between 0 and "
+                    f"{len(self.trajectory_df)-1}, but got {traj_idxs}."
+                )
+
+            if len(traj_idxs) != traj_idxs[-1] - traj_idxs[0] + 1:
+                raise NotImplementedError(
+                    "Can only plot a continuous range of trajectories, but got "
+                    f"{traj_idxs}."
+                )
+
+            traj_startid = self.trajectory_df.loc[traj_idxs[0], "start_step"]
+            traj_endid = self.trajectory_df.loc[traj_idxs[-1], "end_step"]
+
+            startid = max(startid, int(traj_startid))
+            if not np.isnan(traj_endid):
+                endid = min(endid, int(traj_endid) - 1)
+
+        return t, startid, endid
+
     def format_position(
         self,
         position: (
@@ -1069,7 +1125,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         - completed_df (pd.DataFrame): Dataframe of all completed trajectories.
         """
 
-        completed_df = self.trajectory_df.loc[self.trajectory_df["stop_step"].notna()]
+        completed_df = self.trajectory_df.loc[self.trajectory_df["end_step"].notna()]
 
         return completed_df
 
@@ -1087,77 +1143,151 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         return num_completed_trajectories
 
-    def get_trajectory_lengths_to_date(self):
+    def get_trajectory_lengths(self, t_start=None, t_end=None, complete_only=False):
         """
-        self.get_trajectory_lengths_to_date()
+        self.get_trajectory_lengths()
 
-        Obtain the lengths of all completed trajectories to date.
+        Obtain the lengths of all trajectories. Trajectories must be completely within
+        the start and end times provided.
+
+        Args:
+        - t_start (int, optional): The start time (step) to consider.
+        - t_end (int, optional): The end time (step) to consider.
+        - complete_only (bool, optional): If True, only include trajectories that fit
+            completely in the time constraints. Otherwise, the length for the first
+            and last trajectories may be truncated. Default is False.
 
         Returns:
-        - trajectory_lengths_to_date (list): Lengths of all completed trajectories
-            to date.
+        - trajectory_lengths (list): Lengths of all trajectories.
         """
 
-        trajectory_lengths_to_date = (
-            self.trajectory_df["num_steps_total"].to_numpy().copy()
-        )
+        _, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
 
-        if np.isnan(trajectory_lengths_to_date[-1]):
-            last_start = int(
-                self.trajectory_df.loc[len(self.trajectory_df) - 1, "start_step"]  # type: ignore[assignment]
-            )
-            last_length = self.num_steps_total - last_start
-            if last_length == 0:
-                trajectory_lengths_to_date = trajectory_lengths_to_date[:-1]
+        start_steps = self.trajectory_df["start_step"].values
+        end_steps = self.trajectory_df["end_step"].values
+
+        if len(end_steps) and np.isnan(end_steps)[-1]:
+            if complete_only:
+                start_steps = start_steps[:-1]
+                end_steps = end_steps[:-1]
             else:
-                trajectory_lengths_to_date[-1] = last_length
+                end_steps[-1] = self.num_steps_total
 
-        trajectory_lengths_to_date = trajectory_lengths_to_date.astype(int)
+        if t_start is not None:
+            start_idxs = np.where(start_steps >= startid)[0]
+            if len(start_idxs):
+                start_idx = start_idxs[0]
+            else:
+                start_idx = len(start_steps)
 
-        return trajectory_lengths_to_date
+            if not complete_only:
+                start_idx = max(0, start_idx - 1)
+            start_steps = start_steps[start_idx:]
+            end_steps = end_steps[start_idx:]
 
-    def log_trajectories_to_date(self):
+        if t_end is not None:
+            end_idxs = np.where(end_steps <= endid)[0]
+            if len(end_idxs):
+                end_idx = end_idxs[0]
+            else:
+                end_idx = len(end_steps)
+
+            if not complete_only:
+                end_idx = min(len(start_steps), end_idx + 1)
+            start_steps = start_steps[:end_idx]
+            end_steps = end_steps[:end_idx]
+
+        trajectory_lengths = (end_steps - start_steps).astype(int)
+
+        return trajectory_lengths
+
+    def log_target_reach_times(
+        self, log_as_time: bool = True, target_idxs=None, target_name="target"
+    ):
         """
-        self.log_trajectories_to_date()
+        self.log_target_reach_times()
 
-        Log the trajectory lengths to date.
+        Log the target reach times.
+
+        Args:
+        - log_as_time (bool, optional): Whether to log reach times as time (min)
+            instead of steps. Default is True.
+        - target_idxs (list, optional): List of target dataframe indices to consider.
+            If None, all are considered. Default is None.
+        - target_name (str, optional): Name of the target to use in the log string.
+            Default is "target".
         """
 
-        trajectory_lengths_to_date = self.get_trajectory_lengths_to_date()
+        if target_idxs is None:
+            reached_df = self.get_reached_target_df()
+            total = len(self.target_df)
+        else:
+            target_df = self.target_df.loc[target_idxs]
+            reached_df = target_df.loc[target_df["reached_step"].notna()]
+            total = len(target_df)
+
+        col = "time_total" if log_as_time else "num_steps_total"
+        durations = reached_df[col].to_numpy().astype(int)
+
+        unit = "min" if log_as_time else "steps"
+        if log_as_time:
+            durations = durations / 60
+
+        target_name = f"{target_name[0].upper()}{target_name[1:]}"
+        log_str = f"{target_name} reached {len(reached_df)}/{total} times"
+        if len(durations) == 0:
+            log_str = f"{log_str}."
+        elif len(durations) == 1:
+            log_str = f"{log_str} in {durations[0]:.2f} {unit}."
+        else:
+            log_str = (
+                f"{log_str} in {durations.min():.2f} to {durations.max():.2f} {unit}."
+            )
+
+        print(log_str)
+
+    def log_trajectories(self):
+        """
+        self.log_trajectories()
+
+        Log the trajectory lengths.
+        """
+
+        trajectory_lengths = self.get_trajectory_lengths()
         print(
-            f"Trajectory lengths ({len(trajectory_lengths_to_date)}) to date "
-            f"(in steps): {trajectory_lengths_to_date}"
+            f"Trajectory lengths ({len(trajectory_lengths)}) "
+            f"(in steps): {trajectory_lengths}"
         )
 
-    def log_trajectory_stats_to_date(self, log_as_time: bool = True):
+    def log_trajectory_stats(self, log_as_time: bool = True):
         """
-        self.log_trajectory_stats_to_date()
+        self.log_trajectory_stats()
 
-        Log the trajectory length statistics to date.
+        Log the trajectory length statistics.
 
         Args:
         - log_as_time (bool, optional): Whether to log trajectory lengths in time
             (sec/min). Otherwise, they are logged in steps. Default is True.
         """
 
-        traj_leng_to_date = self.get_trajectory_lengths_to_date()
+        traj_lengths = self.get_trajectory_lengths()
         traj_length_unit = "steps"
 
         # get trajectory lengths in seconds
         if log_as_time:
-            traj_leng_to_date = [leng * self.dt for leng in traj_leng_to_date]  # type: ignore[has-type]
+            traj_lengths = [leng * self.dt for leng in traj_lengths]  # type: ignore[has-type]
             traj_length_unit = "sec"
-            if np.mean(traj_leng_to_date) / 60 > 2:
-                traj_leng_to_date = [leng / 60 for leng in traj_leng_to_date]
+            if np.mean(traj_lengths) / 60 > 2:
+                traj_lengths = [leng / 60 for leng in traj_lengths]
                 traj_length_unit = "min"
 
         # get trajectory length statistics
-        traj_leng_to_date_mean = np.mean(traj_leng_to_date)
-        traj_leng_to_date_std = np.std(traj_leng_to_date)
+        traj_length_mean = np.mean(traj_lengths)
+        traj_length_std = np.std(traj_lengths)
 
         print(
-            f"Trajectory lengths ({len(traj_leng_to_date)}) to date: "
-            f"{traj_leng_to_date_mean:.2f} +/- {traj_leng_to_date_std:.2f} "
+            f"Trajectory lengths ({len(traj_lengths)}): "
+            f"{traj_length_mean:.2f} +/- {traj_length_std:.2f} "
             f"{traj_length_unit} each"
         )
 
@@ -1267,7 +1397,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         self.reached_end = False
         if self.reset_position is not None and self.check_if_reset_position_reached():
             # record the time step at which the agent reached the reset position
-            if self.num_steps_total == self._last_stop_step:
+            if self.num_steps_total == self._last_end_step:
                 self.reached_end = False
             else:
                 self.reached_end = True
@@ -1277,7 +1407,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 self.reached_end = True
 
         if self.reached_end:
-            self._last_stop_step = self.num_steps_total
+            self._last_end_step = self.num_steps_total
 
         return self.reached_end
 
@@ -1324,7 +1454,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         - reset_times (1D np.ndarray): Position reset times.
         """
 
-        reset_steps = self.trajectory_df["stop_step"].to_numpy()
+        reset_steps = self.trajectory_df["end_step"].to_numpy()
         if np.isnan(reset_steps[-1]):
             reset_steps = reset_steps[:-1]
 
@@ -1352,7 +1482,9 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         """
         self.get_reached_position_steps()
 
-        Obtain the steps at which the agent reached the specified position.
+        Obtain the steps at which the agent reached the specified position. This
+        differs from get_position_visits(), as it only includes steps when the agent
+        was directed toward the location or had it as a target.
 
         Args:
         - position_name (str, optional): Name of the position to check for.
@@ -1369,7 +1501,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             reached_position_steps = self.trajectory_df["start_step"].to_numpy()
         elif position_name == "reset":
             completed_traj_df = self.get_completed_trajectories_df()
-            reached_position_steps = completed_traj_df["stop_step"].to_numpy()
+            reached_position_steps = completed_traj_df["end_step"].to_numpy()
         elif position_name == "target":
             reached_target_df = self.get_reached_target_df()
             reached_position_steps = reached_target_df["reached_step"].to_numpy()
@@ -1413,13 +1545,41 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         return distances
 
+    def get_position_from_name(self, position_name: str = "target"):
+        """
+        self.get_position_from_name()
+
+        Obtain a position from its name.
+
+        Args:
+        - position_name (str, optional): Name of the position to obtain.
+            Options are 'start', 'reset', or 'target'. Default is 'target'.
+
+        Returns:
+        - position (1D np.ndarray or None): The specified position, or None if not set.
+        """
+
+        if position_name == "start":
+            position = self.start_position
+        elif position_name == "reset":
+            position = self.reset_position
+        elif position_name == "target":
+            position = self.target_position
+        else:
+            raise NotImplementedError(
+                f"Position name must be 'start', 'reset', or 'target', but got "
+                f"{position_name}."
+            )
+
+        return position
+
     def get_position_visits(
         self,
         position: None | np.ndarray[tuple[int], np.dtype[np.float64]] = None,
         position_name: str = "target",
         t_start: float | None = None,
         t_end: float | None = None,
-        min_pts_btw: int = 30,
+        min_steps_btw: int = 30,
         min_dist: float = 0.1,
     ):
         """
@@ -1436,8 +1596,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         - t_start (float, optional): Start time for plotting, in seconds.
             Default is None.
         - t_end (float, optional): End time for plotting, in seconds. Default is None.
-        - min_pts_btw (int, optional): Minimum number of points between visits.
-            Default is 30.
+        - min_steps_btw (int, optional): Minimum number of steps between visits for
+            inclusion. Default is 30.
         - min_dist (float, optional): Minimum distance to consider a visit.
             Default is 0.1.
 
@@ -1450,17 +1610,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         positions = np.asarray(self.history["pos"])[startid : endid + 1]
 
         if position is None:
-            if position_name == "target":
-                position = self.target_position
-            elif position_name == "reset":
-                position = self.reset_position
-            elif position_name == "start":
-                position = self.start_position
-            else:
-                raise ValueError(
-                    f"Can only infer `position` from `position_name` if the latter is "
-                    f"'target', 'reset' or 'start', but got {position_name}."
-                )
+            position = self.get_position_from_name(position_name)
             if position is None:
                 raise ValueError(f"{position_name} is set to None.")
 
@@ -1468,7 +1618,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         distances = np.linalg.norm(positions - position, ord=2, axis=1)
         visit_indices = gen_util.get_minima_indices(
-            distances, min_pts_btw=min_pts_btw, minimum=min_dist
+            distances, min_pts_btw=min_steps_btw, minimum=min_dist
         )
 
         visit_indices = visit_indices[
@@ -1521,9 +1671,9 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         end are reached, and if so, resets the agent.
 
         Attributes:
-        - current_trajectory_length (int): Current trajectory length to date.
+        - current_trajectory_length (int): Current trajectory length.
         - manual_pos (bool): Whether position was set manually.
-        - num_steps_total (int): Total number of steps taken to date.
+        - num_steps_total (int): Total number of steps taken.
         - pos (1D np.ndarray): Position.
         - t (float): Current time.
 
@@ -1735,6 +1885,9 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         - sub_ax (plt.Axes): Subplot axis with the agent's occupancy plotted.
         """
 
+        if "t_stop" in kwargs.keys():
+            warnings.warn("Did you mean 't_end' instead of 't_stop'?")
+
         _, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
         position = np.asarray(self.history["pos"])[startid : endid + 1]
 
@@ -1819,13 +1972,13 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         else:
             return sub_ax
 
-    def plot_trajectories_to_date(
+    def plot_trajectory_lengths(
         self, in_min: bool = True, autosave: bool | None = None
     ) -> plt.Axes:
         """
-        self.plot_trajectories_to_date()
+        self.plot_trajectory_lengths()
 
-        Plot the trajectory lengths to date.
+        Plot the trajectory lengths.
 
         Args:
         - in_min (bool, optional): Whether to plot time axis in minutes, instead
@@ -1834,16 +1987,16 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         global autosave setting for ratinabox is used. Default is None.
 
         Returns:
-        - sub_ax (plt.Axes): Subplot axis with the trajectory lengths to date plotted.
+        - sub_ax (plt.Axes): Subplot axis with the trajectory lengths plotted.
         """
 
-        traj_leng_to_date = self.get_trajectory_lengths_to_date()
+        traj_lengths = self.get_trajectory_lengths()
         sub_ax, _ = plot_fcts.plot_trajectory_lengths(
-            dt=self.dt, trajectory_lengths=traj_leng_to_date, in_min=in_min  # type: ignore[has-type]
+            dt=self.dt, trajectory_lengths=traj_lengths, in_min=in_min  # type: ignore[has-type]
         )
 
         fig = sub_ax.figure
-        plot_util.save_figure(fig, "trajectories_to_date", save=autosave)
+        plot_util.save_figure(fig, "trajectory_lengths", save=autosave)
 
         return sub_ax
 
@@ -1910,6 +2063,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         color: str = "k",
         tol_prop_to_speed_dt: float | None = None,
         zoom_prop: float | None = None,
+        plot_rel: bool = False,
         mark_below_tolerance: bool = False,
         in_min: bool = True,
         autosave: bool | None = None,
@@ -1935,8 +2089,11 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         - color (str, optional): Trajectory point color. Default is 'k'.
         - tol_prop_to_speed_dt (float, optional): Proportion of the tolerance to
             speed * dt to mark on plot. Default is None.
-        - zoom_prop (float, optional): Proportion of the maximum distance measured
-            to zoom plot in on. Default is None.
+        - zoom_prop (float, optional): Proportion of the maximum threshold measured
+            to zoom plot in on. If plot_rel is True, proportion of the maximum relative
+            distance measured is used instead. Default is None.
+        - plot_rel (bool, optional): Whether to plot the distance relative to the
+            tolerance threshold. Default is False.
         - mark_below_tolerance (bool, optional): Whether to mark points below the
             tolerance. Default is False.
         - in_min (bool, optional): Whether to plot time axis in minutes. Default is
@@ -1956,21 +2113,12 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         positions = np.asarray(self.history["pos"])[startid : endid + 1]
 
         if position is None:
-            if position_name == "target":
-                position = self.target_position
-                if tol_prop_to_speed_dt is None:
-                    tol_prop_to_speed_dt = self.target_reached_within_tol_prop_to_speed_dt  # type: ignore[attr-defined]
-            elif position_name == "reset":
-                position = self.reset_position
-                if tol_prop_to_speed_dt is None:
+            position = self.get_position_from_name(position_name)
+            if tol_prop_to_speed_dt is None:
+                if position_name == "reset":
                     tol_prop_to_speed_dt = self.reset_reached_within_tol_prop_to_speed_dt  # type: ignore[attr-defined]
-            elif position_name == "start":
-                position = self.start_position
-            else:
-                raise ValueError(
-                    f"Can only infer `position` from `position_name` if the latter is "
-                    f"'target', 'reset' or 'start', but got {position_name}."
-                )
+                else:
+                    tol_prop_to_speed_dt = self.target_reached_within_tol_prop_to_speed_dt  # type: ignore[attr-defined]
             if position is None:
                 raise ValueError(f"{position_name} is set to None.")
 
@@ -1981,29 +2129,45 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         if sub_ax is None:
             _, sub_ax = plt.subplots(figsize=(8, 2))
 
-        sub_ax.plot(t, distances, alpha=alpha, lw=1, color=color)
+        ylabel = f"Distance to {position_name.replace('_', ' ')}"
+        if not plot_rel:
+            sub_ax.plot(t, distances, alpha=alpha, lw=1, color=color)
+
         if tol_prop_to_speed_dt is not None:
             speed = np.linalg.norm(np.asarray(self.history["vel"]), ord=2, axis=1)
             speed = speed[startid : endid + 1]
             y = speed * self.dt * tol_prop_to_speed_dt  # type: ignore[attr-defined]
-            sub_ax.plot(t, y, color=color, alpha=alpha / 2, lw=0.5)
+            if plot_rel:
+                plot_data = distances - y
+                sub_ax.axhline(0, color="gray", ls="dashed", lw=1, alpha=0.5)
+                ylabel = f"{ylabel}\nrelative to tolerance"
+                sub_ax.plot(t, distances - y, alpha=alpha, lw=1, color=color)
+            else:
+                plot_data = distances
+                sub_ax.plot(t, y, color=color, alpha=alpha / 2, lw=0.5)
             if zoom_prop is not None:
-                sub_ax.set_ylim(0, y.max() * zoom_prop)
+                if plot_rel:
+                    sub_ax.set_ylim(plot_data.min(), plot_data.max() * zoom_prop)
+                    plot_util.pad_axis(sub_ax, "y", pad_prop=0.05, prop_high=0)
+                else:
+                    sub_ax.set_ylim(0, y.max() * zoom_prop)
+
             if mark_below_tolerance:
                 below = np.where(distances < y)[0]
                 if len(below):
                     sub_ax.scatter(
-                        t[below], distances[below], color=color, marker=".", s=12
+                        t[below], plot_data[below], color=color, marker=".", s=12
                     )
 
-        elif zoom_prop or mark_below_tolerance:
+        elif zoom_prop or mark_below_tolerance or plot_rel:
             raise ValueError(
-                "Cannot zoom or mark below the tolerance if a tolerance is not provided."
+                "Cannot zoom or mark below the tolerance or plot relative to the "
+                "tolerance if a tolerance is not provided."
             )
 
         time_str = "Time (min)" if in_min else "Time (s)"
         sub_ax.set_xlabel(time_str)
-        sub_ax.set_ylabel(f"Distance to {position_name.replace('_', ' ')} (m)")
+        sub_ax.set_ylabel(ylabel)
         sub_ax.spines[["right", "top"]].set_visible(False)
 
         fig = sub_ax.figure
@@ -2065,7 +2229,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         **kwargs,
     ):
         """
-        self.add_position_across_time_to_plot()
+        self.add_position_spatially_to_plot()
 
         Add a position to a subplot across time.
 
@@ -2105,18 +2269,20 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         self,
         sub_ax,
         position_name="start",
+        position=None,
         y=None,
         base_s=15,
         t_start=None,
         t_end=None,
         in_min=True,
         dim_idx=0,
+        reached_only=False,
         min_steps_btw=0,
         raise_error=True,
         **kwargs,
     ):
         """
-        self.add_position_across_time_to_plot()
+        self.add_position_across_time_to_plot(sub_ax)
 
         Add a position to a subplot across time.
 
@@ -2124,14 +2290,23 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         - sub_ax (plt.Axes): Subplot to plot on.
         - position_name (str, optional): Position name to plot.
             Must be 'start', 'reset' or 'target'. Default is 'start'.
+        - y (float, optional): Y position to plot at. If None, the position value
+            is used. Default is None.
+        - position (float, optional): Position to plot at. If None, the y value
+            is used. Default is None.
         - base_s (int, optional): Base marker size. Default is 15.
         - t_start (float, optional): Start time in seconds. Default is None.
         - t_end (float, optional): End time in seconds. Default is None.
         - in_min (bool, optional): Whether to plot time axis in minutes.
             Default is True.
         - dim_idx (int, optional): Dimension index. Default is 0.
-        - raise_error (bool, optional): Whether to raise an error if no positions
-            are found for the specified position name. Default is True.
+        - reached_only (bool, optional): Whether to only plot positions that were
+            reached as targets or positions the agent was directed to. If False, all
+            visits are included. Default is False.
+        - min_steps_btw (int, optional): Minimum steps between position reaches or
+            visits for inclusion. Default is 0.
+        - raise_error (bool, optional): Whether to raise an error if no time steps
+            are found for the specified position. Default is True.
 
         Keyword args:
         - **kwargs: Additional keyword arguments passed to plt.scatter().
@@ -2146,14 +2321,21 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         y = pos_y if y is None else y
 
-        indices = self.get_reached_position_steps(
-            position_name, min_steps_btw=min_steps_btw
-        )
-        if len(indices) == 0:
-            if raise_error:
-                raise ValueError(f"No {position_name} positions reached.")
-            else:
-                return
+        if reached_only:
+            if position is not None:
+                raise ValueError(
+                    "Cannot specify 'position' if 'reached_only' is True. "
+                    "Must use 'position_name'."
+                )
+            pos_str = "reached"
+            indices = self.get_reached_position_steps(
+                position_name, min_steps_btw=min_steps_btw
+            )
+        else:
+            pos_str = "visited"
+            indices = self.get_position_visits(
+                position, position_name=position_name, min_steps_btw=min_steps_btw
+            )
 
         t, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
 
@@ -2163,8 +2345,21 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         xs = [t[x] for x in indices if x >= startid and x < endid]
         ys = [y] * len(xs)
 
-        plot_kwargs = plot_util.get_plot_marker_kwargs(position_name, base_s=base_s)
+        if len(xs) == 0:
+            if raise_error:
+                time_str = ""
+                if len(indices):
+                    time_str = " within the time range specified"
+                raise ValueError(f"{position_name} was not {pos_str}{time_str}.")
+            else:
+                return
+
+        if position_name in ["start", "reset", "target"]:
+            plot_kwargs = plot_util.get_plot_marker_kwargs(position_name, base_s=base_s)
+        else:
+            plot_kwargs = dict()
         plot_kwargs.update(kwargs)
+
         sub_ax.scatter(xs, ys, **plot_kwargs)
 
     def plot_trajectories_across_time(
@@ -2374,8 +2569,9 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         self,
         t_start: float | None = None,
         t_end: float | None = None,
+        traj_idxs: list[int] | int | None = None,
         framerate: int | float = 10,
-        sub_ax: plt.Axes | None = None,
+        ax: plt.Axes | np.ndarray | None = None,
         decay_point_size: bool = False,
         decay_point_timescale: float = 10,
         plot_agent: bool = True,
@@ -2391,8 +2587,10 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         scale_cmap_per: bool = False,
         s_2D: int | float = 15,
         rasterize_traj: bool = False,
+        separate_axes: bool = False,
+        step_bounds: list | None = None,
         autosave: bool | None = None,
-        **env_kwargs,
+        **kwargs,
     ) -> plt.Axes:
         """
         self.plot_trajectories()
@@ -2406,10 +2604,12 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         Args:
         - t_start (float, optional): Start time in seconds. Default is None.
         - t_end (float, optional): End time in seconds. Default is None.
+        - traj_idxs (list of int or int, optional): Indices of trajectories to plot.
+            If None, trajectories are plotted only based on time. Default is None.
         - framerate (int or float, optional): How many scatter points / per second of
             motion to display. Default is 10.
-        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
-            created. Default is None.
+        - ax (plt.Axes or np.ndarray, optional): Subplot(s) to plot on. If None, a new
+            subplot or array of subplots is created. Default is None.
         - decay_point_size (bool, optional): Whether to decay trajectory point size
             over time, with recent timepoints being plotted largest. Only applies to 2D
             environments. Default is False.
@@ -2441,25 +2641,37 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             Default is 15.
         - rasterize_traj (bool, optional): Whether to rasterize the trajectory scatter
             points, reducing the size of exported vector files. Default is False.
+        - separate_axes (bool, optional): Whether to plot each trajectory on separate
+            subplots. Only applies to 2D environments. If step_bounds is not provided,
+            one subplot per trajectory is created. Default is False.
+        - step_bounds (list, optional): Step bounds for each subplot, used if
+            separate_axes is True. Default is None.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
             global autosave setting for ratinabox is used. Default is None.
 
         Keyword args:
-        - **env_kwargs: Additional keyword arguments passed to
+        - **kwargs: Additional keyword arguments passed to
             self.Environment.plot_environment() if environmet is 2D.
 
         Returns:
-        - sub_ax (plt.Axes): Subplot with trajectories plotted.
+        - ax (plt.Axes or 2D np.ndarray): Subplot or array of subplots with
+            trajectories plotted.
         """
 
+        if "t_stop" in kwargs.keys():
+            warnings.warn("Did you mean 't_end' instead of 't_stop'?")
+
         dt = self.dt
-        t, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
+        t, startid, endid = self.get_trajectory_plotting_times(
+            traj_idxs=traj_idxs, t_start=t_start, t_end=t_end
+        )
+
         pos = np.asarray(self.history["pos"])
 
         skiprate = max(1, int((1 / framerate) / dt))
         t = t[::skiprate]
-        idx = np.arange(startid, endid + 1, skiprate)
-        trajectory = pos[idx]
+        full_idx = np.arange(startid, endid + 1, skiprate)
+        trajectory = pos[full_idx]
 
         time = t / 60  # in minutes
 
@@ -2469,75 +2681,154 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         elif len(time) == 0:
             raise RuntimeError("Duration too short. No time points to plot.")
 
-        trajectory_lengths = self.get_trajectory_lengths_to_date()
+        trajectory_lengths = self.get_trajectory_lengths(t_start=t_start, t_end=t_end)
+        if len(trajectory_lengths) == 0:
+            trajectory_lengths = [endid - startid + 1]
         colors = plot_util.get_trajectory_cmap_colors(
             trajectory_lengths,
             colormap,
             cmap_per=cmap_per,
             scale_cmap_per=scale_cmap_per,
-            time_idx=idx,
+            time_idx=full_idx,
         )
 
         full_traj_idx = [
             np.full(steps, i) for i, steps in enumerate(trajectory_lengths)
         ]
-        traj_idx = np.concatenate(full_traj_idx).astype(int)[idx]
+        traj_idx = np.concatenate(full_traj_idx).astype(int)[full_idx]
+        s = s_2D * np.ones_like(time)
+        if plot_traj_ends:
+            traj_ends = np.where(np.diff(traj_idx) > 0)[0]
+            traj_ends = np.append(traj_ends, len(trajectory) - 1)
+            colors[traj_ends] = mpl_colors.to_rgba("darkred")  # type: ignore[arg-type]
+            s[traj_ends] *= 2
 
         if self.Environment.dimensionality == "2D":
-            sub_ax = self.Environment.plot_environment(sub_ax=sub_ax, **env_kwargs)
+            if separate_axes:
+                if step_bounds is not None:
+                    if not len(step_bounds):
+                        raise ValueError("step_bounds cannot be an empty list.")
+                    # check that step_bounds are consecutively increasing
+                    if not all(
+                        step_bounds[i] <= step_bounds[i + 1]
+                        for i in range(len(step_bounds) - 1)
+                    ):
+                        raise ValueError(
+                            "step_bounds must be consecutively increasing and non-overlapping."
+                        )
+                    if isinstance(step_bounds[0], int):
+                        # convert to nested list of starts and stops
+                        step_bounds = [
+                            (step_bounds[i], step_bounds[i + 1])
+                            for i in range(len(step_bounds) - 1)
+                        ]
+                    if startid > np.min(step_bounds) or endid + 1 < np.max(step_bounds):
+                        raise ValueError(
+                            "step_bounds must be within the plotting time bounds."
+                        )
+                    # get traj_idx
+                    traj_idx = np.full_like(time, -1)
+                    for i, (start, stop) in enumerate(step_bounds):
+                        indices = np.where((full_idx >= start) & (full_idx < stop))[0]
+                        traj_idx[indices] = i
 
-            if plot_target and self.target_position is not None:
+                    n_traj = len(step_bounds)
+                    sub_ax_idxs = traj_idx
+                else:
+                    n_traj = len(trajectory_lengths)
+                    sub_ax_idxs = traj_idx
+                if ax is None:
+                    n_cols = min(4, n_traj)
+                    n_rows = int(np.ceil(n_traj / n_cols))
+                    fig, ax = plt.subplots(
+                        nrows=n_rows,
+                        ncols=n_cols,
+                        figsize=(n_cols * 2, n_rows * 1.8),
+                        squeeze=False,
+                    )
+                    ax1D = ax.ravel()
+                else:
+                    ax1D = np.asarray(ax).reshape(-1)
+                    if len(ax1D) < n_traj:
+                        raise ValueError(
+                            f"Not enough subplots provided ({len(ax1D)}) to plot "
+                            f"all trajectories ({n_traj})."
+                        )
+            else:
+                sub_ax_idxs = np.zeros_like(traj_idx)
+                if ax is None:
+                    ax1D = np.asarray([None])
+                else:
+                    ax1D = np.asarray(ax).ravel()
+
+            for i, idx in enumerate(np.unique(np.sort(sub_ax_idxs))):
+                last_traj = idx == np.max(sub_ax_idxs)
+                indices = np.where(sub_ax_idxs == idx)[0]
+                sub_ax_time = time[indices]
+
+                sub_ax = self.Environment.plot_environment(sub_ax=ax1D[i], **kwargs)
+
+                if last_traj and plot_target and self.target_position is not None:
+                    sub_ax.scatter(
+                        *self.target_position,
+                        zorder=5,
+                        alpha=target_alpha,
+                        label="target",
+                        **plot_util.get_plot_marker_kwargs("target"),
+                    )
+
+                sub_ax_s = s[indices]
+                if decay_point_size:
+                    if plot_traj_ends:
+                        sub_ax_ends = np.where(sub_ax_s > s_2D)[0]
+                    sub_ax_s = sub_ax_s * np.exp(
+                        (sub_ax_time - sub_ax_time[-1]) / decay_point_timescale
+                    )
+                    sub_ax_s[
+                        (sub_ax_time[-1] - sub_ax_time) > 1.5 * decay_point_timescale
+                    ] *= 0
+                    if plot_traj_ends and len(sub_ax_ends):
+                        sub_ax_s[sub_ax_ends] = s_2D * 2
+
                 sub_ax.scatter(
-                    *self.target_position,
-                    zorder=5,
-                    alpha=target_alpha,
-                    label="target",
-                    **plot_util.get_plot_marker_kwargs("target"),
+                    *trajectory[indices].T,
+                    s=sub_ax_s,
+                    alpha=alpha,
+                    zorder=2,
+                    c=colors[indices],
+                    lw=0,
+                    rasterized=rasterize_traj,
                 )
 
-            s = s_2D * np.ones_like(time)
-            if decay_point_size == True:
-                s = s_2D * np.exp((time - time[-1]) / decay_point_timescale)
-                s[(time[-1] - time) > 1.5 * decay_point_timescale] *= 0
+                if last_traj and plot_agent:
+                    head_direction = None
+                    if plot_head_direction:
+                        head_direction = self.history["head_direction"][full_idx[-1]]
 
-            if plot_traj_ends == True and len(self.trajectory_df) - 1 > 0:
-                ends = np.where(np.diff(traj_idx) > 0)[0]
-                ends = np.append(ends, len(trajectory) - 1)
-                s[ends] = s_2D * 2
-                # set last colormap value to dark red
-                colors[ends] = mpl_colors.to_rgba("darkred")  # type: ignore[arg-type]
+                    self.add_agent_to_plot(
+                        sub_ax,
+                        coords=trajectory[-1],
+                        agent_color=agent_color,
+                        head_direction=head_direction,
+                        zorder=3,
+                        s=s_2D * 2.75,
+                        alpha=0.9,
+                    )
 
-            sub_ax.scatter(
-                *trajectory.T,
-                s=s,
-                alpha=alpha,
-                zorder=2,
-                c=colors,
-                lw=0,
-                rasterized=rasterize_traj,
-            )
-
-            if plot_agent == True:
-                head_direction = None
-                if plot_head_direction:
-                    head_direction = self.history["head_direction"][idx[-1]]
-
-                self.add_agent_to_plot(
-                    sub_ax,
-                    coords=trajectory[-1],
-                    agent_color=agent_color,
-                    head_direction=head_direction,
-                    zorder=3,
-                    s=s_2D * 2.75,
-                    alpha=0.9,
-                )
+            if len(ax1D) > i:
+                for j in range(i + 1, len(ax1D)):
+                    ax1D[j].axis("off")
 
         if self.Environment.dimensionality == "1D":
-            sub_ax = self.plot_trajectories_across_time(
+            if separate_axes:
+                raise NotImplementedError(
+                    "separate_axes is only implemented for 2D environments."
+                )
+            ax = self.plot_trajectories_across_time(
                 t_start=t_start,
                 t_end=t_end,
                 framerate=framerate,
-                sub_ax=sub_ax,
+                sub_ax=ax,
                 alpha=alpha,
                 color=colors,
                 s=0.02,
@@ -2547,10 +2838,10 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 autosave=False,
             )
 
-        fig = sub_ax.figure
+        fig = np.asarray(ax).ravel()[-1].figure
         plot_util.save_figure(fig, "trajectory", save=autosave)
 
-        return sub_ax
+        return ax
 
     def plot_trajectory_edges(
         self,
@@ -2567,7 +2858,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         plot_ends: bool = True,
         in_min: bool = True,
         autosave: bool | None = None,
-        **env_kwargs,
+        **kwargs,
     ) -> plt.Axes:
         """
         self.plot_trajectory_edges()
@@ -2602,12 +2893,15 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             global autosave setting for ratinabox is used. Default is None.
 
         Keyword args:
-        - **env_kwargs: Additional keyword arguments passed to
+        - **kwargs: Additional keyword arguments passed to
             self.Environment.plot_environment() if environmet is 2D.
 
         Returns:
          - sub_ax (plt.Axes): Subplot with trajectory edges plotted.
         """
+
+        if "t_stop" in kwargs.keys():
+            warnings.warn("Did you mean 't_end' instead of 't_stop'?")
 
         t, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
         pos = np.asarray(self.history["pos"])
@@ -2619,7 +2913,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             colormap = "crest"
         cmap = sns.color_palette(colormap, as_cmap=True)
 
-        actual_trajectory_lengths = self.get_trajectory_lengths_to_date()
+        actual_trajectory_lengths = self.get_trajectory_lengths()
         all_ends = np.cumsum(actual_trajectory_lengths)
 
         traj_plot_components = list()
@@ -2636,7 +2930,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             raise ValueError("At least 'plot_starts' or 'plot_ends' must be True.")
 
         if self.Environment.dimensionality == "2D":
-            sub_ax = self.Environment.plot_environment(sub_ax=sub_ax, **env_kwargs)
+            sub_ax = self.Environment.plot_environment(sub_ax=sub_ax, **kwargs)
         elif self.Environment.dimensionality == "1D" and sub_ax is None:
             _, sub_ax = plt.subplots(figsize=(3, 1.5))
         else:
@@ -3251,7 +3545,8 @@ class OpenFieldAgent(ResetableAgent):
         "no_target_factor": 1,  # factor for not setting any target for a trajectory
         "trajectory_length": 2000,  # int or iterable of ints
         "num_trajectories": 10,  # number of trajectory lengths to sample
-        "num_random_walk_steps": 100,  # number of steps to random walk, if target is not in sight
+        "num_random_walk_steps": 300,  # number of steps to random walk, if target is not in sight
+        "wait_between_same_target": 300,  # number of steps to wait before a target can be reached a second time
         "always_log_teleportation": False,  # whether to log teleportation events when they occur
     }
 
@@ -3262,6 +3557,7 @@ class OpenFieldAgent(ResetableAgent):
     List of methods (in addition to ratinabox.Agent methods):
         • self.set_all_positions()
         • self.sample_position_within_tolerance()
+        • self.get_position()
         • self.get_target_probability_df()
         • self.check_target_reached_during_random_walk()
         • self.check_if_target_is_in_sight()
@@ -3275,6 +3571,7 @@ class OpenFieldAgent(ResetableAgent):
         • self.get_teleport_rotated_velocity()
         • self.get_teleport_coords_if_applicable()
         • self.log_teleportation()
+        • self.log_target_reach_times()
         • self.reset()
         • self.update()
         • self.get_agent_color_for_trajectory()
@@ -3291,7 +3588,7 @@ class OpenFieldAgent(ResetableAgent):
         "no_target_factor": 1,  # factor for not setting any target for a trajectory
         "trajectory_length": 2000,  # int or iterable of ints
         "num_trajectories": 10,  # number of trajectory lengths to sample
-        "num_random_walk_steps": 100,  # number of steps to random walk, if target is not in sight
+        "num_random_walk_steps": 300,  # number of steps to random walk, if target is not in sight
         "wait_between_same_target": 300,  # number of steps to wait before a target can be reached a second time
         "always_log_teleportation": False,  # whether to log teleportation events when they occur
     }
@@ -3326,9 +3623,11 @@ class OpenFieldAgent(ResetableAgent):
         if not isinstance(Env, env.OpenField):
             raise TypeError("Env must be an OpenField object.")
 
-        self.allow_teleportation()
+        self.allow_teleportation(False)  # only enable after initialization
 
         super().__init__(Env, self.params)
+
+        self.allow_teleportation(True)
 
     @property
     def teleportation_allowed(self) -> bool:
@@ -3702,6 +4001,46 @@ class OpenFieldAgent(ResetableAgent):
         )
 
         return sampled_position
+
+    def get_position(
+        self,
+        position_name: str = "start",
+        dim_idx: int | None = None,
+        raise_error: bool = True,
+    ) -> float | None:
+        """
+        Get a specific position of the agent.
+
+        Args:
+        - position_name (str, optional): Position name to get.
+            Must be 'start', 'reset' or 'target'. Default is 'start'.
+        - dim_idx (int, optional): Dimension index. Default is None.
+        - raise_error (bool, optional): Whether to raise an error if no position
+            is found for the specified position name. Default is True.
+
+        Returns:
+        - position (float | 1D np.ndarray | None): The requested position value.
+        """
+
+        object_type_name_to_num_dict = self.Environment.object_type_name_to_num_dict
+
+        if position_name in object_type_name_to_num_dict.keys():
+            object_type_idx = object_type_name_to_num_dict[position_name]
+            position = self.Environment.objects["objects"][object_type_idx]
+
+            if dim_idx is not None:
+                position = position[dim_idx]
+
+        elif position_name in ["start", "reset", "target"]:
+            position = super().get_position(
+                position_name=position_name, dim_idx=dim_idx, raise_error=raise_error
+            )
+        else:
+            raise NotImplementedError(
+                "Position name must be 'start', 'reset' or 'target' or an object name, "
+                f"but got {position_name}."
+            )
+        return position
 
     def get_target_probability_df(self) -> pd.DataFrame:
         """
@@ -4266,6 +4605,33 @@ class OpenFieldAgent(ResetableAgent):
 
         print(log_str)
 
+    def log_target_reach_times(self, target_name="all", log_as_time=True, **kwargs):
+        """
+        self.log_target_reach_times()
+
+        Log the target reach times.
+
+        Args:
+        - target_name (str): Target for which to log reach times. If 'all', reach times
+            are logged for all targets (other than 'no_target'). Default is "all".
+        - log_as_time (bool, optional): Whether to log reach times as time (min)
+            instead of steps. Default is True.
+        Keyword args:
+        - **kwargs: Keyword arguments passed to super().log_target_reach_times().
+        """
+
+        df = self.get_filtered_target_df(target_name=target_name, reached_only=False)
+
+        if len(df) == 0:
+            print(f"{target_name} object was never a target.")
+        else:
+            super().log_target_reach_times(
+                target_idxs=df.index,
+                target_name=target_name,
+                log_as_time=log_as_time,
+                **kwargs,
+            )
+
     def reset(self, target: str | None = None):
         """
         self.reset()
@@ -4361,6 +4727,161 @@ class OpenFieldAgent(ResetableAgent):
             drift_to_random_strength_ratio=drift_to_random_strength_ratio,
             **kwargs,
         )
+
+    def get_filtered_target_df(self, target_name, reached_only=False):
+        """
+        self.get_filtered_target_df(target_name)
+
+        Obtained the target DataFrame filtered based on the target name and reach status.
+
+        Args:
+        - target_name (str): The name of the target to filter by.
+        - reached_only (bool): If True, only include dataframe lines for when target
+            was reached. Default is False.
+
+        Returns:
+        - filtered_df (pd.DataFrame): The filtered target DataFrame.
+        """
+
+        if target_name == "all":
+            filtered_df = self.target_df.loc[
+                self.target_df["object_type_name"] != "no_target"
+            ]
+        else:
+            if target_name not in self.Environment.object_df["object_type_name"].values:
+                raise ValueError(
+                    f"Position name {target_name} not in environment object types."
+                )
+
+            filtered_df = self.target_df[
+                self.target_df["object_type_name"] == target_name
+            ]
+
+        if reached_only:
+            filtered_df = filtered_df[~filtered_df["reached_step"].isna()]
+
+        return filtered_df
+
+    def get_position_from_name(self, position_name: str = "target"):
+        """
+        self.get_position_from_name()
+
+        Obtain a position from its name.
+
+        Args:
+        - position_name (str, optional): Name of the position to obtain.
+            Options are 'start', 'reset', or 'target'. Default is 'target'.
+
+        Returns:
+        - position (1D np.ndarray or None): The specified position, or None if not set.
+        """
+
+        if position_name in ["start", "reset", "target"]:
+            position = super().get_position_from_name(position_name=position_name)
+        else:
+            if (
+                position_name
+                not in self.Environment.object_df["object_type_name"].values
+            ):
+                raise ValueError(
+                    f"Position name {position_name} not in environment object types."
+                )
+
+            object_type_idx = self.Environment.object_type_name_to_num_dict[
+                position_name
+            ]
+            position = self.Environment.objects["objects"][object_type_idx]
+
+        return position
+
+    def get_reached_position_steps(
+        self, position_name: str = "reset", min_steps_btw: int = 0
+    ) -> np.ndarray:
+        """
+        self.get_reached_position_steps()
+
+        Obtain the steps at which the agent reached the specified position. This
+        differs from get_position_visits, as it only includes steps when the agent was
+        assigned that position as a target, and reached it.
+
+        Args:
+        - position_name (str, optional): Name of the position to check for.
+            Options are 'start', 'reset', or 'target'. Default is 'reset'.
+        - min_steps_btw (int, optional): Minimum difference between steps to consider.
+            Default is 0.
+
+        Returns:
+        - reached_position_steps (1D np.ndarray): Steps at which the agent
+            reached the specified position.
+        """
+
+        if position_name in ["start", "reset", "target"]:
+            reached_position_steps = super().get_reached_position_steps(
+                position_name, min_steps_btw=min_steps_btw
+            )
+
+        else:
+            if position_name == "all_targets":
+                position_name = "all"
+
+            reached_position_steps = self.get_filtered_target_df(
+                position_name, reached_only=True
+            )["reached_step"]
+
+            reached_position_steps = self.get_filtered_target_df(
+                "all", reached_only=True
+            )["reached_step"]
+
+            reached_position_steps = reached_position_steps.astype(int)
+
+            if min_steps_btw > 0 and len(reached_position_steps) > 1:
+                step_diff = np.diff(reached_position_steps)
+                keep_steps = np.concatenate(
+                    [[0], np.where(step_diff >= min_steps_btw)[0] + 1]
+                )
+                reached_position_steps = reached_position_steps[keep_steps]
+
+        return reached_position_steps
+
+    def get_target_step_bounds(self, traj_idxs=None, t_start=None, t_end=None):
+        """
+        self.get_target_step_bounds()
+
+        Obtain the step bounds for specific target trajectories. If time and trajectory
+        constraints are provided, they are used to truncate the target step bounds.
+
+        Args:
+        - traj_idxs (int or list of int, optional): Trajectory indices to plot.
+            Default is None.
+        - t_start (float, optional): Start time, used to further constrain the
+            plotting times. Default is None.
+        - t_end (float, optional): End time, used to further constrain the plotting
+            times. Default is None.
+
+        Returns:
+        - step_bounds (list): List of time step bounds for each target, within the
+            requested time and trajectory constraints.
+        """
+
+        t, startid, endid = self.get_trajectory_plotting_times(
+            traj_idxs=traj_idxs, t_start=t_start, t_end=t_end
+        )
+
+        targ_start_steps = self.target_df["set_step"].values
+        targ_num_steps = self.target_df["num_steps_total"].values
+        targ_end_steps = targ_start_steps + targ_num_steps
+        if np.isnan(targ_end_steps[-1]):
+            targ_end_steps[-1] = endid
+
+        targ_start_steps = np.maximum(targ_start_steps, startid)
+        targ_end_steps = np.minimum(targ_end_steps, endid)
+
+        step_bounds = list()
+        for start, end in zip(targ_start_steps, targ_end_steps):
+            if end > start:
+                step_bounds.append((start, end))
+
+        return step_bounds
 
     def get_agent_color_for_trajectory(self, t: float | None = None) -> str:
         """
@@ -4541,11 +5062,56 @@ class OpenFieldAgent(ResetableAgent):
             alpha=0.6,
         )
 
+    def add_position_across_time_to_plot(
+        self,
+        sub_ax,
+        position_name="target",
+        base_s=15,
+        **kwargs,
+    ):
+        """
+        self.add_position_across_time_to_plot(sub_ax)
+
+        Add a position to a subplot across time.
+
+        Args:
+        - sub_ax (plt.Axes): Subplot to plot on.
+        - position_name (str, optional): Position name to plot.
+            Must be 'target' for the current target or the name of an object.
+            Default is 'target'.
+        - base_s (int, optional): Base marker size. Default is 15.
+
+        Keyword args:
+        - **kwargs: Additional keyword arguments passed to self.add_position_across_time_to_plot().
+        """
+
+        if position_name == "target" and self.target_position is None:
+            raise ValueError("No current target to plot. Please specify object name.")
+
+        if position_name in self.Environment.object_df["object_type_name"].values:
+            plot_position_name = "target"
+        else:
+            plot_position_name = position_name
+
+        plot_kwargs = plot_util.get_plot_marker_kwargs(
+            plot_position_name, base_s=base_s
+        )
+        kwargs.update(plot_kwargs)
+
+        super().add_position_across_time_to_plot(
+            sub_ax, position_name=position_name, base_s=base_s, **kwargs
+        )
+
     def plot_trajectories(  # type: ignore[override]
         self,
+        t_start: float | None = None,
         t_end: float | None = None,
+        traj_idxs: Sequence[int] | None = None,
         target_alpha: float = 0.7,
+        by_target: bool = False,
         plot_target: bool = True,
+        separate_axes: bool = False,
+        step_bounds: list | None = None,
         no_legend: bool = False,
         autosave: bool | None = None,
         **kwargs,
@@ -4567,29 +5133,47 @@ class OpenFieldAgent(ResetableAgent):
         - **kwargs: Additional keyword arguments.
 
         Returns:
-        - sub_ax (plt.Axes): Subplot with trajectory plotted.
+        - ax (plt.Axes or np.ndarray): Subplot or subplots with trajectories plotted.
         """
+        if by_target:
+            if not separate_axes:
+                raise ValueError(
+                    "If 'by_target' is True, 'separate_axes' must also be True."
+                )
+            if step_bounds is not None:
+                raise ValueError(
+                    "If 'by_target' is True, 'step_bounds' must not be passed."
+                )
+            step_bounds = self.get_target_step_bounds(
+                traj_idxs=traj_idxs, t_start=t_start, t_end=t_end
+            )
+            traj_idxs = None
 
-        sub_ax = super().plot_trajectories(
+        ax = super().plot_trajectories(
+            t_start=t_start,
             t_end=t_end,
             target_alpha=target_alpha,
             plot_target=False,
+            traj_idxs=traj_idxs,
+            separate_axes=separate_axes,
+            step_bounds=step_bounds,
             agent_color=self.get_agent_color_for_trajectory(t=t_end),
             autosave=False,
             **kwargs,
         )
 
-        legend = sub_ax.get_legend()
-        if no_legend and legend is not None:
-            legend.remove()
+        for sub_ax in np.asarray(ax).ravel():
+            legend = sub_ax.get_legend()
+            if no_legend and legend is not None:
+                legend.remove()
 
         if plot_target:
-            self.add_target_to_plot(sub_ax, t=t_end)
+            self.add_target_to_plot(sub_ax, t=t_end)  # last one
 
         fig = sub_ax.figure
         plot_util.save_figure(fig, "trajectory", save=autosave)
 
-        return sub_ax
+        return ax
 
     def plot_trajectory_targets(
         self,

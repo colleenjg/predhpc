@@ -241,7 +241,7 @@ def get_oscillation_df(firingrates, window=5, amp_thr=0.1):
         with columns:
             - "neuron_idx" (int): Neuron index
             - "start_frame" (int): Start frame of oscillation
-            - "stop_frame" (int): Stop frame of oscillation
+            - "end_frame" (int): End frame of oscillation
             - "num_frames" (int): Number of frames in oscillation
             - "mean_amp" (float): Mean amplitude of oscillation
             - "median_amp" (float): Median amplitude of oscillation
@@ -276,7 +276,7 @@ def get_oscillation_df(firingrates, window=5, amp_thr=0.1):
         columns=[
             "neuron_idx",
             "start_frame",
-            "stop_frame",
+            "end_frame",
             "num_frames",
             "mean_amp",
             "median_amp",
@@ -285,10 +285,10 @@ def get_oscillation_df(firingrates, window=5, amp_thr=0.1):
     idx = 0
     for i in range(num_neurons):
         edges = gen_util.get_nonzero_edges(flat_cumsum[:, i], num_consec_thr=window)
-        for start, stop in edges.T:
+        for start, end in edges.T:
             start -= n_before
-            stop += n_after
-            oscillation = np.absolute(np.diff(firingrates[start:stop, i]))
+            end += n_after
+            oscillation = np.absolute(np.diff(firingrates[start:end, i]))
             mean_amp = np.mean(oscillation)
             med_amp = np.median(oscillation)
             if mean_amp < amp_thr or med_amp < amp_thr:
@@ -296,8 +296,8 @@ def get_oscillation_df(firingrates, window=5, amp_thr=0.1):
 
             oscillation_df.loc[idx, "neuron_idx"] = i
             oscillation_df.loc[idx, "start_frame"] = start
-            oscillation_df.loc[idx, "stop_frame"] = stop
-            oscillation_df.loc[idx, "num_frames"] = stop - start
+            oscillation_df.loc[idx, "end_frame"] = end
+            oscillation_df.loc[idx, "num_frames"] = end - start
             oscillation_df.loc[idx, "mean_amp"] = mean_amp
             oscillation_df.loc[idx, "median_amp"] = med_amp
 

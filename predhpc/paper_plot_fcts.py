@@ -360,7 +360,7 @@ def plot_single_neuron_rate_timeseries(
     sub_ax.set_ylabel("")
     plot_util.expand_ticks(sub_ax, axis="x", num_ticks=7, alternating=True, round_dec=1)
     NeuronLayer.Agent.add_position_across_time_to_plot(
-        sub_ax=sub_ax, position_name="target", alpha=0.8, y=13.6
+        sub_ax=sub_ax, position_name="reward", alpha=0.8, y=13.6
     )
 
     configure_neural_activity_axis(sub_ax)
@@ -419,7 +419,7 @@ def plot_BTSP_kernel(Pyrs, xlims=None):
     )
 
     if xlims is None:
-        xlims = [-10, 10]
+        xlims = [-14, 10]
 
     sub_ax = plot_util.plot_summed_exp_kernel(
         dt=Ag.dt,
@@ -455,8 +455,8 @@ def plot_linear_summary(learner):
     _, _, PCs, _ = ext_util.extract_objects_from_Pyrs(learner.Pyrs)
 
     plot_kwargs = {
-        "hspace": 0.37,
-        "height_ratios": [0.1, 0.1, 0.42, 0.14, 0.14, 0.14],
+        "hspace": 0.38,
+        "height_ratios": [0.1, 0.1, 0.45, 0.13, 0.13, 0.13],
         "figsize": (5.8, 8.3),
         "lw": LW,
         "s": 1.2,
@@ -479,7 +479,7 @@ def plot_linear_summary(learner):
     ax1D[0].set_yticks([0, 3, 6])
     ax1D[0].spines["left"].set_bounds(0, 6)
     plot_util.expand_ticks(
-        ax1D[-1], axis="x", num_ticks=9, alternating=True, round_dec=1
+        ax1D[-1], axis="x", num_ticks=7, alternating=True, round_dec=1
     )
     plot_util.pad_axis(ax1D[0], axis="x", pad_prop=0.01, prop_high=0)
     ax1D[0].set_xlim([None, ax1D[0].get_xticks()[-1]])
@@ -1476,7 +1476,7 @@ def plot_target_shift_PFs(
     return ax1D
 
 
-def plot_openfield_components(Pyrs, titles=False):
+def plot_openfield_components(Pyrs, titles=False, BTSP_trajectory=True):
     """
     plot_openfield_components(Pyrs)
 
@@ -1510,17 +1510,27 @@ def plot_openfield_components(Pyrs, titles=False):
     Env.plot_environment(
         sub_ax=env_sub_ax, scale_loc=(1.62, 1.88), scale_length=0.5, **kwargs
     )
+    if BTSP_trajectory:
+        BTSP_times = Pyrs.SomaticCompartment.get_BTSP_steps() * Ag.dt
+        if len(BTSP_times) == 0:
+            raise RuntimeError("No BTSP events found for Pyrs.SomaticCompartment.")
+        pre, post = Pyrs.SomaticCompartment.get_estimated_num_steps_pre_post_BTSP(
+            as_time=True
+        )
+        kwargs["t_start"] = max(0, BTSP_times[0] - pre)
+        kwargs["t_end"] = BTSP_times[0] + post
+        kwargs["colormap"] = Pyrs.SomaticCompartment.get_BTSP_kernel_based_cmap(
+            t_pre=pre, t_post=post
+        )
+    else:
+        kwargs["traj_idxs"] = [0]
 
     if titles:
-        traj_sub_ax.set_title("Example trajectory", y=y)
-    traj_idx = 4
-    t_start = Ag.trajectory_df.loc[traj_idx, "start_time"] + 1
-    t_end = Ag.trajectory_df.loc[traj_idx, "stop_time"]
-    t_end = min(t_end, t_start + 90)
+        title = "Trajectory used for BTSP" if BTSP_trajectory else "Example trajectory"
+        traj_sub_ax.set_title(title, y=y)
+
     Ag.plot_trajectories(
-        sub_ax=traj_sub_ax,
-        t_start=t_start,
-        t_end=t_end,
+        ax=traj_sub_ax,
         framerate=8,
         alpha=0.4,
         s_2D=5,

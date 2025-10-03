@@ -547,9 +547,9 @@ def plot_oscillation_events(
         df_row = oscillation_df.loc[indices[row]]
         neuron_idx = df_row["neuron_idx"]
         neuron_sub_idx = df_row["neuron_sub_idx"]
-        start, stop = df_row["start_frame"], df_row["stop_frame"]
+        start, end = df_row["start_frame"], df_row["end_frame"]
 
-        sub_ax.plot(firingrates[start:stop, neuron_idx], color=color)
+        sub_ax.plot(firingrates[start:end, neuron_idx], color=color)
 
         if order_by[0] == "neuron_idx" and neuron_idx != prev_neuron_idx:
             num = len(oscillation_df.loc[oscillation_df["neuron_idx"] == neuron_idx])
@@ -606,12 +606,12 @@ def plot_with_marked_oscillations(
         raise ValueError("sub_ax must be a matplotlib Axes object.")
 
     oscillation_df = oscillation_df.loc[
-        (oscillation_df["start_frame"] < len(t)) & (oscillation_df["stop_frame"] > 0)
+        (oscillation_df["start_frame"] < len(t)) & (oscillation_df["end_frame"] > 0)
     ]
 
     if len(oscillation_df):
         oscillation_df.loc[oscillation_df["start_frame"] < 0, "start_frame"] = 0
-        oscillation_df.loc[oscillation_df["stop_frame"] > len(t), "stop_frame"] = len(t)
+        oscillation_df.loc[oscillation_df["end_frame"] > len(t), "end_frame"] = len(t)
 
     for i in range(num_neurons):
         sub_df = oscillation_df[oscillation_df["neuron_idx"] == i]
@@ -628,7 +628,7 @@ def plot_with_marked_oscillations(
             lw=0,
         )
 
-        for startid, endid in zip(sub_df["start_frame"], sub_df["stop_frame"]):
+        for startid, endid in zip(sub_df["start_frame"], sub_df["end_frame"]):
             startid = max(0, startid)
             endid = min(len(t), endid)
 
@@ -695,31 +695,30 @@ def plot_oscillations(
         raise ValueError("sub_ax must be a matplotlib Axes object.")
 
     oscillation_df = oscillation_df.loc[
-        (oscillation_df["start_frame"] < num_frames)
-        & (oscillation_df["stop_frame"] > 0)
+        (oscillation_df["start_frame"] < num_frames) & (oscillation_df["end_frame"] > 0)
     ]
     oscillation_df.loc[oscillation_df["start_frame"] < 0, "start_frame"] = 0
-    oscillation_df.loc[oscillation_df["stop_frame"] > num_frames, "stop_frame"] = (
+    oscillation_df.loc[oscillation_df["end_frame"] > num_frames, "end_frame"] = (
         num_frames
     )
 
     frames_to_plot = list()
     for i in range(num_neurons):
         sub_df = oscillation_df[oscillation_df["neuron_idx"] == i]
-        start_frames, stop_frames = (
+        start_frames, end_frames = (
             sub_df["start_frame"].to_numpy(),
-            sub_df["stop_frame"].to_numpy(),
+            sub_df["end_frame"].to_numpy(),
         )
         if len(start_frames) == 0:
             continue
 
         if aligned:
             frames = np.concatenate(
-                [np.arange(st, en) for st, en in zip(start_frames, stop_frames)]
+                [np.arange(st, en) for st, en in zip(start_frames, end_frames)]
             )
             frames_to_plot.append(frames)
         else:
-            frames_to_plot.append(np.sum(stop_frames - start_frames))
+            frames_to_plot.append(np.sum(end_frames - start_frames))
 
     if len(frames_to_plot):
         if aligned:
@@ -740,7 +739,7 @@ def plot_oscillations(
         sub_df = oscillation_df[oscillation_df["neuron_idx"] == i]
 
         indices = list()
-        for startid, endid in zip(sub_df["start_frame"], sub_df["stop_frame"]):
+        for startid, endid in zip(sub_df["start_frame"], sub_df["end_frame"]):
             startid = max(0, startid)
             endid = min(num_frames, endid)
             indices.append(np.arange(startid, endid))
@@ -809,7 +808,7 @@ def plot_property_at_BTSP_and_closest_to_target_steps(
     x_data_type="Step",
     y_data_type="Distance",
     sub_ax=None,
-    legend=True,
+    no_legend=False,
     scale_size=True,
 ):
     """
@@ -830,7 +829,7 @@ def plot_property_at_BTSP_and_closest_to_target_steps(
     - y_data_type (str, optional): y data type. Default is "Distance".
     - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
         created. Default is None.
-    - legend (bool, optional): Whether to add a legend. Default is True.
+    - no_legend (bool, optional): Whether to skip adding a legend. Default is False.
     - scale_size (bool, optional): Whether to scale the marker size. Default is True.
 
     Returns:
@@ -863,7 +862,7 @@ def plot_property_at_BTSP_and_closest_to_target_steps(
 
             sub_ax.scatter(x_data[step], y_data[step], **plot_kwargs)
 
-        if legend and len(steps):
+        if not no_legend and len(steps):
             label = key.replace("_", " ").replace("steps ", "")
             plot_kwargs["s"] = base_s
             sub_ax.scatter([], [], label=label, **plot_kwargs)
@@ -887,7 +886,7 @@ def plot_property_at_BTSP_and_closest_to_target_steps(
     sub_ax.set_xlabel(x_data_type)
     sub_ax.set_ylabel(y_data_type)
 
-    if legend and len(all_steps):
+    if not no_legend and len(all_steps):
         sub_ax.legend(fontsize=5, loc="upper right")
 
     return sub_ax

@@ -121,7 +121,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         Args:
         - t_start (float, optional): Start time for obtaining firingrate min and max.
             Default is None.
-        - t_end (float, optional): Stop time for obtaining firingrate min and max.
+        - t_end (float, optional): End time for obtaining firingrate min and max.
             Default is None.
         - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
             Default is "all".
@@ -298,7 +298,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
 
             if t_start is not None:
                 oscillation_df = oscillation_df.loc[
-                    oscillation_df["stop_frame"] > startid
+                    oscillation_df["end_frame"] > startid
                 ]
 
                 oscillation_df.loc[
@@ -310,12 +310,12 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
                     oscillation_df["start_frame"] < endid
                 ]
 
-                oscillation_df.loc[
-                    oscillation_df["stop_frame"] > endid, "stop_frame"
-                ] = endid
+                oscillation_df.loc[oscillation_df["end_frame"] > endid, "end_frame"] = (
+                    endid
+                )
 
         oscillation_df["start_time"] = oscillation_df["start_frame"] * self.Agent.dt
-        oscillation_df["stop_time"] = oscillation_df["stop_frame"] * self.Agent.dt
+        oscillation_df["end_time"] = oscillation_df["end_frame"] * self.Agent.dt
 
         return oscillation_df
 
@@ -374,7 +374,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         Args:
         - t_start (float, optional): Time at which to start plotting data.
             Default is None.
-        - t_end (float, optional): Time at which to stop plotting data.
+        - t_end (float, optional): Time at which to end plotting data.
             Default is None.
         - num_bins (int, optional): Number of bins to use for binning the firing rates.
             Default is 100.
@@ -452,7 +452,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
             Default is "all".
         - t_start (float, optional): Time at which to start plotting data.
             Default is None.
-        - t_end (float, optional): Time at which to stop plotting data.
+        - t_end (float, optional): Time at which to end plotting data.
             Default is None.
         - plot_type (str, optional): Type of plot to make. Options are "full",
             "limited" or "individual". Default is "full".
@@ -499,10 +499,10 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         )
         if in_min:
             oscillation_df["start_time"] = oscillation_df["start_time"] / 60
-            oscillation_df["stop_time"] = oscillation_df["stop_time"] / 60
+            oscillation_df["end_time"] = oscillation_df["end_time"] / 60
 
         oscillation_df["start_frame"] -= startid
-        oscillation_df["stop_frame"] -= startid
+        oscillation_df["end_frame"] -= startid
 
         if plot_type == "full":
             sub_ax = plot_fcts.plot_with_marked_oscillations(
@@ -568,7 +568,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         Args:
         - t_start (float, optional): Time at which to start plotting data.
             Default is None.
-        - t_end (float, optional): Time at which to stop plotting data.
+        - t_end (float, optional): Time at which to end plotting data.
             Default is None.
         - ax (np.ndarray or plt.Axes, optional): Subplot or array of subplots to plot
             on (one per plotted ROI, if environment is 2D). Default is None.
@@ -655,6 +655,9 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
            (one per plotted ROI, if environment is 2D).
         """
 
+        if "t_stop" in kwargs.keys():
+            warnings.warn("Did you mean 't_end' instead of 't_stop'?")
+
         kwargs = plot_util.organize_fig_ax_kwargs(ax=ax, return_env_fig=True, **kwargs)
 
         _, ax_out = super().plot_rate_map(**kwargs)
@@ -686,14 +689,14 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         Args:
         - t_start (float, optional): Time at which to start plotting data.
             Default is None.
-        - t_end (float, optional): Time at which to stop plotting data.
+        - t_end (float, optional): Time at which to end plotting data.
             Default is None.
         - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
             Default is "all".
         - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
             created. Default is None.
         - adjust_xlim (bool, optional): Whether to adjust the x limits to the start
-            and stop times. Default is True.
+            and end times. Default is True.
         - in_min (bool, optional): Whether to plot time in minutes instead of seconds.
             Default is True.
         - norm_by (str, optional): Normalization method for the firing rates. If "none",
@@ -708,6 +711,9 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         Returns:
         - sub_ax (plt.Axes): Subplot with firing rate timeseries plotted.
         """
+
+        if "t_stop" in kwargs.keys():
+            warnings.warn("Did you mean 't_end' instead of 't_stop'?")
 
         if "linewidth" in kwargs.keys():
             lw = kwargs.pop("linewidth")
@@ -783,7 +789,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         Args:
         - t_start (float, optional): Time at which to start plotting data.
             Default is 0.
-        - t_end (float, optional): Time at which to stop plotting data.
+        - t_end (float, optional): Time at which to end plotting data.
             Default is None.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
             global autosave setting for ratinabox is used. Default is None.

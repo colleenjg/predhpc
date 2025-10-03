@@ -501,7 +501,7 @@ def plot_openfield(
     Pyrs.Agent.plot_trajectories(
         t_start=t_start,
         t_end=t_end,
-        sub_ax=ax1D[0],
+        ax=ax1D[0],
         decay_point_size=True,
         decay_point_timescale=1,
         plot_head_direction=True,

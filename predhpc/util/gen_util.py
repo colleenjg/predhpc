@@ -179,9 +179,9 @@ def get_duration_str(start_time, log=False):
     - time_str (str): Time elapsed as a string.
     """
 
-    stop_time = time.perf_counter()
+    end_time = time.perf_counter()
 
-    time_sec = stop_time - start_time
+    time_sec = end_time - start_time
     if time_sec / 3600 > 1.5:
         time_hour = int(time_sec // 3600)
         time_min = time_sec / 60 - time_hour * 60
@@ -468,7 +468,7 @@ def get_nonzero_edges(data, num_consec_thr=5):
     """
     get_nonzero_edges(data)
 
-    Obtain the start and stop edges of nonzero values in the data.
+    Obtain the start and end edges of nonzero values in the data.
 
     Args:
     - data (1D np.ndarray): Data.
@@ -476,24 +476,24 @@ def get_nonzero_edges(data, num_consec_thr=5):
         consider as an edge. Default is 5.
 
     Returns:
-    - edges (2D np.ndarray): Start and stop edges of nonzero values, with shape (2, n).
+    - edges (2D np.ndarray): Start and end edges of nonzero values, with shape (2, n).
     """
 
     start_edges = np.where((data[:-1] == 0) * (data[1:] != 0))[0] + 1
     if data[0] != 0:
         start_edges = np.insert(start_edges, 0, 0)
 
-    stop_edges = np.where((data[:-1] != 0) * (data[1:] == 0))[0] + 1
+    end_edges = np.where((data[:-1] != 0) * (data[1:] == 0))[0] + 1
     if data[-1] != 0:
-        stop_edges = np.append(stop_edges, len(data))
+        end_edges = np.append(end_edges, len(data))
 
-    if len(start_edges) != len(stop_edges):
-        raise RuntimeError("'start_edges' is not the same length as 'stop_edges'.")
+    if len(start_edges) != len(end_edges):
+        raise RuntimeError("'start_edges' is not the same length as 'end_edges'.")
 
     edges = list()
-    for start, stop in zip(start_edges, stop_edges):
-        if data[stop - 1] >= num_consec_thr:
-            edges.append([start, stop])
+    for start, end in zip(start_edges, end_edges):
+        if data[end - 1] >= num_consec_thr:
+            edges.append([start, end])
 
     edges = np.asarray(edges).T
 

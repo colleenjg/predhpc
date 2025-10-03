@@ -407,7 +407,7 @@ class TwoCompLayer(object):
         Args:
         - t_start (float, optional): Start time for obtaining firingrate min and max.
             Default is None.
-        - t_end (float, optional): Stop time for obtaining firingrate min and max.
+        - t_end (float, optional): End time for obtaining firingrate min and max.
             Default is None.
         - chosen_neurons (str, int, list or np.ndarray, optional): Neurons to consider
             for min and max firing rates. Default is "all".
@@ -567,7 +567,7 @@ class TwoCompLayer(object):
         self,
         neuron_idx: int = 0,
         target_src_name: str = "Obj",
-        min_pts_btw=30,
+        min_steps_btw=30,
         min_dist=0.05,
     ):
         """
@@ -580,7 +580,7 @@ class TwoCompLayer(object):
         - neuron_idx (int, optional): Neuron index. Default is 0.
         - target_src_name (str, optional): Name of the input layer
             (must be a place cell-derived layer). Default is "Obj".
-        - min_pts_btw (int, optional): Minimum number of steps between closest steps.
+        - min_steps_btw (int, optional): Minimum number of steps between closest steps.
             Default is 30.
         - min_dist (float, optional): Minimum distance to be considered a visit.
             Default is 0.05.
@@ -595,7 +595,7 @@ class TwoCompLayer(object):
         )
 
         visit_indices = gen_util.get_minima_indices(
-            distances, min_pts_btw=min_pts_btw, minimum=min_dist
+            distances, min_pts_btw=min_steps_btw, minimum=min_dist
         )
 
         return visit_indices
@@ -648,7 +648,7 @@ class TwoCompLayer(object):
     def get_nbr_visits_per_target(
         self,
         target_src_name: str = "Obj",
-        min_pts_btw=30,
+        min_steps_btw=30,
         min_dist=0.1,
         t_start=None,
         t_end=None,
@@ -662,7 +662,7 @@ class TwoCompLayer(object):
         Args:
         - target_src_name (str, optional): Name of the input layer
             (must be a place cell-derived layer). Default is "Obj".
-        - min_pts_btw (int, optional): Minimum number of steps between closest steps.
+        - min_steps_btw (int, optional): Minimum number of steps between closest steps.
             Default is 30.
         - min_dist (float, optional): Minimum distance to be considered a visit.
             Default is 0.1.
@@ -686,7 +686,7 @@ class TwoCompLayer(object):
             visit_indices = self.get_target_visits(
                 neuron_idx=neuron_idx,
                 target_src_name=target_src_name,
-                min_pts_btw=min_pts_btw,
+                min_steps_btw=min_steps_btw,
                 min_dist=min_dist,
             )
 
@@ -1619,7 +1619,7 @@ class TwoCompLayer(object):
         t_end=None,
         axes=None,
         k=5,
-        legend=True,
+        no_legend=False,
         autosave=None,
     ):
         """
@@ -1638,8 +1638,8 @@ class TwoCompLayer(object):
         - k (bool, optional): Number of points across which to smooth the firing rate,
         velocity and angle data backward, before the target point. If None, no
         smoothing is done. Default is 5.
-        - legend (bool, optional): Whether to include a legend in the plots.
-            Default is True.
+        - no_legend (bool, optional): Whether to skip adding a legend to the last plot.
+            Default is False.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
         global autosave setting for ratinabox is used. Default is None.
 
@@ -1683,7 +1683,10 @@ class TwoCompLayer(object):
                     smoothed = np.insert(smoothed, j, x_data[: j + 1].mean())
                 x_data = smoothed
 
-            incl_legend = i == (len(axes.ravel()) - 1) and legend
+            sub_ax_no_legend = True
+            if i == (len(axes.ravel()) - 1):
+                sub_ax_no_legend = no_legend
+
             plot_fcts.plot_property_at_BTSP_and_closest_to_target_steps(
                 steps_dict,
                 y_data=distances,
@@ -1691,7 +1694,7 @@ class TwoCompLayer(object):
                 x_data_type=x_data_type,
                 y_data_type=y_data_type,
                 sub_ax=sub_ax,
-                legend=incl_legend,
+                no_legend=sub_ax_no_legend,
             )
 
             if x_data_type == "Step":
@@ -1716,7 +1719,7 @@ class TwoCompLayer(object):
         t_start=None,
         t_end=None,
         k=5,
-        legend=True,
+        no_legend=False,
         autosave=None,
     ):
         """
@@ -1734,7 +1737,7 @@ class TwoCompLayer(object):
         - k (bool, optional): Number of points across which to smooth the firing rate,
         velocity and angle data backward, before the target point. If None, no
         smoothing is done. Default is 5.
-        - legend (bool, optional): Whether to include a legend in the plots.
+        - no_legend (bool, optional): Whether to skip adding a legend to the plots.
             Default is True.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
             global autosave setting for ratinabox is used. Default is None.
@@ -1765,7 +1768,7 @@ class TwoCompLayer(object):
                 t_end=t_end,
                 axes=axes[i],
                 k=k,
-                legend=legend,
+                no_legend=no_legend,
                 autosave=False,
             )
             title = f"Neuron {neuron_idx}"
@@ -1798,7 +1801,7 @@ class TwoCompLayer(object):
     def plot_BTSP_counts_vs_target_visits(
         self,
         target_src_name="Obj",
-        min_pts_btw=30,
+        min_steps_btw=30,
         min_dist=0.1,
         applied_only=False,
         t_start=None,
@@ -1815,7 +1818,7 @@ class TwoCompLayer(object):
         Args:
         - target_src_name (str, optional): Name of the input layer
             (must be a place cell-derived layer). Default is "Obj".
-        - min_pts_btw (int, optional): Minimum number of points between BTSP events.
+        - min_steps_btw (int, optional): Minimum number of steps between BTSP events.
             Default is 30.
         - min_dist (float, optional): Minimum distance to be considered a visit.
             Default is 0.1.
@@ -1835,7 +1838,7 @@ class TwoCompLayer(object):
 
         nbr_visits_per_target = self.get_nbr_visits_per_target(
             target_src_name=target_src_name,
-            min_pts_btw=min_pts_btw,
+            min_steps_btw=min_steps_btw,
             min_dist=min_dist,
             t_start=t_start,
             t_end=t_end,

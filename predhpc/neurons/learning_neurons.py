@@ -4,6 +4,7 @@ import warnings
 
 from matplotlib import pyplot as plt  # type: ignore[import]
 from matplotlib import markers as mpl_markers
+from matplotlib.colors import ListedColormap
 import numpy as np
 
 from ratinabox import utils as rutils  # type: ignore[import]
@@ -17,6 +18,7 @@ from predhpc.util import (
     plot_util,
     params_util,
     learn_util,
+    hyper_util,
 )
 
 if TYPE_CHECKING:
@@ -930,8 +932,8 @@ class LearnLayer(SmoothFeedForwardLayer):
         for i, start in enumerate(start_pts):
             map_axes = axes[i] if row == "num_maps" else axes[:, i]
             t_start = t[start]
-            stop = min([len(t) - 1, start + n_pts])
-            t_end = t[stop]
+            end = min([len(t) - 1, start + n_pts])
+            t_end = t[end]
             map_axes[0].set_title(f"From {t_start / 60:.2f} to {t_end / 60:.2f} min.")
 
             self.plot_rate_map(
@@ -1857,6 +1859,7 @@ class BTSPLayer(HebbianLayer):
         • self.log_num_steps_to_apply_BTSP()
         • self.get_BTSP_kernel_kwargs()
         • self.get_BTSP_kernel()
+        • self.get_estimated_BTSP_roots()
         • self.get_BTSP_step_dict()
         • self.get_BTSP_steps()
         • self.get_BTSP_info()
@@ -1918,7 +1921,7 @@ class BTSPLayer(HebbianLayer):
                 List of weight updates, each with shape (O, I_i)
         - last_BTSP_pos (list): Last position at which a BTSP event occurred.
         - last_BTSP_step (int): Last step at which a BTSP event occurred.
-        - num_BTSP_to_date (int): Number of BTSP events to date.
+        - num_BTSP (int): Number of BTSP events recorded.
 
         Args:
         - Agent (agent.ResetableAgent): Associated agent.
@@ -1940,7 +1943,7 @@ class BTSPLayer(HebbianLayer):
 
         self._init_post_BTSP_filters()
 
-        self.num_BTSP_to_date = np.zeros(self.n)  # type: ignore[attr-defined]
+        self.num_BTSP = np.zeros(self.n)  # type: ignore[attr-defined]
         # type: ignore[attr-defined]
         self.last_BTSP_step = np.full(self.n, np.nan)  # type: ignore[attr-defined]
         self.last_BTSP_pos = [None for _ in range(self.n)]  # type: ignore[attr-defined]
@@ -2270,7 +2273,7 @@ class BTSPLayer(HebbianLayer):
 
         return BTSP_kernel_kwargs
 
-    def get_BTSP_kernel(self, **kwargs):
+    def get_BTSP_kernel(self, t_pre=None, t_post=None, **kwargs):
         """
         self.get_BTSP_kernel()
 
@@ -2291,7 +2294,49 @@ class BTSPLayer(HebbianLayer):
             **kwargs,
         )
 
+        if t_pre is not None:
+            t_pre = int(np.round(t_pre / self.Agent.dt))
+            if t_pre < 0:
+                raise ValueError("t_pre must be non-negative.")
+            if t_pre > len(BTSP_kernel) - align_pt - 1:
+                raise ValueError(
+                    f"The BTSP kernel is too short for a t_pre value of {t_pre}."
+                )
+            BTSP_kernel = BTSP_kernel[align_pt - t_pre :]
+            align_pt = t_pre
+
+        if t_post is not None:
+            t_post = int(np.round(t_post / self.Agent.dt))
+            if t_post < 0:
+                raise ValueError("t_post must be non-negative.")
+            if t_post > align_pt:
+                raise ValueError(
+                    f"The BTSP kernel is too short for a t_post value of {t_post}."
+                )
+            BTSP_kernel = BTSP_kernel[: align_pt + t_post + 1]
+
         return BTSP_kernel, align_pt
+
+    def get_estimated_BTSP_roots(self, near_zero=1e-4, **kwargs):
+        """
+        self.get_estimated_BTSP_roots()
+
+        Obtain the estimated roots of the BTSP kernel.
+
+        Keyword args:
+        - **kwargs: Keyword arguments passed to signal_util.get_summed_exp().
+
+        Returns
+        - root_dict (dict): Estimated roots of the BTSP kernel. np.inf is returned if
+            no roots were found.
+        """
+
+        BTSP_kernel, align_pt = self.get_BTSP_kernel(**kwargs)
+        root_dict = hyper_util.get_root_dict(
+            BTSP_kernel, align_pt, dt=self.Agent.dt, near_zero=near_zero
+        )
+
+        return root_dict
 
     def get_BTSP_step_dict(self, apply_step=False, t_start=None, t_end=None):
         """
@@ -2500,6 +2545,49 @@ class BTSPLayer(HebbianLayer):
             )
 
         return counts
+
+    def get_estimated_num_steps_pre_post_BTSP(self, as_time=False):
+        """
+        self.get_estimated_num_steps_pre_post_BTSP()
+
+        Get the estimated number of steps used in the calculation of a BTSP event
+        before and after. The mean number of steps post is used, and the number of
+        steps pre is estimated based on the BTSP kernel roots.
+
+        Args:
+        - as_time (bool, optional): Whether to return the number of steps as time
+            instead. Default is False.
+
+        Returns:
+        - pre (int): Estimated number of steps or time before BTSP event.
+        - post (int): Estimated number of steps or time after BTSP event.
+        """
+
+        num_steps_to_apply_BTSP = self.history["num_steps_to_apply_BTSP"]
+        if len(num_steps_to_apply_BTSP) == 0:
+            raise NotImplementedError(
+                "Cannot estimate number of steps as no BTSP events have occurred."
+            )
+
+        post = int(np.mean(num_steps_to_apply_BTSP))
+
+        root_dict = self.get_estimated_BTSP_roots()
+        if isinstance(root_dict, dict):
+            time_pre = root_dict["pre_outer"]
+            time_post = root_dict["post_outer"]
+            pre = int(np.around(np.absolute(post / time_post * time_pre)))
+
+        else:
+            raise NotImplementedError(
+                "Cannot estimate number of steps pre as the kernel root estimate did "
+                "not find roots."
+            )
+
+        if as_time:
+            pre = pre * self.Agent.dt
+            post = post * self.Agent.dt
+
+        return pre, post
 
     def get_BTSP_ramp_peaks(self, t_start=None, t_end=None):
         """
@@ -2777,7 +2865,7 @@ class BTSPLayer(HebbianLayer):
 
             if self.single_BTSP:  # type: ignore[attr-defined]
                 keep_BTSP_targets = np.asarray(
-                    [targ for targ in BTSP_targets if self.num_BTSP_to_date[targ] == 0]
+                    [targ for targ in BTSP_targets if self.num_BTSP[targ] == 0]
                 )
 
             elif self.BTSP_distance_prop is not None:  # type: ignore[attr-defined]
@@ -2822,7 +2910,7 @@ class BTSPLayer(HebbianLayer):
         if len(BTSP_targets) == 0:
             return
 
-        self.num_BTSP_to_date[np.asarray(BTSP_targets)] += +1
+        self.num_BTSP[np.asarray(BTSP_targets)] += +1
         self.last_BTSP_step[np.asarray(BTSP_targets)] = self.num_steps_total - 1
         for targ in BTSP_targets:
             self.last_BTSP_pos[targ] = self.Agent.pos
@@ -3093,6 +3181,45 @@ class BTSPLayer(HebbianLayer):
             self.save_to_history()
 
         return
+
+    def get_BTSP_kernel_based_cmap(self, t_pre=14, t_post=10):
+        """
+        self.get_BTSP_kernel_based_cmap()
+
+        Obtain a colormap that tracks the strength and valence of the BTSP kernel
+        within a specific time range around the BTSP event.
+
+        Args:
+        - t_pre (float, optional): Time before the BTSP event to consider in
+            constructing the colormap. Default is 14.
+        - t_post (float, optional): Time after the BTSP event to consider in
+            constructing the colormap. Default is 10.
+
+        Returns:
+        - cmap (ListedColormap): Colormap based on the BTSP kernel.
+        """
+
+        kernel, _ = self.get_BTSP_kernel(t_pre=t_pre, t_post=t_post)
+
+        colors = np.zeros((len(kernel), 3))
+
+        if np.any(kernel < 0):
+            neg_scaled = kernel[kernel < 0] / kernel.min()
+            colors[kernel < 0] = np.stack(
+                [np.zeros_like(neg_scaled), np.zeros_like(neg_scaled), neg_scaled],
+                axis=-1,
+            )
+
+        if np.any(kernel > 0):
+            pos_scaled = kernel[kernel > 0] / kernel.max()
+            colors[kernel > 0] = np.stack(
+                [pos_scaled, np.zeros_like(pos_scaled), np.zeros_like(pos_scaled)],
+                axis=-1,
+            )
+
+        cmap = ListedColormap(colors, name="BTSP_kernel_cmap", N=len(kernel))
+
+        return cmap
 
     def plot_BTSP_kernel(self, autosave: bool | None = None, **kwargs):
         """

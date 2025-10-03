@@ -493,8 +493,8 @@ class Learner:
                 f"(target: {self.max_num_target_reaches})."
             )
 
-        self.Agent.log_trajectory_stats_to_date()
-        self.Agent.log_trajectory_stats_to_date(log_as_time=False)
+        self.Agent.log_trajectory_stats()
+        self.Agent.log_trajectory_stats(log_as_time=False)
 
         steps_BTSP_triggered = np.asarray(self.steps_BTSP_triggered)
 
@@ -1098,7 +1098,7 @@ def plot_T_maze(
     ax1D = np.asarray(axes).ravel()
 
     # Plot trajectories on T-maze
-    Ag.plot_trajectories(scale_cmap_per=False, s_2D=5, alpha=0.3, sub_ax=ax1D[0])
+    Ag.plot_trajectories(scale_cmap_per=False, s_2D=5, alpha=0.3, ax=ax1D[0])
     ax1D[0].set_title("Trajectories")
 
     # Plot place cell locations on T-maze

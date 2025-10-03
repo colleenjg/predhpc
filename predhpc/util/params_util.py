@@ -285,7 +285,6 @@ def get_agent_params(dt=DT, scale=None, environment="linear", **kwargs):
     agent_params = {
         "dt": dt,
         "head_direction_smoothing_timescale": dt * 2,
-        "wait_between_same_target": 30,
     }
 
     if environment == "linear":
@@ -298,6 +297,7 @@ def get_agent_params(dt=DT, scale=None, environment="linear", **kwargs):
         agent_params["target_position"] = scale - dt * 8
         agent_params["fixed_direction"] = True
         agent_params["wait_after_trajectory"] = int(WAIT_LINEAR_SEC / dt)
+        agent_params["wait_between_same_target"] = 30
         agent_params["target_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_LINEAR
         agent_params["reset_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_LINEAR
 
@@ -305,19 +305,25 @@ def get_agent_params(dt=DT, scale=None, environment="linear", **kwargs):
         agent_params["speed_mean"] = SPEED_MEAN_2D
         agent_params["thigmotaxis"] = 0.5
         agent_params["left_arm_prop"] = 0.5
+        agent_params["wait_between_same_target"] = 30
         agent_params["target_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_2D
         agent_params["reset_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_2D
 
     elif environment in ["openfield", "openfield_corridor"]:
         agent_params["speed_mean"] = SPEED_MEAN_2D
         agent_params["thigmotaxis"] = 0.5
-        agent_params["num_random_walk_steps"] = 300
         agent_params["always_log_teleportation"] = True
-        agent_params["no_target_factor"] = 5
         agent_params["target_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_2D
         if environment == "openfield_corridor":
-            agent_params["reward_factor"] = 3
-            agent_params["no_target_factor"] = 1
+            agent_params["reward_factor"] = 1
+            agent_params["no_target_factor"] = 2
+            agent_params["num_random_walk_steps"] = 300
+            agent_params["wait_between_same_target"] = 1000
+        else:
+            agent_params["reward_factor"] = 1
+            agent_params["no_target_factor"] = 2
+            agent_params["num_random_walk_steps"] = 300
+            agent_params["wait_between_same_target"] = 300
 
     for key, value in kwargs.items():
         agent_params[key] = value

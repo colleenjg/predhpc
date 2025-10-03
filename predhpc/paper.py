@@ -27,6 +27,7 @@ SHIFT_EXAMPLES = [1.0, 0, -0.4, -3.0]
 SMOOTH_K = 5  # across 120 samples
 
 NUM_TRAJ_SPEED = 20
+OPENFIELD_MAX_STEPS = 20000
 
 
 def suppress_warnings():
@@ -1078,6 +1079,7 @@ def run_linear_fct(fct_name="linear_speeds", overwrite=False, seed=True, num_job
 def get_openfield_Pyrs(
     corridor=False,
     log_BTSP=True,
+    init_reward_only=False,
     seed=True,
 ):
     """
@@ -1088,6 +1090,8 @@ def get_openfield_Pyrs(
     Args:
     - environment (str): The environment to initialize. Default is "openfield".
     - log_BTSP (bool): Whether to log BTSP events. Default is True.
+    - init_reward_only (bool): Whether to initialize the agent with only reward
+        inputs. Only implemented for corridor environment. Default is False.
     - seed (bool): Whether to seed the random number generator with the paper seed.
         Default is True.
 
@@ -1100,12 +1104,25 @@ def get_openfield_Pyrs(
 
     environment = "openfield_corridor" if corridor else "openfield"
 
+    agent_params = None
+    if init_reward_only:
+        if not corridor:
+            raise NotImplementedError(
+                "'init_reward_only' is only implemented for corridor environment."
+            )
+        agent_params = params_util.get_agent_params(
+            environment=environment,
+            reward_factor=1,
+            no_target_factor=0,
+        )
+
     Pyr_params = params_util.get_Pyr_params(
         environment=environment,
         log_BTSP=log_BTSP,
     )
 
     Pyrs = run_manager.init_env_objects(
+        agent_params=agent_params,
         Pyr_params=Pyr_params,
         environment=environment,
         plot=False,
@@ -1116,7 +1133,7 @@ def get_openfield_Pyrs(
 
 def run_openfield_corridor(
     Pyrs=None,
-    max_num_steps=15000,
+    max_num_steps=OPENFIELD_MAX_STEPS,
     max_time_min=None,
     weight_recording_freq=1000,
     teleportation_enabled=False,
@@ -1133,7 +1150,7 @@ def run_openfield_corridor(
         a new Pyr object is created with default parameters.
     - max_num_steps (int): Maximum number of steps to run the environment. Note
         that if learner is set to finish final trajectory, max_num_steps will be
-        exceeded to complete any incomplete trajectories. Default is 3800.
+        exceeded to complete any incomplete trajectories. Default is OPENFIELD_MAX_STEPS.
     - max_time_min (float, optional): Maximum time in minutes to run the environment.
         If specified, it overrides max_num_steps based on the agent's time step. Note
         that if learner is set to finish final trajectory, max_time_min will be
@@ -1152,7 +1169,9 @@ def run_openfield_corridor(
         gen_util.seed_all(PAPER_SEED)
 
     if Pyrs is None:
-        Pyrs = get_openfield_Pyrs(corridor=True, seed=False)
+        Pyrs = get_openfield_Pyrs(corridor=True, init_reward_only=True, seed=False)
+
+    Pyrs.Agent.set_no_target_factor(2)
 
     if max_time_min is not None:
         max_num_steps = int(max_time_min * 60 / Pyrs.Agent.dt)
@@ -1191,7 +1210,7 @@ def plot_openfield_corridor_components(Pyrs=None, **kwargs):
         learner = run_manager.learn_openfield_BTSP(
             Pyrs_or_learner=Pyrs,
             corridor=True,
-            max_num_steps=15000,
+            max_num_steps=OPENFIELD_MAX_STEPS,
             weight_recording_freq=1000,
             teleportation_enabled=False,
         )
@@ -1224,7 +1243,7 @@ def plot_openfield_corridor_PFs(Pyrs=None, **kwargs):
         learner = run_manager.learn_openfield_BTSP(
             Pyrs_or_learner=Pyrs,
             corridor=True,
-            max_num_steps=15000,
+            max_num_steps=OPENFIELD_MAX_STEPS,
             weight_recording_freq=1000,
             teleportation_enabled=False,
         )
@@ -1257,7 +1276,7 @@ def plot_openfield_corridor_timeseries(Pyrs=None, **kwargs):
         learner = run_manager.learn_openfield_BTSP(
             Pyrs_or_learner=Pyrs,
             corridor=True,
-            max_num_steps=15000,
+            max_num_steps=OPENFIELD_MAX_STEPS,
             weight_recording_freq=1000,
             teleportation_enabled=False,
         )

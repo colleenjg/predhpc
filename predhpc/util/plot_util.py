@@ -1110,7 +1110,10 @@ def get_trajectory_cmap_colors(
 
     if colormap is None:
         colormap = "crest"
-    cmap_colors = sns.color_palette(colormap, as_cmap=True)(cmap_vals_np)  # type: ignore[callable]
+    if isinstance(colormap, str):
+        colormap = sns.color_palette(colormap, as_cmap=True)
+
+    cmap_colors = colormap(cmap_vals_np)
 
     return cmap_colors
 
@@ -1657,9 +1660,9 @@ def plot_learning_kernel(Is, xs, kernel=None, kernel_xs=None):
             kernel = kernel[start_x:]
             kernel_xs = kernel_xs[start_x:]
         if xs[-1] < kernel_xs.max():
-            stop_x = gen_util.get_index_of_closest(kernel_xs, xs[-1], method="above")
-            kernel = kernel[: stop_x + 1]
-            kernel_xs = kernel_xs[: stop_x + 1]
+            end_x = gen_util.get_index_of_closest(kernel_xs, xs[-1], method="above")
+            kernel = kernel[: end_x + 1]
+            kernel_xs = kernel_xs[: end_x + 1]
 
         sub_ax.plot(
             kernel_xs,

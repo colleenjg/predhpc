@@ -938,6 +938,7 @@ def get_values_at_target_roots(
         align_pt = np.argmax(exp)
 
     t = (np.arange(len(exp)) - align_pt) * dt
+    print(t)
 
     target_root_dict = get_target_root_dict()
 
@@ -947,7 +948,7 @@ def get_values_at_target_roots(
             val_dict[name] = exp[np.where(t == target_t)[0][0]]
         else:
             spline = CubicSpline(t, exp)
-            val_dict[name] = spline(target_t)
+            val_dict[name] = spline(target_t).item()
 
     return val_dict
 
