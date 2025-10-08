@@ -2,12 +2,12 @@ import copy
 from typing import TYPE_CHECKING, Any, Sequence
 import warnings
 
-from matplotlib import pyplot as plt  # type: ignore[import]
+from matplotlib import pyplot as plt
 from matplotlib import markers as mpl_markers
 from matplotlib.colors import ListedColormap
 import numpy as np
 
-from ratinabox import utils as rutils  # type: ignore[import]
+from ratinabox import utils as rutils
 
 from predhpc import plot_fcts
 from predhpc.neurons import riab_neurons
@@ -22,7 +22,7 @@ from predhpc.util import (
 )
 
 if TYPE_CHECKING:
-    import ratinabox  # type: ignore[import]
+    import ratinabox
 
 
 class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer):
@@ -3182,7 +3182,15 @@ class BTSPLayer(HebbianLayer):
 
         return
 
-    def get_BTSP_kernel_based_cmap(self, t_pre=14, t_post=10):
+    def get_BTSP_kernel_based_cmap(
+        self,
+        t_pre=14,
+        t_post=10,
+        gray_level=0.5,
+        use_alpha=True,
+        min_alpha=0,
+        shared_max=True,
+    ):
         """
         self.get_BTSP_kernel_based_cmap()
 
@@ -3194,28 +3202,62 @@ class BTSPLayer(HebbianLayer):
             constructing the colormap. Default is 14.
         - t_post (float, optional): Time after the BTSP event to consider in
             constructing the colormap. Default is 10.
+        - gray_level (float, optional): Gray level to use for zero kernel value.
+            Higher values are closer to black. Default is 0.5.
+        - use_alpha (bool, optional): Whether to use alpha channel to indicate
+            strength instead of color strength. Default is True.
+        - min_alpha (float, optional): Minimum alpha value to use if use_alpha is
+            True. Default is 0.
+        - shared_max (bool, optional): Whether to use a shared maximum value
+            across positive and negative values. Default is True.
 
         Returns:
         - cmap (ListedColormap): Colormap based on the BTSP kernel.
         """
 
+        gray_RGB = 1 - gray_level
+
         kernel, _ = self.get_BTSP_kernel(t_pre=t_pre, t_post=t_post)
+        if use_alpha:
+            full_value = 0
+            num_dim = 4
+        else:
+            full_value = gray_RGB
+            num_dim = 3
 
-        colors = np.zeros((len(kernel), 3))
+        colors = np.full((len(kernel), num_dim), full_value).astype(float)
 
-        if np.any(kernel < 0):
-            neg_scaled = kernel[kernel < 0] / kernel.min()
-            colors[kernel < 0] = np.stack(
-                [np.zeros_like(neg_scaled), np.zeros_like(neg_scaled), neg_scaled],
-                axis=-1,
-            )
+        if shared_max:
+            max_val = np.absolute(kernel).max()
 
-        if np.any(kernel > 0):
-            pos_scaled = kernel[kernel > 0] / kernel.max()
-            colors[kernel > 0] = np.stack(
-                [pos_scaled, np.zeros_like(pos_scaled), np.zeros_like(pos_scaled)],
-                axis=-1,
-            )
+        neg_mask = kernel < 0
+        if np.any(neg_mask):
+            if not shared_max:
+                max_val = kernel[neg_mask].min()
+            neg_scaled = np.absolute(kernel[neg_mask] / max_val)
+            if use_alpha:
+                colors[neg_mask, 2] = 1.0  # B
+                colors[neg_mask, 3] = neg_scaled
+            else:
+                colors[neg_mask, 0] = (gray_RGB) * (1 - neg_scaled)  # R
+                colors[neg_mask, 1] = gray_RGB * (1 - neg_scaled)  # G
+                colors[neg_mask, 2] = gray_RGB + (1 - gray_RGB) * neg_scaled  # B
+
+        pos_mask = kernel > 0
+        if np.any(pos_mask):
+            if not shared_max:
+                max_val = kernel[pos_mask].max()
+            pos_scaled = np.absolute(kernel[pos_mask] / max_val)
+            if use_alpha:
+                colors[pos_mask, 0] = 1.0  # R
+                colors[pos_mask, 3] = pos_scaled
+            else:
+                colors[pos_mask, 0] = gray_RGB + (1 - gray_RGB) * pos_scaled  # R
+                colors[pos_mask, 1] = gray_RGB * (1 - pos_scaled)  # G
+                colors[pos_mask, 2] = gray_RGB * (1 - pos_scaled)  # B
+
+        if use_alpha:
+            colors[:, 3] = np.maximum(colors[:, 3], min_alpha)
 
         cmap = ListedColormap(colors, name="BTSP_kernel_cmap", N=len(kernel))
 
@@ -4230,6 +4272,7 @@ class BTSPLayer(HebbianLayer):
         marker: str = "x",
         prop_y: float = 0.7,
         lw: float = 1.0,
+        zorder: int = 5,
     ):
         """
         self.add_BTSP_markers_to_plots()
@@ -4255,6 +4298,7 @@ class BTSPLayer(HebbianLayer):
         - prop_y (float, optional): Proportional y-offset for the markers if timeseries
             is True. Default is 0.7.
         - lw (float, optional): Line width of the markers. Default is 1.
+        - zorder (int, optional): Z-order of the markers. Default is 5.
         """
 
         if color is None:
@@ -4323,6 +4367,7 @@ class BTSPLayer(HebbianLayer):
                     marker=marker,
                     s=s,
                     lw=lw,
+                    zorder=zorder,
                 )
 
     def plot_rate_map(

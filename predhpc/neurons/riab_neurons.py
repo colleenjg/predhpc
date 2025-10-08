@@ -545,7 +545,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         t_start: float | None = None,
         t_end: float | None = None,
         ax: plt.Axes | np.ndarray | None = None,
-        num_bins: int = 100,
+        num_bins: int = 150,
         part_run: float = 0.2,
         merge: bool = True,
         vel_sign_smooth: int = 5,
@@ -573,7 +573,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         - ax (np.ndarray or plt.Axes, optional): Subplot or array of subplots to plot
             on (one per plotted ROI, if environment is 2D). Default is None.
         - num_bins (int, optional): Number of bins to use for binning the firing rates.
-            Default is 100.
+            Default is 150.
         - part_run (float, optional): Proportion of the run to use for binning the
             firing rates. Default is 0.2.
         - merge (bool, optional): Whether to merge the firing rates of the neurons.

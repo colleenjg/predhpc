@@ -772,8 +772,10 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                     f"{traj_idxs}."
                 )
 
-            traj_startid = self.trajectory_df.loc[traj_idxs[0], "start_step"]
-            traj_endid = self.trajectory_df.loc[traj_idxs[-1], "end_step"]
+            traj_startid = int(self.trajectory_df.loc[traj_idxs[0], "start_step"])
+            traj_endid = int(self.trajectory_df.loc[traj_idxs[-1], "end_step"])
+
+            t = t[traj_startid - startid : traj_endid - startid + 1]
 
             startid = max(startid, int(traj_startid))
             if not np.isnan(traj_endid):
@@ -2469,6 +2471,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                     t_end=t_end,
                     in_min=True,
                     dim_idx=dim_idx,
+                    reached_only=True,
                     raise_error=(position_name != "target"),
                 )
 
@@ -2623,7 +2626,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             direction. Default is False.
         - colormap (str, optional): Colormap to use to plot trajectories.
             Default is None.
-        - alpha (float, optional): Trajectory point transparency. Default is 0.6.
+        - alpha (float, optional): Trajectory point transparency. Default is 0.7.
         - xlim (float, optional): Upper x axis limit to set (in minutes),
             if environment is 1D. Default is None.
         - plot_traj_ends (bool, optional): Whether to plot a point at the end of each
@@ -3068,7 +3071,9 @@ class TAgent(ResetableAgent):
 
         extra = self.Environment.prop_env * self.Environment.scale_y * 0.1
 
-        return self.pos[1] > (self.Environment.branch_y - extra)
+        near = self.pos[1] > (self.Environment.branch_y - extra)
+
+        return near
 
     @property
     def past_branch_point(self) -> bool:
@@ -3083,7 +3088,9 @@ class TAgent(ResetableAgent):
 
         extra = self.Environment.prop_env * self.Environment.scale_y * 0.1
 
-        return self.pos[1] > (self.Environment.branch_y + extra)
+        past = self.pos[1] > (self.Environment.branch_y + extra)
+
+        return past
 
     @property
     def at_branch_point(self) -> bool:
@@ -3096,9 +3103,9 @@ class TAgent(ResetableAgent):
         - (bool): Whether the agent has reached the T-maze branch point.
         """
 
-        extra = self.Environment.prop_env * self.Environment.scale_y * 0.2
+        at = self.pos[1] > self.Environment.branch_y
 
-        return self.pos[1] > self.Environment.branch_y
+        return at
 
     @property
     def target_df_columns(self) -> list:

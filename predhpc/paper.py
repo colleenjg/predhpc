@@ -28,6 +28,7 @@ SMOOTH_K = 5  # across 120 samples
 
 NUM_TRAJ_SPEED = 20
 OPENFIELD_MAX_STEPS = 20000
+EX_TRAJ_IDX = 8
 
 
 def suppress_warnings():
@@ -1216,7 +1217,9 @@ def plot_openfield_corridor_components(Pyrs=None, **kwargs):
         )
         Pyrs = learner.Pyrs
 
-    axes = paper_plot_fcts.plot_openfield_components(Pyrs, **kwargs)
+    axes = paper_plot_fcts.plot_openfield_components(
+        Pyrs, traj_idx=EX_TRAJ_IDX, **kwargs
+    )
 
     return axes
 
@@ -1254,6 +1257,40 @@ def plot_openfield_corridor_PFs(Pyrs=None, **kwargs):
     return sub_ax
 
 
+def plot_openfield_corridor_BTSP_trajectory(Pyrs=None, **kwargs):
+    """
+    plot_openfield_corridor_BTSP_trajectory()
+
+    Plots the trajectory of the agent in the openfield corridor around the first BTSP
+    event.
+
+    Args:
+    - Pyrs (Pyr): Pyr object for openfield corridor.
+        If None, a new Pyr object is created.
+
+    Keyword Args:
+    - **kwargs: Additional keyword arguments passed to
+        run_manager.plot_openfield_corridor_trajectory().
+
+    Returns:
+    - sub_ax (plt.Axes): Subplot with openfield corridor trajectory plotted.
+    """
+
+    if Pyrs is None:
+        learner = run_manager.learn_openfield_BTSP(
+            Pyrs_or_learner=Pyrs,
+            corridor=True,
+            max_num_steps=OPENFIELD_MAX_STEPS,
+            weight_recording_freq=1000,
+            teleportation_enabled=False,
+        )
+        Pyrs = learner.Pyrs
+
+    sub_ax = paper_plot_fcts.plot_openfield_corridor_BTSP_trajectory(Pyrs, **kwargs)
+
+    return sub_ax
+
+
 def plot_openfield_corridor_timeseries(Pyrs=None, **kwargs):
     """
     plot_openfield_corridor_timeseries()
@@ -1283,7 +1320,7 @@ def plot_openfield_corridor_timeseries(Pyrs=None, **kwargs):
         Pyrs = learner.Pyrs
 
     sub_ax = paper_plot_fcts.plot_single_neuron_rate_timeseries(
-        Pyrs.SomaticCompartment, **kwargs
+        Pyrs.SomaticCompartment, mark_traj_idxs=[EX_TRAJ_IDX], **kwargs
     )
 
     return sub_ax
@@ -1297,7 +1334,7 @@ def plot_figure_panel(*args, fig=1, panel="A", save=True, **kwargs):
 
     Args:
     - *args: Positional arguments passed to the plotting function.
-    - fig (int): Figure number.
+    - fig (int or str): Figure number.
     - panel (str): Panel letter (A, B, C, etc.).
     - save (bool): Whether to save the figure.
     - **kwargs: Keyword arguments passed to the plotting function.
@@ -1306,33 +1343,43 @@ def plot_figure_panel(*args, fig=1, panel="A", save=True, **kwargs):
     - ax: The axes object for the plotted panel.
     """
 
-    fig = int(fig)
+    if str(fig).isnumeric():
+        fig = int(fig)
+
     panel = panel.upper()
 
     fig_dict = {
         1: {
-            "A": "schematic",
-            "B": plot_linear_environment,
-            "C": "schematic",
-            "D": plot_BTSP_kernel,
+            "A": ("schematic", dict()),
+            "B": (plot_linear_environment, dict()),
+            "C": ("schematic", dict()),
+            "D": (plot_BTSP_kernel, dict()),
         },
         2: {
-            "A": plot_linear_summary,
-            "B": plot_linear_place_fields,
-            "C": plot_linear_binned_rates,
+            "A": (plot_linear_summary, dict()),
+            "B": (plot_linear_place_fields, dict()),
+            "C": (plot_linear_binned_rates, dict()),
         },
         3: {
-            "A": plot_linear_speed_PF_examples,
-            "B": plot_linear_speed_PF_widths,
+            "A": (plot_linear_speed_PF_examples, dict()),
+            "B": (plot_linear_speed_PF_widths, dict()),
+        },
+        "3S": {
+            "A": (plot_linear_speed_PF_examples, {"PF_type": "weights"}),
+            "B": (plot_linear_speed_PF_widths, {"PF_type": "weights"}),
         },
         4: {
-            "A": plot_linear_shift_PF_examples,
-            "B": plot_target_shift_PFs,
+            "A": (plot_linear_shift_PF_examples, dict()),
+            "B": (plot_target_shift_PFs, dict()),
         },
         5: {
-            "A-D": plot_openfield_corridor_components,
-            "E": plot_openfield_corridor_PFs,
-            "F": plot_openfield_corridor_timeseries,
+            "A-D": (plot_openfield_corridor_components, dict()),
+            "E": (plot_openfield_corridor_PFs, dict()),
+            "F": (plot_openfield_corridor_BTSP_trajectory, dict()),
+            "G": (plot_openfield_corridor_timeseries, dict()),
+        },
+        "5S": {
+            "A": (plot_openfield_corridor_PFs, {"PF_type": "weights"}),
         },
     }
 
@@ -1342,12 +1389,12 @@ def plot_figure_panel(*args, fig=1, panel="A", save=True, **kwargs):
     if panel not in fig_dict[fig].keys():
         raise ValueError(f"Unknown panel for figure {fig}: {panel}")
 
-    fct = fig_dict[fig][panel]
+    fct, fct_kwargs = fig_dict[fig][panel]
     if fct == "schematic":
         ax = None
         print("Schematic plot.")
     else:
-        ax = fig_dict[fig][panel](*args, **kwargs)
+        ax = fct(*args, **fct_kwargs, **kwargs)
 
     if save and ax is not None:
         key = f"{fig}{panel}"

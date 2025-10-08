@@ -1449,6 +1449,17 @@ def plot_binned_rates(
             f"{num_neurons} neurons, if occupancy is{err_str} provided."
         )
 
+    if vmin is not None and np.nanmin(binned_rate_means) < vmin:
+        raise ValueError(
+            f"vmin ({vmin}) is greater than the minimum of the binned rates "
+            f"({np.nanmin(binned_rate_means)})."
+        )
+    if vmax is not None and np.nanmax(binned_rate_means) > vmax:
+        raise ValueError(
+            f"vmax ({vmax}) is less than the maximum of the binned rates "
+            f"({np.nanmax(binned_rate_means)})."
+        )
+
     if shared_range:
         if vmin is None:
             vmin = np.nanmin(binned_rate_means)
@@ -1457,7 +1468,7 @@ def plot_binned_rates(
 
     for i in range(num_neurons):
         im = ax1D[i].imshow(
-            binned_rate_means,
+            binned_rate_means[:, :, i],
             aspect="auto",
             cmap="viridis",
             interpolation="none",

@@ -14,7 +14,7 @@ from predhpc.util import gen_util, params_util, plot_util, ext_util
 
 LW = 1.6
 
-BTSP_ASTERISK = (5, 2, 0)  # asterisk
+BTSP_ASTERISK = (6, 2, 0)  # asterisk
 BTSP_S = 35  # size of BTSP markers
 
 
@@ -204,6 +204,33 @@ def add_1D_position_markers(
         )
 
 
+def get_BTSP_times_and_cmap(NeuronLayer):
+    """
+    get_BTSP_times_and_cmap(NeuronLayer)
+
+    Retrieves BTSP event times and colormap for the given NeuronLayer object.
+
+    Returns:
+    - t_start (float): Start time for plotting.
+    - t_end (float): End time for plotting.
+    - cmap (ListedColormap): Colormap for BTSP events.
+    """
+
+    BTSP_times = NeuronLayer.get_BTSP_steps() * NeuronLayer.Agent.dt
+    if len(BTSP_times) == 0:
+        raise RuntimeError("No BTSP events found for the neuron layer.")
+    pre, post = NeuronLayer.get_estimated_num_steps_pre_post_BTSP(as_time=True)
+    t_start = max(0, BTSP_times[0] - pre)
+    t_end = BTSP_times[0] + post
+    cmap = NeuronLayer.get_BTSP_kernel_based_cmap(
+        t_pre=pre,
+        t_post=post,
+        use_alpha=True,
+    )
+
+    return t_start, t_end, cmap
+
+
 def configure_neural_activity_axis(
     sub_ax, ymin=0, ymax=10, norm=1, right=False, label=True
 ):
@@ -322,7 +349,12 @@ def plot_1D_PFs(
 
 
 def plot_single_neuron_rate_timeseries(
-    NeuronLayer, chosen_neuron=0, sub_ax=None, lw=LW
+    NeuronLayer,
+    chosen_neuron=0,
+    sub_ax=None,
+    lw=LW,
+    mark_traj_idxs=None,
+    mark_BTSP_kernel=True,
 ):
     """
     plot_single_neuron_rate_timeseries(NeuronLayer)
@@ -335,6 +367,10 @@ def plot_single_neuron_rate_timeseries(
         Default is 0.
     - sub_ax (plt.Axes, optional): The subplot to plot on. Default is None.
     - lw (float, optional): Line width for the plot. Default is LW.
+    - mark_traj_idxs (list, optional): List of trajectory indices to mark on the plot.
+        Default is None.
+    - mark_BTSP_kernel (bool, optional): Whether to mark the BTSP kernel on the plot.
+        Default is True.
 
     Returns:
     - sub_ax (plt.Axes): The axes with the plotted neuron activity.
@@ -342,6 +378,7 @@ def plot_single_neuron_rate_timeseries(
 
     if sub_ax is None:
         _, sub_ax = plt.subplots(figsize=(10, 1.7))
+
     NeuronLayer.plot_rate_timeseries(
         sub_ax=sub_ax,
         lw=lw,
@@ -350,7 +387,9 @@ def plot_single_neuron_rate_timeseries(
         chosen_neurons=[chosen_neuron],
     )
 
-    ymin = min(sub_ax.get_ylim()[0], -0.2) - 0.2
+    ylow = -0.3 if mark_traj_idxs or mark_BTSP_kernel else -0.2
+
+    ymin = min(sub_ax.get_ylim()[0], ylow) + ylow
     ymax = max(sub_ax.get_ylim()[1], 11) * 1.3
     sub_ax.set_ylim(ymin, ymax)
 
@@ -358,13 +397,28 @@ def plot_single_neuron_rate_timeseries(
         ax=sub_ax, s=BTSP_S, prop_y=0.8, lw=lw, marker=BTSP_ASTERISK, timeseries=True
     )
     sub_ax.set_ylabel("")
-    plot_util.expand_ticks(sub_ax, axis="x", num_ticks=7, alternating=True, round_dec=1)
+    plot_util.expand_ticks(
+        sub_ax, axis="x", num_ticks=11, alternating=True, round_dec=1
+    )
     NeuronLayer.Agent.add_position_across_time_to_plot(
         sub_ax=sub_ax, position_name="reward", alpha=0.8, y=13.6
     )
 
     configure_neural_activity_axis(sub_ax)
     plot_util.pad_axis(sub_ax, axis="x", pad_prop=0.015, prop_high=0)
+
+    if mark_traj_idxs is not None:
+        t, _, _ = NeuronLayer.Agent.get_trajectory_plotting_times(
+            traj_idxs=mark_traj_idxs
+        )
+        sub_ax.plot(t[[0, -1]] / 60, [ymin / 2] * 2, color="k", lw=2, alpha=0.8)
+
+    if mark_BTSP_kernel:
+        t_start, t_end, cmap = get_BTSP_times_and_cmap(NeuronLayer)
+        num = 150
+        x = np.linspace(t_start, t_end, num) / 60  # minutes
+        colors = cmap(np.linspace(0, 1, num))
+        sub_ax.scatter(x, [ymin / 2] * num, color=colors, s=3)
 
     return sub_ax
 
@@ -586,7 +640,7 @@ def plot_linear_place_fields(learner):
     return ax1D
 
 
-def plot_linear_binned_rates(learner, num_bins=100):
+def plot_linear_binned_rates(learner, num_bins=150):
     """
     plot_linear_binned_rates(learner)
 
@@ -605,6 +659,7 @@ def plot_linear_binned_rates(learner, num_bins=100):
     kwargs = {
         "num_bins": num_bins,
         "vmin": 0,
+        "vmax": 10,
         "cbar_aspect": 10,
         "plot_occ": False,
         "mark_runs": True,
@@ -618,7 +673,7 @@ def plot_linear_binned_rates(learner, num_bins=100):
             sub_ax,
             Ag=learner.Pyrs.Agent,
             y_1D=3.4,
-            pos_fact=100 / 6,
+            pos_fact=num_bins / 6,
             pos_shift=-0.5,
         )
 
@@ -1476,7 +1531,7 @@ def plot_target_shift_PFs(
     return ax1D
 
 
-def plot_openfield_components(Pyrs, titles=False, BTSP_trajectory=True):
+def plot_openfield_components(Pyrs, titles=False, traj_idx=8):
     """
     plot_openfield_components(Pyrs)
 
@@ -1485,6 +1540,7 @@ def plot_openfield_components(Pyrs, titles=False, BTSP_trajectory=True):
     Args:
     - Pyrs (Pyr): Pyr object containing the environment, agent, object and place cells.
     - titles (bool, optional): Whether to add titles to each subplot. Default is False.
+    - traj_idx (int, optional): Index of the trajectory to plot. Default is 8.
 
     Returns:
     - axes (np.ndarray of plt.Axes): Array of subplots with openfield components plotted.
@@ -1497,7 +1553,7 @@ def plot_openfield_components(Pyrs, titles=False, BTSP_trajectory=True):
     if Env.D != 2:
         raise ValueError("2D plotting is only supported for 2D environments.")
 
-    kwargs = {"skip_object_types": ["teleport"], "no_legend": True}
+    env_kwargs = {"skip_object_types": ["teleport"], "no_legend": True}
     y = 1.02
     chosen_PCs = [206]
 
@@ -1508,53 +1564,42 @@ def plot_openfield_components(Pyrs, titles=False, BTSP_trajectory=True):
     if titles:
         env_sub_ax.set_title("Environment", y=y)
     Env.plot_environment(
-        sub_ax=env_sub_ax, scale_loc=(1.62, 1.88), scale_length=0.5, **kwargs
+        sub_ax=env_sub_ax, scale_loc=(1.62, 1.88), scale_length=0.5, **env_kwargs
     )
-    if BTSP_trajectory:
-        BTSP_times = Pyrs.SomaticCompartment.get_BTSP_steps() * Ag.dt
-        if len(BTSP_times) == 0:
-            raise RuntimeError("No BTSP events found for Pyrs.SomaticCompartment.")
-        pre, post = Pyrs.SomaticCompartment.get_estimated_num_steps_pre_post_BTSP(
-            as_time=True
-        )
-        kwargs["t_start"] = max(0, BTSP_times[0] - pre)
-        kwargs["t_end"] = BTSP_times[0] + post
-        kwargs["colormap"] = Pyrs.SomaticCompartment.get_BTSP_kernel_based_cmap(
-            t_pre=pre, t_post=post
-        )
-    else:
-        kwargs["traj_idxs"] = [0]
 
     if titles:
-        title = "Trajectory used for BTSP" if BTSP_trajectory else "Example trajectory"
-        traj_sub_ax.set_title(title, y=y)
+        traj_sub_ax.set_title("Example trajectory", y=y)
 
     Ag.plot_trajectories(
         ax=traj_sub_ax,
-        framerate=8,
         alpha=0.4,
-        s_2D=5,
+        traj_idxs=[traj_idx],
         cmap_per=True,
+        framerate=8,
+        s_2D=5,
         plot_target=False,
         plot_agent=False,
-        **kwargs,
+        plot_traj_ends=True,
+        **env_kwargs,
     )
 
     # bottom row
     if titles:
         Obj_sub_ax.set_title("Object field", y=y, color=Objs.color)
-    Objs.plot_rate_map(sub_ax=Obj_sub_ax, plot_objects=False, colorbar=False, **kwargs)
+    Objs.plot_rate_map(
+        sub_ax=Obj_sub_ax, plot_objects=False, colorbar=False, **env_kwargs
+    )
 
     if titles:
         PC_sub_ax.set_title(
             f"Place fields ({len(chosen_PCs)}/{PCs.n})", y=y, color=PCs.color
         )
-    Env.plot_environment(sub_ax=PC_sub_ax, plot_objects=True, **kwargs)
+    Env.plot_environment(sub_ax=PC_sub_ax, plot_objects=True, **env_kwargs)
     plot_fcts.plot_overlayed_rate_maps(
         PCs, sub_ax=PC_sub_ax, method="max", chosen_neurons=chosen_PCs, colorbar=False
     )
     PCs.plot_place_cell_locations(
-        sub_ax=PC_sub_ax, plot_objects=True, s=3, alpha=0.8, marker=".", **kwargs
+        sub_ax=PC_sub_ax, plot_objects=True, s=3, alpha=0.8, marker=".", **env_kwargs
     )
 
     cbar_axlist = [Obj_sub_ax, PC_sub_ax]
@@ -1645,7 +1690,7 @@ def get_s_openfield_PFs(fig_side=4.0, PF_type="weights"):
     return s
 
 
-def plot_openfield_PFs(Pyrs, fig_side=4.0, lw=LW, alpha=0.8, PF_type="weights"):
+def plot_openfield_PFs(Pyrs, fig_side=3.0, lw=LW, alpha=0.8, PF_type="history"):
     """
     plot_openfield_PFs(Pyrs)
 
@@ -1653,12 +1698,13 @@ def plot_openfield_PFs(Pyrs, fig_side=4.0, lw=LW, alpha=0.8, PF_type="weights"):
 
     Args:
     - Pyrs (Pyr): Pyr object for openfield.
-    - fig_side (float, optional): Size of the figure. Default is 3.3.
+    - fig_side (float, optional): Size of the figure. Default is 3.0.
     - lw (float, optional): Line width. Default is LW.
     - alpha (float, optional): Transparency level. Default is 0.8.
+    - PF_type (str, optional): PF evaluation method to plot. Default is "history".
 
     Returns:
-    - sub_ax (plt.Axes): The subplot with the plotted weights.
+    - sub_ax (plt.Axes): The subplot with the plotted PFs.
     """
 
     fig, sub_ax = plt.subplots(figsize=(fig_side, fig_side))
@@ -1688,8 +1734,8 @@ def plot_openfield_PFs(Pyrs, fig_side=4.0, lw=LW, alpha=0.8, PF_type="weights"):
         alpha=alpha,
         s=s,
         obj_s=30,
-        BTSP_s=30,
-        BTSP_marker=(5, 2, 0),
+        BTSP_s=BTSP_S,
+        BTSP_marker=BTSP_ASTERISK,
         lw=lw,
         round_dec=round_dec,
         plot_BTSP_events=True,
@@ -1706,5 +1752,63 @@ def plot_openfield_PFs(Pyrs, fig_side=4.0, lw=LW, alpha=0.8, PF_type="weights"):
     cax = fig.axes[-1]
     clabel = get_PF_label(PF_type, title=False)
     cax.set_ylabel(clabel)
+
+    return sub_ax
+
+
+def plot_openfield_corridor_BTSP_trajectory(Pyrs, x_lims=None, y_lims=(None, 0.6)):
+    """
+    plot_openfield_corridor_BTSP_trajectory(Pyrs)
+
+    Plots the trajectory around the first BTSP event in an openfield corridor experiment.
+
+    Args:
+    - Pyrs (Pyr): Pyr object containing the environment, agent, object and place cells.
+    - x_lims (list, optional): X-axis limits for the plot. Default is None.
+    - y_lims (list, optional): Y-axis limits for the plot. Default is (None, 0.5).
+
+    Returns:
+    - sub_ax (plt.Axes): Subplot with the openfield BTSP trajectory.
+    """
+
+    _, sub_ax = plt.subplots(figsize=(2.8, 1.3))
+
+    Env, Ag, _, _ = ext_util.extract_objects_from_Pyrs(Pyrs)
+    if Env.D != 2:
+        raise ValueError("2D plotting is only supported for 2D environments.")
+
+    kwargs = {"skip_object_types": ["teleport"], "no_legend": True, "s": 30}
+
+    t_start, t_end, cmap = get_BTSP_times_and_cmap(Pyrs.SomaticCompartment)
+
+    Ag.plot_trajectories(
+        ax=sub_ax,
+        t_start=t_start,
+        t_end=t_end,
+        framerate=30,
+        s_2D=7,
+        colormap=cmap,
+        alpha=None,
+        cmap_per=True,
+        plot_target=False,
+        plot_agent=False,
+        plot_traj_ends=False,
+        **kwargs,
+    )
+
+    BTSP_kwargs = {
+        "t_start": t_start,
+        "t_end": t_end,
+        "s": BTSP_S,
+        "marker": BTSP_ASTERISK,
+        "lw": LW,
+    }
+
+    Pyrs.SomaticCompartment.add_BTSP_markers_to_plots(ax=sub_ax, **BTSP_kwargs)
+
+    if x_lims is not None:
+        sub_ax.set_xlim(x_lims)
+    if y_lims is not None:
+        sub_ax.set_ylim(y_lims)
 
     return sub_ax
