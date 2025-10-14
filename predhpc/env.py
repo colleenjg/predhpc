@@ -65,14 +65,14 @@ class Environment(riabEnv, ext_util.ParamsManagerMixin):
 
         super().__init__(params=params)
 
-    def get_environment_figsize(self, size_fact=1.0):
+    def get_environment_figsize(self, size_factor=1.0):
         """
         self.get_environment_figsize()
 
         Obtain the figure size for a 2D environment.
 
         Args:
-        - size_fact (float, optional): Size factor by which to expand the environment
+        - size_factor (float, optional): Size factor by which to expand the environment
             figure size in each dimension. Default is 1.0.
 
         Raises:
@@ -90,7 +90,7 @@ class Environment(riabEnv, ext_util.ParamsManagerMixin):
         extent = self.extent
         x_base = extent[1] - extent[0]
         y_base = extent[3] - extent[2]
-        figsize = (size_fact * x_base, size_fact * y_base)
+        figsize = (size_factor * x_base, size_factor * y_base)
 
         return figsize
 
@@ -1595,7 +1595,7 @@ class OpenField(Environment):
         sub_ax: plt.Axes | None = None,
         plot_objects: bool = True,
         skip_object_types: list = list(),
-        size_fact: float = 2.5,
+        size_factor: float = 2.5,
         alpha: float = 0.8,
         s: float = 20,
         no_legend: bool = False,
@@ -1620,7 +1620,7 @@ class OpenField(Environment):
             Default is True.
         - skip_object_types (list, optional): List of object types to skip plotting.
             Default is an empty list.
-        - size_fact (float, optional): Factor to multiply environment width by to
+        - size_factor (float, optional): Factor to multiply environment width by to
             determine figure size. Default is 2.5.
         - alpha (float, optional): Alpha value for plotting objects. Default is 0.8.
         - s (float, optional): Size of objects. Default is 20.
@@ -1648,7 +1648,9 @@ class OpenField(Environment):
         kwargs = plot_util.organize_fig_ax_kwargs(fig=fig, sub_ax=sub_ax, **kwargs)
 
         if "ax" not in kwargs.keys():
-            env_width, env_height = self.get_environment_figsize(size_fact=size_fact)
+            env_width, env_height = self.get_environment_figsize(
+                size_factor=size_factor
+            )
             if plot_objects:
                 env_width *= 1.5  # for legend and labels
             kwargs["fig"], kwargs["ax"] = plt.subplots(figsize=(env_width, env_height))

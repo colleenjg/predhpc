@@ -13,6 +13,7 @@ from ratinabox import utils as rutils  # type: ignore[import]
 from ratinabox import MOUNTAIN_PLOT_WIDTH_MM, MOUNTAIN_PLOT_SHIFT_MM
 
 from predhpc.util import ext_util, gen_util, learn_util, signal_util, plot_util
+from predhpc.experiments import metrics
 
 if TYPE_CHECKING:
     from predhpc.agent import ResetableAgent
@@ -1291,7 +1292,7 @@ def plot_1D_rate_map_across_learning(
 def add_1D_PF_widths(
     sub_ax,
     PF: np.ndarray[tuple[int, int, int], np.dtype[np.float64]],
-    PF_positions: np.ndarray | None = None,
+    PF_centers: np.ndarray | None = None,
     PCs: "riab_neurons.PlaceCells" = None,
     Ag: "ResetableAgent" = None,
     prop_peak: float = signal_util.DFT_PROP_PEAK,
@@ -1307,10 +1308,10 @@ def add_1D_PF_widths(
     Args:
     - sub_ax (plt.Axes): Subplot to add the width to.
     - PF (1D np.ndarray): Place field.
-    - PF_positions (1D np.ndarray, optional): Positions for the place fields. If None,
+    - PF_centers (1D np.ndarray, optional): Place field centers. If None,
         place cell centers are used. Default is None.
     - PCs (riab_neurons.PlaceCells): Place cells of the layer. Only required if
-        PF_positions is not provided. Default is None.
+        PF_centers is not provided. Default is None.
     - Ag (ResetableAgent, optional): Agent for which to plot the environment. Only
         required if time_axis is True and PCs is not provided. Default is None.
     - prop_peak (float): Proportion of the peak to use for width computation.
@@ -1333,19 +1334,19 @@ def add_1D_PF_widths(
     if len(PF.shape) != 1:
         raise ValueError("PF must be a 1D array.")
 
-    if PF_positions is None:
+    if PF_centers is None:
         if PCs is None:
-            raise ValueError("PCs must be provided if PF_positions is None.")
-        PF_positions = PCs.place_cell_centers[:, 0]
+            raise ValueError("PCs must be provided if PF_centers is None.")
+        PF_centers = PCs.place_cell_centers[:, 0]
 
-    if len(PF_positions) != len(PF):
+    if len(PF_centers) != len(PF):
         raise ValueError(
-            f"PF_positions must have the same length ({len(PF_positions)}) as the "
+            f"PF_centers must have the same length ({len(PF_centers)}) as the "
             f"number of values per place field ({len(PF)})."
         )
 
     if Ag is None:
-        max_pos = PF_positions.max()
+        max_pos = PF_centers.max()
     else:
         max_pos = Ag.Environment.scale
 
@@ -1354,12 +1355,12 @@ def add_1D_PF_widths(
         if Ag is None:
             raise ValueError("Ag must be provided if time_axis is True.")
         speed_mean = Ag.speed_mean  # m/s
-        PF_positions = PF_positions / speed_mean - time_shift
+        PF_centers = PF_centers / speed_mean - time_shift
         max_pos = max_pos / speed_mean
         unit = "s"
 
     width, edges = signal_util.compute_signal_width(
-        PF, PF_positions, max_x=max_pos, prop_peak=prop_peak, return_edges=True
+        PF, PF_centers, max_x=max_pos, prop_peak=prop_peak, return_edges=True
     )
     label = f"Width={width:.2f} {unit}"
 
@@ -1375,7 +1376,7 @@ def plot_1D_PFs(
     PFs: np.ndarray[tuple[int, int, int], np.dtype[np.float64]],
     PCs: "riab_neurons.PlaceCells" = None,
     PF_type: str = "weights",
-    PF_positions: np.ndarray | None = None,
+    PF_centers: np.ndarray | None = None,
     Ag: "ResetableAgent" = None,
     cmap: str = "crest",
     time_axis: bool = False,
@@ -1393,9 +1394,9 @@ def plot_1D_PFs(
     - PFs (2 or 3D np.ndarray): Place fields across epochs with shape
         ((num_epochs,) num_cells, num_PCs).
     - PCs (riab_neurons.PlaceCells): Place cells of the layer. Only required if
-        PF_positions is not provided. Default is None.
+        PF_centers is not provided. Default is None.
     - PF_type (str, optional): Type of place field to plot. Default is "weights".
-    - PF_positions (1D np.ndarray, optional): Positions for the place fields. If None,
+    - PF_centers (1D np.ndarray, optional): Place field centers. If None,
         place cell centers are used. Default is None.
     - Ag (ResetableAgent, optional): Agent for which to plot the environment. Only
         required if time_axis is True and PCs is not provided. Default is None.
@@ -1449,15 +1450,15 @@ def plot_1D_PFs(
         alpha = 0.8 ** (len(colors) / 6)
 
     xlabel = "Position (m)"
-    if PF_positions is None:
+    if PF_centers is None:
         if PCs is None:
-            raise ValueError("PCs must be provided if PF_positions is provided.")
-        PF_positions = PCs.place_cell_centers[:, 0]
+            raise ValueError("PCs must be provided if PF_centers is provided.")
+        PF_centers = PCs.place_cell_centers[:, 0]
         xlabel = "Input place cell center (m)"
 
-    if len(PF_positions) != PFs.shape[2]:
+    if len(PF_centers) != PFs.shape[2]:
         raise ValueError(
-            f"PF_positions must have the same length ({PF_positions.shape[0]}) as the "
+            f"PF_centers must have the same length ({PF_centers.shape[0]}) as the "
             f"number of values per place field ({PFs.shape[2]})."
         )
 
@@ -1470,10 +1471,10 @@ def plot_1D_PFs(
             raise ValueError("Ag must be provided if time_axis is True.")
         xlabel = "Average time (s)"
         speed_mean = Ag.speed_mean  # m/s
-        PF_positions = PF_positions / speed_mean
+        PF_centers = PF_centers / speed_mean
         if target_pos is not None:
             time_shift = target_pos / speed_mean
-            PF_positions = PF_positions - time_shift
+            PF_centers = PF_centers - time_shift
             target_pos = 0
 
     legend = plot_last_width
@@ -1491,7 +1492,7 @@ def plot_1D_PFs(
         for i, color in enumerate(colors):
             offset = spacing * n
             sub_ax.plot(
-                PF_positions,
+                PF_centers,
                 PFs[i, n] + offset,
                 color=color,
                 alpha=alpha,
@@ -1503,7 +1504,7 @@ def plot_1D_PFs(
                 add_1D_PF_widths(
                     sub_ax,
                     PFs[i, n],
-                    PF_positions=PF_positions,
+                    PF_centers=PF_centers,
                     PCs=PCs,
                     time_axis=time_axis,
                     time_shift=time_shift,
@@ -1547,7 +1548,7 @@ def plot_1D_PFs(
 
 def plot_recorded_1D_PFs(
     PFs,
-    PF_positions,
+    PF_centers,
     PFs_t=None,
     PF_type="weights",
     color="k",
@@ -1564,7 +1565,7 @@ def plot_recorded_1D_PFs(
     sub_ax=None,
 ):
     """
-    plot_recorded_1D_PFs(PFs, PF_positions)
+    plot_recorded_1D_PFs(PFs, PF_centers)
 
     Plots the place fields of a Pyr. somatic compartment, across time, for a linear
     track environment.
@@ -1572,7 +1573,7 @@ def plot_recorded_1D_PFs(
     Args:
     - PFs (2D np.ndarray): Place fields of a target neuron, for each timepoint,
         with shape (timepoints, num_inputs).
-    - PF_positions (1D np.ndarray): Positions for the place field values.
+    - PF_centers (1D np.ndarray): Positions for the place field values.
     - PFs_t (list): List of timepoints for the PFs. Must have the same
         length as PFs if provided. Default is None.
     - color (str, optional): Color. Default is "k".
@@ -1604,14 +1605,14 @@ def plot_recorded_1D_PFs(
             "must be the same."
         )
 
-    if len(PF_positions.shape) == 2:
-        if PF_positions.shape[1] != 1:
+    if len(PF_centers.shape) == 2:
+        if PF_centers.shape[1] != 1:
             raise ValueError(
-                "PF_positions must be a 1D array or a 2D array with one column."
+                "PF_centers must be a 1D array or a 2D array with one column."
             )
-        PF_positions = PF_positions[:, 0]
-    elif len(PF_positions.shape) > 2:
-        raise ValueError("PF_positions must be a 1D or 2D array.")
+        PF_centers = PF_centers[:, 0]
+    elif len(PF_centers.shape) > 2:
+        raise ValueError("PF_centers must be a 1D or 2D array.")
 
     if PF_type == "weights":
         xlabel = "Input place field center (m)"
@@ -1656,7 +1657,7 @@ def plot_recorded_1D_PFs(
             plot_PF = signal_util.smooth_circularly(plot_PF, k=k)
 
         sub_ax.plot(
-            PF_positions,
+            PF_centers,
             plot_PF,
             alpha=alpha,
             **place_PF_kwargs,
@@ -1670,7 +1671,7 @@ def plot_recorded_1D_PFs(
 
     elif num_plotted == 1:  # only one
         sub_ax.plot(
-            PF_positions,
+            PF_centers,
             last_PF,
             alpha=0.9,
             **place_PF_kwargs,
@@ -1678,11 +1679,11 @@ def plot_recorded_1D_PFs(
 
     if plot_last_width and num_plotted > 0:
         width, edges = signal_util.compute_signal_width(
-            last_PF, PF_positions, k=k, return_edges=True
+            last_PF, PF_centers, k=k, return_edges=True
         )
         label = f"width={width:.2f} m"
 
-        end_pts = [0, PF_positions.max()]
+        end_pts = [0, PF_centers.max()]
         if np.isclose(edges[0], edges[1]):
             edges = end_pts
         plot_util.plot_vspan_circular(
@@ -1709,7 +1710,7 @@ def plot_recorded_1D_PFs(
 def plot_1D_BTSP_stats(
     Pyrs,
     recorded_PFs,
-    PF_positions=None,
+    PF_centers=None,
     target_position=None,
     other_positions=list(),
     in_min=True,
@@ -1725,7 +1726,7 @@ def plot_1D_BTSP_stats(
     Args:
     - Pyrs (learning_neurons.BTSPLayer): Pyramidal neurons.
     - recorded_PFs (1D np.ndarray): Recorded place fields.
-    - PF_positions (1D np.ndarray, optional): Positions for the place fields. If None,
+    - PF_centers (1D np.ndarray, optional): Place field centers. If None,
         place cell centers are used. Default is None.
     - target_position (float, optional): Target position. Default is None.
     - other_positions (list, optional): Other positions to plot. Default is empty list.
@@ -1764,16 +1765,16 @@ def plot_1D_BTSP_stats(
     else:
         Pyrs.plot_BTSP_ramp(axes=BTSP_ramp_ax1D, in_min=in_min)
 
-    if PF_positions is None:
+    if PF_centers is None:
         _, _, PCs, _ = ext_util.extract_objects_from_Pyrs(Pyrs)
-        PF_positions = PCs.place_cell_centers
+        PF_centers = PCs.place_cell_centers
         color = color or PCs.color
     elif color is None:
         color = "k"
 
     plot_recorded_1D_PFs(
         recorded_PFs,
-        PF_positions,
+        PF_centers,
         PF_type=PF_type,
         color=color,
         marker="none",
@@ -2296,33 +2297,65 @@ def plot_1D_time_info(
     return axes
 
 
+def get_2D_PF_as_imshow(PFs, PF_centers):
+
+    if not len(PF_centers.shape) == 2 and PF_centers.shape[1] == 2:
+        raise ValueError("PF_centers must be a 2D array with shape (n, 2).")
+
+    unique_x = np.sort(np.unique(PF_centers[:, 0]))
+    unique_y = np.sort(np.unique(PF_centers[:, 1]))
+
+    linspace_x = np.linspace(unique_x.min(), unique_x.max(), len(unique_x))
+    linspace_y = np.linspace(unique_y.min(), unique_y.max(), len(unique_y))
+
+    if (
+        np.isclose(unique_x, linspace_x).all()
+        and np.isclose(unique_y, linspace_y).all()
+    ):
+        reindex = list()
+        for x, y in PF_centers:
+            x_idx = np.where(unique_x == x)[0][0]
+            y_idx = np.where(unique_y == y)[0][0]
+            reindex.append(x_idx + y_idx * len(unique_x))
+
+        reindex = np.asarray(reindex)
+        imshow_PFs = PFs[:, reindex].reshape(len(PFs), len(unique_x), len(unique_y))
+    else:
+        imshow_PFs = None
+
+    return imshow_PFs
+
+
 def plot_2D_PFs(
     target_neurons: "riab_neurons.Neurons",
     PCs_input_name: str = "PCs",
     PFs: np.ndarray[tuple[int, int], np.dtype[np.float64]] | None = None,
-    PF_positions: np.ndarray[tuple[int, int], np.dtype[np.float64]] | None = None,
+    PF_centers: np.ndarray[tuple[int, int], np.dtype[np.float64]] | None = None,
     chosen_neurons: (
         str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
     ) = "all",
     PF_type: str = "weights",
     PF_t_start: float | None = None,
+    PF_t_end: float | None = None,
     cmap: str = "inferno",
     vmin: float | None = None,
     vmax: float | None = None,
     round_dec: int = 2,
-    marker: str = "o",
+    marker: str | tuple = "o",
     alpha: float = 0.7,
     lw: float = 0,
     s: float = 75,
     obj_s: float = 20,
     BTSP_s: float = 10,
-    BTSP_marker: str = "x",
+    BTSP_marker: str | tuple = "x",
     zorder: int = 1,
     title: str | None = None,
     y: float = 1,
+    plot_colorbar: bool = True,
     single_colorbar: bool = False,
     cbar_side: str = "right",
     cbar_outline: bool = False,
+    num_cols: int = 10,
     plot_BTSP_events: bool = False,
     t_start: float | None = None,
     t_end: float | None = None,
@@ -2342,9 +2375,9 @@ def plot_2D_PFs(
     - PFs (2D np.ndarray, optional): Place fields to plot with shape
         (number of neurons, number of place field positions). If None, extracts the
         values from target_neurons. Default is None.
-    - PF_positions (2D np.ndarray, optional): Positions for the place fields with
+    - PF_centers (2D np.ndarray, optional): Place field centers with
         shape (number of place field positions, 2). If None, the place cell centers
-        from the PCs_input_name input layer are used. Exact PF positions may differ if
+        from the PCs_input_name input layer are used. Exact PF centers may differ if
         PF_type is "history" and PFs are not provided. Default is None.
     - PF_type (str, optional): Type of place field to plot. Either "weights" or
         "history". If "weights", the weights from the PCs_input_name input layer are
@@ -2352,6 +2385,8 @@ def plot_2D_PFs(
         Default is "weights".
     - PF_t_start (float, optional): Start time for the PFs if PF_type is "history".
         Default is None.
+    - PF_t_end (float, optional): End time for the PFs if PF_type is "history". Default
+        is None.
     - chosen_neurons (str, int, list, or np.ndarray, optional): Neurons to plot.
         Default is "all". If "all", all neurons are plotted. If int, a single neuron
         is plotted. If list or np.ndarray, a list of neurons is plotted.
@@ -2372,11 +2407,13 @@ def plot_2D_PFs(
     - zorder (int, optional): Zorder of the marker. Default is 1.
     - title (str, optional). Figure title. Default is None.
     - y (float, optional): Y position of the title. Default is 1.
+    - plot_colorbar (bool, optional): Whether to plot a colorbar. Default is True.
     - single_colorbar (bool, optional): Whether to use a single colorbar. Default is
         False.
     - cbar_side (str, optional): Side of the colorbar. Default is "right".
     - cbar_outline (bool, optional): Whether to draw an outline around the colorbar.
         Default is False.
+    - num_cols (int, optional): Number of columns for subplot array. Default is 10.
     - plot_BTSP_events (bool, optional): Whether to plot the BTSP events.
         Default is False.
     - t_start (float, optional): Start time of the plot. Default is None.
@@ -2398,18 +2435,18 @@ def plot_2D_PFs(
 
     """
 
-    if PFs is None or PF_positions is None:
+    if PFs is None or PF_centers is None:
         if PCs_input_name not in target_neurons.inputs.keys():
             raise ValueError(
                 f"Input layer '{PCs_input_name}' not found among target_neurons inputs."
             )
 
-    if PF_positions is None:
-        PF_positions = target_neurons.inputs[PCs_input_name]["layer"].place_cell_centers
+    if PF_centers is None:
+        PF_centers = target_neurons.inputs[PCs_input_name]["layer"].place_cell_centers
 
-    if len(PF_positions.shape) != 2 or PF_positions.shape[1] != 2:
+    if len(PF_centers.shape) != 2 or PF_centers.shape[1] != 2:
         raise ValueError(
-            "PF_positions must be a 2D array with shape (num_PF_positions, 2)."
+            "PF_centers must be a 2D array with shape (num_PF_centers, 2)."
         )
 
     chosen_neurons = np.asarray(
@@ -2420,46 +2457,40 @@ def plot_2D_PFs(
 
     BTSP_per = False
     if PFs is None:
-        if PF_type == "weights":
-            PFs = target_neurons.inputs[PCs_input_name]["w"][chosen_neurons]
-        elif PF_type == "history":
-            dist = np.inf
-            for i in range(2):
-                dist = min(
-                    dist,
-                    np.absolute(np.diff(np.sort(np.unique(PF_positions[:, i])))).min(),
-                )
-            PFs, PF_positions = target_neurons.get_history_ratemap(
-                t_start=PF_t_start, bin_size=dist / 2
-            )
-        else:
-            raise ValueError("PF_type must be either 'weights' or 'history'.")
+        PFs, PF_centers = metrics.evaluate_PFs(
+            target_neurons,
+            PC_name=PCs_input_name,
+            method=PF_type,
+            t_start=PF_t_start,
+            t_end=PF_t_end,
+            chosen_neurons=chosen_neurons,
+        )
         BTSP_per = True
 
-    if PFs.shape[1] != PF_positions.shape[0]:
+    if PFs.shape[1] != PF_centers.shape[0]:
         raise ValueError(
-            f"Number of PF positions ({PF_positions.shape[0]}) must match the number "
+            f"Number of PF centers ({PF_centers.shape[0]}) must match the number "
             f"of columns in PFs ({PFs.shape[1]})."
         )
 
     orig_vmin = vmin
-    fact = 10**round_dec
+    factor = 10**round_dec
     if vmin is None:
         vmin = np.nanmin(PFs)
-        vmin = np.floor(vmin * fact) / fact
+        vmin = np.floor(vmin * factor) / factor
 
     if vmax is None:
         vmax = max(np.nanmax(PFs), 0.02)
-        vmax = np.ceil(vmax * fact) / fact
+        vmax = np.ceil(vmax * factor) / factor
 
     if vmax == vmin and orig_vmin is None:
-        vmax = np.ceil(vmin * 2 * fact) / fact
+        vmax = np.ceil(vmin * 2 * factor) / factor
         vmin = 0
 
     if ax is None:
         ax = plot_util.init_rate_map_axes(
             num_plots=len(PFs),
-            num_cols=10,
+            num_cols=num_cols,
             **kwargs,
         )
 
@@ -2476,23 +2507,41 @@ def plot_2D_PFs(
         key = "base_s" if is_tmaze else "s"
         obj_s_kwarg[key] = obj_s
 
+    imshow_PFs = get_2D_PF_as_imshow(PFs, PF_centers)
+
+    if imshow_PFs is not None:
+        PFs = imshow_PFs
+
     for i in range(len(PFs)):
         target_neurons.Agent.Environment.plot_environment(
             sub_ax=ax1D[i], alpha=0.8, autosave=False, **kwargs, **obj_s_kwarg
         )
 
-        ax1D[i].scatter(
-            *PF_positions.T,
-            c=PFs[i],
-            vmin=vmin,
-            vmax=vmax,
-            marker=marker,
-            s=s,
-            alpha=alpha,
-            lw=0,
-            zorder=zorder,
-            cmap=cmap,
-        )
+        if imshow_PFs is None:
+            ax1D[i].scatter(
+                *PF_centers.T,
+                c=PFs[i],
+                vmin=vmin,
+                vmax=vmax,
+                marker=marker,
+                s=s,
+                alpha=alpha,
+                lw=0,
+                zorder=zorder,
+                cmap=cmap,
+            )
+        else:
+            ax1D[i].imshow(
+                PFs[i],
+                origin="lower",
+                extent=target_neurons.Agent.Environment.extent,
+                vmin=vmin,
+                vmax=vmax,
+                cmap=cmap,
+                zorder=zorder,
+                aspect="auto",
+                interpolation="nearest",
+            )
 
     if plot_BTSP_events:
         _, startid, endid = target_neurons.get_plotting_times(
@@ -2519,26 +2568,27 @@ def plot_2D_PFs(
                         chosen_neurons=[i], **BTSP_kwargs
                     )
 
-    norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
-    im = mpl_cm.ScalarMappable(norm=norm, cmap=cmap)
-    cbars = plot_util.add_colorbars(
-        ax,
-        im,
-        vmin=vmin,
-        vmax=vmax,
-        label=clabel,
-        end_only=single_colorbar,
-        side=cbar_side,
-        outline=cbar_outline,
-    )
+    if plot_colorbar:
+        norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
+        im = mpl_cm.ScalarMappable(norm=norm, cmap=cmap)
+        cbars = plot_util.add_colorbars(
+            ax,
+            im,
+            vmin=vmin,
+            vmax=vmax,
+            label=clabel,
+            end_only=single_colorbar,
+            side=cbar_side,
+            outline=cbar_outline,
+        )
 
-    v_ticks = [np.around(vmin, 2), np.around(vmax, 2)]
-    for cbar in cbars:
-        if np.diff(v_ticks) < 0.1:
-            tick_labels = [f"{tick:.2f}" for tick in v_ticks]
-        else:
-            tick_labels = [f"{tick:.1f}" for tick in v_ticks]
-        cbar.set_ticklabels(tick_labels)
+        v_ticks = [np.around(vmin, 2), np.around(vmax, 2)]
+        for cbar in cbars:
+            if np.diff(v_ticks) < 0.1:
+                tick_labels = [f"{tick:.2f}" for tick in v_ticks]
+            else:
+                tick_labels = [f"{tick:.1f}" for tick in v_ticks]
+            cbar.set_ticklabels(tick_labels)
 
     fig = ax1D[-1].figure
 

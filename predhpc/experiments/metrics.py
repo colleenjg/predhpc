@@ -5,17 +5,17 @@ from predhpc.util import signal_util
 WIDTH = 0.5  # symmetical width (m) around PC peak to use for pre/post weight ratio
 
 
-def get_smoothed_weights(all_weights, PF_centers, PC_widths):
+def get_smoothed_1D_weights(all_weights, PF_centers, PC_widths):
     """
-    get_smoothed_weights(all_weights, PF_centers, PC_widths)
+    get_smoothed_1D_weights(all_weights, PF_centers, PC_widths)
 
-    Apply a Gaussian smoothing kernel to the weights to take into account the spatial
+    Apply a Gaussian smoothing kernel to 1D weights to take into account the spatial
     structure of the place fields.
 
     Args:
     - all_weights (2D np.ndarray): Weights from place cells to pyramidal neurons
         (weights x place cells).
-    - PF_centers (1D or 2D np.ndarray): Place field centers (place cells x D).
+    - PF_centers (1D or 2D np.ndarray): Place field centers (place cells x 1).
     - PC_widths (float): Width of the place cells (same unit as PF_centers).
 
     Returns:
@@ -24,6 +24,10 @@ def get_smoothed_weights(all_weights, PF_centers, PC_widths):
     """
 
     if len(PF_centers.shape) == 2:
+        if PF_centers.shape[1] != 1:
+            raise NotImplementedError(
+                "Expected 1D PF_centers or second dimension to have length 1."
+            )
         PF_centers = PF_centers[:, 0]
 
     sorter = np.argsort(PF_centers)
@@ -43,7 +47,14 @@ def get_smoothed_weights(all_weights, PF_centers, PC_widths):
     return sm_weights, PF_centers
 
 
-def evaluate_PFs(Pyrs, PC_name="PCs", method="weights", t_start=None, t_end=None):
+def evaluate_PFs(
+    Pyrs,
+    PC_name="PCs",
+    method="weights",
+    t_start=None,
+    t_end=None,
+    chosen_neurons="all",
+):
     """
     evaluate_PFs(Pyrs)
 
@@ -62,16 +73,14 @@ def evaluate_PFs(Pyrs, PC_name="PCs", method="weights", t_start=None, t_end=None
         Default is "weights".
     - t_start (float, optional): Start time for history evaluation. Default is None.
     - t_end (float, optional): End time for history evaluation. Default is None.
+    - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
+            Default is "all".
 
     Returns:
     - PFs (2D np.ndarray): Place fields (neurons x PF centers).
-    - PF_centers (1D np.ndarray): Place field centers (PF centers).
+    - PF_centers (1D or 2D np.ndarray): Center coordinates for each place field
+        (place cells x dimensions).
     """
-
-    if Pyrs.Agent.Environment.D != 1:
-        raise NotImplementedError(
-            "Place field analysis tools only implemented for 1D environments."
-        )
 
     if hasattr(Pyrs, "SomaticCompartment"):
         Pyrs = Pyrs.SomaticCompartment
@@ -81,15 +90,34 @@ def evaluate_PFs(Pyrs, PC_name="PCs", method="weights", t_start=None, t_end=None
 
     PCs = Pyrs.inputs["PCs"]["layer"]
 
-    PF_centers = PCs.place_cell_centers[:, 0]
-    sorter = np.argsort(PF_centers)
-    PF_centers = PF_centers[sorter]
+    PF_centers = PCs.place_cell_centers
+    if Pyrs.Agent.Environment.D == 1:
+        PF_centers = PF_centers[:, 0]
+        sorter = np.argsort(PF_centers)
+        PF_centers = PF_centers[sorter]
+    elif Pyrs.Agent.Environment.D == 2:
+        if len(PF_centers.shape) != 2 or PF_centers.shape[1] != 2:
+            raise ValueError(
+                "PF_centers must be a 2D array with shape (num_PF_centers, 2)."
+            )
+    else:
+        raise NotImplementedError(
+            f"Expected environment to be 1 or 2D, but found {Pyrs.Agent.Environment.D}."
+        )
+
+    chosen_neurons = np.asarray(
+        Pyrs.return_list_of_neurons(chosen_neurons=chosen_neurons)
+    )
 
     if method in ["weights", "applied_weights", "smoothed_weights"]:
-
-        PFs = Pyrs.inputs["PCs"]["w"][:, sorter]
-
+        PFs = Pyrs.inputs["PCs"]["w"][chosen_neurons]
         if method == "smoothed_weights":
+            if Pyrs.Agent.Environment.D == 1:
+                PFs = PFs[:, sorter]
+            else:
+                raise NotImplementedError(
+                    "Smoothed weights only implemented for 1D environments."
+                )
             if PCs.description != "gaussian" or not isinstance(
                 PCs.widths, (int, float)
             ):
@@ -97,7 +125,7 @@ def evaluate_PFs(Pyrs, PC_name="PCs", method="weights", t_start=None, t_end=None
                     "PCs must have a Gaussian description and a single numeric width "
                     "to use 'smoothed_weights' method."
                 )
-            PFs, PF_centers = get_smoothed_weights(PFs, PF_centers, PCs.widths)
+            PFs, PF_centers = get_smoothed_1D_weights(PFs, PF_centers, PCs.widths)
 
         if method == "applied_weights":
             PC_inputs = PCs.get_state(evaluate_at="pos", pos=PF_centers.reshape(-1, 1))
@@ -105,15 +133,21 @@ def evaluate_PFs(Pyrs, PC_name="PCs", method="weights", t_start=None, t_end=None
             if Pyrs.biases.shape != V.shape:
                 Pyrs.biases = Pyrs.biases.reshape((-1, 1))
             V += Pyrs.biases
-
-            PFs = V
-
             PFs = Pyrs.activation_function(V, deriv=False)
 
     elif method == "history":
-        dist = np.absolute(np.diff(PF_centers)).mean() / 2
+        if Pyrs.Agent.Environment.D == 1:
+            dist = np.absolute(np.diff(PF_centers)).mean()
+        elif Pyrs.Agent.Environment.D == 2:
+            dist = np.inf
+            for i in range(2):
+                dist = min(
+                    dist,
+                    np.absolute(np.diff(np.sort(np.unique(PF_centers[:, i])))).min(),
+                )
+        bin_size = dist / 2
         PFs, PF_centers = Pyrs.get_history_ratemap(
-            t_start=t_start, t_end=t_end, bin_size=dist
+            t_start=t_start, t_end=t_end, bin_size=bin_size
         )
 
     else:
@@ -137,7 +171,8 @@ def get_PF_info(Pyrs, PC_name="PCs", **kwargs):
 
     Returns:
     - PFs (2D np.ndarray): Place field.
-    - PF_centers (np.ndarray): center coordinates for each place field point.
+    - PF_centers (1D or 2D np.ndarray): Center coordinates for each place field
+        (place cells x dimensions).
     - peak_idx (int or None): Index of the place cell weight peak. If all weights are
         equal, returns None.
     """
@@ -255,6 +290,9 @@ def compute_PF_width(Pyrs, k=1, prop_peak=signal_util.DFT_PROP_PEAK, **kwargs):
     - width (float): Width of the place field.
     """
 
+    if Pyrs.Agent.Environment.D != 1:
+        raise NotImplementedError("PF width only implemented for 1D environments.")
+
     PF, PF_centers, peak_idx = get_PF_info(Pyrs, **kwargs)
 
     if peak_idx is None:
@@ -276,7 +314,7 @@ def compute_BTSP_metrics(Pyrs, t_start=0, bins=21, width=WIDTH, k=1, **kwargs):
 
     Args:
     - Pyrs (two_comp_neurons.TwoCompLayer): Pyr. layer.
-    - start_time (int, optional): Time from which to gather metrics. Default is 0.
+    - t_start (int, optional): Time from which to gather metrics. Default is 0.
     - bins (int, optional): Number of bins to use for binning positions on linear
         track and counting number of positions a BTSP event occurred in. Default is 21.
     - width (float, optional): Width (m) around PC peak to use for pre/post weight

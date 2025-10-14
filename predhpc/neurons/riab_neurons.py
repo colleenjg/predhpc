@@ -676,7 +676,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         adjust_xlim: bool = True,
         in_min: bool = True,
         imshow: bool = False,
-        norm_by: str | None = None,
+        norm_by: str = "max",
         lw: float = 1.0,
         autosave: bool | None = None,
         **kwargs,
@@ -700,7 +700,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         - in_min (bool, optional): Whether to plot time in minutes instead of seconds.
             Default is True.
         - norm_by (str, optional): Normalization method for the firing rates. If "none",
-            parameters are chosen so no normalization is applied. Default is None.
+            parameters are chosen so no normalization is applied. Default is "max".
         - lw (float, optional): Line width for the firing rate timeseries. Default is 1.0.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
         global autosave setting for ratinabox is used. Default is None.
@@ -735,7 +735,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
             kwargs["norm_by"] = 1
             kwargs["overlap"] = 1
             kwargs["global_shift"] = -1
-        else:
+        elif norm_by:
             kwargs["norm_by"] = norm_by
 
         _, sub_ax = super().plot_rate_timeseries(

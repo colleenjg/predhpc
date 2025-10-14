@@ -2225,7 +2225,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         position_name="start",
         base_s=15,
         y_1D=0,
-        pos_fact=1,
+        pos_factor=1,
         pos_shift=0,
         raise_error=True,
         **kwargs,
@@ -2242,7 +2242,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         - base_s (int, optional): Base marker size. Default is 15.
         - y_1D (float, optional): Y position to plot at if environment is 1D.
             Default is 0.
-        - pos_fact (float, optional): Value by which to multiply positions.
+        - pos_factor (float, optional): Value by which to multiply positions.
             Default is 1.
         - pos_shift (float, optional): Value by which to shift positions (after
             multiplication, if applicable). Default is 0.
@@ -2259,7 +2259,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         if pos is None:
             return
 
-        pos = pos * pos_fact + pos_shift
+        pos = pos * pos_factor + pos_shift
         if self.Environment.D == 1:
             pos = np.asarray([pos, y_1D])
 
@@ -2673,8 +2673,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         skiprate = max(1, int((1 / framerate) / dt))
         t = t[::skiprate]
-        full_idx = np.arange(startid, endid + 1, skiprate)
-        trajectory = pos[full_idx]
+        full_idx = np.arange(0, endid - startid + 1, skiprate)
+        trajectory = pos[full_idx + startid]
 
         time = t / 60  # in minutes
 
@@ -2817,6 +2817,9 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                         s=s_2D * 2.75,
                         alpha=0.9,
                     )
+
+                if ax is None:
+                    ax = sub_ax
 
             if len(ax1D) > i:
                 for j in range(i + 1, len(ax1D)):
@@ -5187,7 +5190,7 @@ class OpenFieldAgent(ResetableAgent):
         sub_ax: plt.Axes | None = None,
         alpha: float = 1.0,
         plot_env: bool = True,
-        size_fact: float = 2.5,
+        size_factor: float = 2.5,
         no_legend: bool = False,
         colormap: str | None | mpl_colors.Colormap = None,
         autosave: bool | None = None,
@@ -5204,7 +5207,7 @@ class OpenFieldAgent(ResetableAgent):
         - alpha (float, optional): Alpha value of the targets.
         - plot_env (bool, optional): Whether to plot the environment, if sub_ax is not
             None. Default is True.
-        - size_fact (float, optional): Factor to multiply the environment size by.
+        - size_factor (float, optional): Factor to multiply the environment size by.
             Default is 2.5.
         - no_legend (bool, optional): Whether to remove the legend. Default is False.
         - colormap (str, optional): Colormap to use. Default is None.
@@ -5217,7 +5220,7 @@ class OpenFieldAgent(ResetableAgent):
 
         if sub_ax is None:
             sub_ax = self.Environment.plot_environment(
-                sub_ax=sub_ax, size_fact=size_fact
+                sub_ax=sub_ax, size_factor=size_factor
             )
 
         elif plot_env:
@@ -5460,7 +5463,7 @@ class OpenFieldAgent(ResetableAgent):
     def animate_trajectories(
         self,
         plot_head_direction=True,
-        size_fact=2,
+        size_factor=2,
         fps=8,
         speed_up=3,
         additional_plot_func: Callable | None = None,
@@ -5479,7 +5482,7 @@ class OpenFieldAgent(ResetableAgent):
             Default is True.
         - fps (int, optional): Frames per second. Default is 8.
         - speed_up (int, optional): Speedup factor for the animation. Default is 3.
-        - size_fact (float, optional): Factor to multiply the environment size by.
+        - size_factor (float, optional): Factor to multiply the environment size by.
             Default is 2.
         - additional_plot_func: A function that is called after each frame of the
             animation is plotted. It takes sub_ax, t and **kwargs and returns sub_ax.
@@ -5534,7 +5537,7 @@ class OpenFieldAgent(ResetableAgent):
             plot_head_direction=plot_head_direction,
             return_traj_fig=True,
             return_env_fig=True,
-            size_fact=size_fact,
+            size_factor=size_factor,
             fps=fps,
             speed_up=speed_up,
             progress_bar=True,

@@ -58,18 +58,19 @@ def initialize_paper_parameters(**kwargs):
     paper_plot_fcts.initialize_paper_parameters(**kwargs)
 
 
-def gather_PF_info(learner, k=SMOOTH_K, t_start=None):
+def gather_1D_PF_info(learner, k=SMOOTH_K, t_start=None, t_end=None):
     """
-    gather_PF_info(learner)
+    gather_1D_PF_info(learner)
 
-    Gathers information about place fields (PFs) from the given learner object using
-    various metrics ("weights", "smoothed_weights", "history").
+    Gathers information about place fields (PFs) from the given learner object in a 1D
+    environment using various metrics ("weights", "smoothed_weights", "history").
 
     Args:
     - learner (Learner): The learner object to gather information from.
     - k (int): The smoothing factor for place field width computation from firingrate
         history. Default is SMOOTH_K.
     - t_start (float): The start time for history evaluation. Default is None.
+    - t_end (float): The end time for history evaluation. Default is None.
 
     Returns:
     - PF_info (dict): A dictionary containing gathered PF information:
@@ -92,19 +93,22 @@ def gather_PF_info(learner, k=SMOOTH_K, t_start=None):
     sorter = np.argsort(PC_place_centers)
     PF_info["PC_place_centers"] = PC_place_centers[sorter]
 
-    PF_info["PC_weights"] = learner.get_recorded_weights()["weights"][:, 0, sorter]
+    PC_weights = learner.get_recorded_weights()["weights"][..., sorter]
+    if learner.Pyrs.n == 1:
+        PC_weights = PC_weights[:, 0]
+    PF_info["PC_weights"] = PC_weights
     PF_info["PC_weight_widths"] = metrics.compute_PF_width(learner.Pyrs, k=1)
 
     # from input weights, smoothed
-    PF_info["PC_smoothed_weights"], _ = metrics.get_smoothed_weights(
-        PF_info["PC_weights"], PF_info["PC_place_centers"], PCs.widths
-    )
-    PF_info["PC_smoothed_weight_widths"] = metrics.compute_PF_width(
-        learner.Pyrs, k=1, method="smoothed_weights"
-    )
+    if learner.Pyrs.Agent.Environment.D == 1:
+        PF_info["PC_smoothed_weights"], _ = metrics.get_smoothed_1D_weights(
+            PF_info["PC_weights"], PF_info["PC_place_centers"], PCs.widths
+        )
+        PF_info["PC_smoothed_weight_widths"] = metrics.compute_PF_width(
+            learner.Pyrs, k=1, method="smoothed_weights"
+        )
 
     # from history
-    _, _, PCs, _ = ext_util.extract_objects_from_Pyrs(learner.Pyrs)
     PFs, PF_centers = metrics.evaluate_PFs(
         learner.Pyrs, method="history", t_start=t_start
     )
@@ -113,6 +117,70 @@ def gather_PF_info(learner, k=SMOOTH_K, t_start=None):
     PF_info["PF_widths"] = metrics.compute_PF_width(
         learner.Pyrs, k=k, method="history", t_start=t_start
     )
+
+    return PF_info
+
+
+def gather_2D_PF_info(learner):
+    """
+    gather_2D_PF_info(learner)
+
+    Gathers information about place fields (PFs) from the given learner object in a 2D
+    environment using various metrics ("weights", "history").
+
+    Args:
+    - learner (Learner): The learner object to gather information from.
+    - k (int): The smoothing factor for place field width computation from firingrate
+        history. Default is SMOOTH_K.
+    - t_start (float): The start time for history evaluation. Default is None.
+    - t_end (float): The end time for history evaluation. Default is None.
+
+    Returns:
+    - PF_info (dict): A dictionary containing gathered PF information:
+        - "PC_place_centers": Place cell centers.
+        - "PC_weights": List of place cell input weights.
+        - "PFs": Place fields computed from history for each applied BTSP event.
+        - "PF_centers": List of place field centers.
+        - "PF_times": List of (start, end) times for each applied BTSP event for which
+            PFs were computed (times x 2).
+    """
+
+    _, _, PCs, _ = ext_util.extract_objects_from_Pyrs(learner.Pyrs)
+
+    PF_info = dict()
+
+    # from input weights
+    PF_info["PC_place_centers"] = PCs.place_cell_centers
+    PC_weights = learner.get_recorded_weights()["weights"]
+    if learner.Pyrs.n == 1:
+        PC_weights = PC_weights[:, 0]
+    PF_info["PC_weights"] = PC_weights
+
+    PF_shape = None
+
+    # from history
+    history_PFs = list()
+    PF_times = ext_util.get_times_for_each_BTSP_event(learner.Pyrs.SomaticCompartment)
+    for t_start, t_end in PF_times:
+        if np.isnan(t_start):
+            if PF_shape is None:
+                history_PFs.append(None)
+            else:
+                history_PFs.append(np.full(PF_shape, np.nan))
+
+        PFs, PF_centers = metrics.evaluate_PFs(
+            learner.Pyrs, method="history", t_start=t_start, t_end=t_end
+        )
+        if learner.Pyrs.n == 1:
+            PFs = PFs[0]
+        history_PFs.append(PFs)
+
+    if history_PFs[0] is None:
+        history_PFs[0] = np.full(PF_shape, np.nan)
+
+    PF_info["PFs"] = np.asarray(history_PFs)
+    PF_info["PF_centers"] = PF_centers
+    PF_info["PF_times"] = np.asarray(PF_times)
 
     return PF_info
 
@@ -475,7 +543,7 @@ def run_linear_speed(
         seed=False,
     )
 
-    data_dict = gather_PF_info(learner, k=k, t_start=t_start)
+    data_dict = gather_1D_PF_info(learner, k=k, t_start=t_start)
 
     num_BTSP_applied = len(
         Pyrs.SomaticCompartment.get_BTSP_steps(applied_only=True, apply_step=True)
@@ -789,7 +857,7 @@ def run_linear_shift(
     if additional > 0:
         raise RuntimeError(f"Expected no new BTSP events, but {additional} occurred.")
 
-    data_dict = gather_PF_info(learner, k=k, t_start=t_start)
+    data_dict = gather_1D_PF_info(learner, k=k, t_start=t_start)
 
     # pad data if num of BTSP events is below 2
     PF_keys = ["PC_weights", "PC_smoothed_weights", "PFs"]
@@ -1012,6 +1080,9 @@ def log_max_normalization_value(norm_values):
     - norm_values (np.ndarray): Array of normalization values to log.
     """
 
+    if isinstance(norm_values, list):
+        norm_values = np.concatenate(norm_values)
+
     finite = np.isfinite(norm_values)
     if finite.any():
         max_norm = np.nanmax(norm_values)
@@ -1136,8 +1207,8 @@ def run_openfield_corridor(
     Pyrs=None,
     max_num_steps=OPENFIELD_MAX_STEPS,
     max_time_min=None,
-    weight_recording_freq=1000,
     teleportation_enabled=False,
+    no_logs=False,
     seed=True,
     **kwargs,
 ):
@@ -1156,6 +1227,9 @@ def run_openfield_corridor(
         If specified, it overrides max_num_steps based on the agent's time step. Note
         that if learner is set to finish final trajectory, max_time_min will be
         exceeded to complete any incomplete trajectories. Default is None.
+    - teleportation_enabled (bool, optional): Whether to enable teleportation. Default
+        is False.
+    - no_logs (bool): Whether to disable logging. Default is False.
     - seed (bool): Whether to seed the random number generator with the paper seed.
         Default is True.
 
@@ -1170,7 +1244,9 @@ def run_openfield_corridor(
         gen_util.seed_all(PAPER_SEED)
 
     if Pyrs is None:
-        Pyrs = get_openfield_Pyrs(corridor=True, init_reward_only=True, seed=False)
+        Pyrs = get_openfield_Pyrs(
+            corridor=True, init_reward_only=True, seed=False, log_BTSP=not (no_logs)
+        )
 
     Pyrs.Agent.set_no_target_factor(2)
 
@@ -1181,8 +1257,8 @@ def run_openfield_corridor(
         Pyrs_or_learner=Pyrs,
         corridor=True,
         max_num_steps=max_num_steps,
-        weight_recording_freq=weight_recording_freq,
         teleportation_enabled=teleportation_enabled,
+        no_logs=no_logs,
         **kwargs,
     )
 
@@ -1212,7 +1288,6 @@ def plot_openfield_corridor_components(Pyrs=None, **kwargs):
             Pyrs_or_learner=Pyrs,
             corridor=True,
             max_num_steps=OPENFIELD_MAX_STEPS,
-            weight_recording_freq=1000,
             teleportation_enabled=False,
         )
         Pyrs = learner.Pyrs
@@ -1224,9 +1299,9 @@ def plot_openfield_corridor_components(Pyrs=None, **kwargs):
     return axes
 
 
-def plot_openfield_corridor_PFs(Pyrs=None, **kwargs):
+def plot_openfield_corridor_PF(Pyrs=None, **kwargs):
     """
-    plot_openfield_corridor_PFs()
+    plot_openfield_corridor_PF()
 
     Plots the weights of the Pyr neuron in the openfield corridor.
 
@@ -1247,12 +1322,11 @@ def plot_openfield_corridor_PFs(Pyrs=None, **kwargs):
             Pyrs_or_learner=Pyrs,
             corridor=True,
             max_num_steps=OPENFIELD_MAX_STEPS,
-            weight_recording_freq=1000,
             teleportation_enabled=False,
         )
         Pyrs = learner.Pyrs
 
-    sub_ax = paper_plot_fcts.plot_openfield_PFs(Pyrs, **kwargs)
+    sub_ax = paper_plot_fcts.plot_openfield_PF(Pyrs, **kwargs)
 
     return sub_ax
 
@@ -1281,7 +1355,6 @@ def plot_openfield_corridor_BTSP_trajectory(Pyrs=None, **kwargs):
             Pyrs_or_learner=Pyrs,
             corridor=True,
             max_num_steps=OPENFIELD_MAX_STEPS,
-            weight_recording_freq=1000,
             teleportation_enabled=False,
         )
         Pyrs = learner.Pyrs
@@ -1314,7 +1387,6 @@ def plot_openfield_corridor_timeseries(Pyrs=None, **kwargs):
             Pyrs_or_learner=Pyrs,
             corridor=True,
             max_num_steps=OPENFIELD_MAX_STEPS,
-            weight_recording_freq=1000,
             teleportation_enabled=False,
         )
         Pyrs = learner.Pyrs
@@ -1324,6 +1396,282 @@ def plot_openfield_corridor_timeseries(Pyrs=None, **kwargs):
     )
 
     return sub_ax
+
+
+def run_openfield_corridors(
+    seed=True, max_num_steps=OPENFIELD_MAX_STEPS, num_repeats=10
+):
+    """
+    run_openfield_corridors()
+
+    Runs multiple repeats of the openfield corridor experiment and collects data on
+    place field widths and weights.
+
+    Args:
+    - seed (bool): Whether to seed the random number generator with the paper seed.
+        Default is True.
+    - max_num_steps (int): Maximum number of steps to run the environment. Note
+        that if learner is set to finish final trajectory, max_num_steps will be
+        exceeded to complete any incomplete trajectories. Default is OPENFIELD_MAX_STEPS.
+    - num_repeats (int): Number of repeats for the experiment. Default is 10.
+
+    Returns:
+    - data_dict (dict): Dictionary containing:
+        - "PC_place_centers": Array of place cell centers.
+        - "PC_weights": Array of place cell input weights.
+        - "PFs": Array of place fields computed from history.
+        - "PF_centers": Array of place field centers.
+        - "PF_times": Array of place field history collection times.
+        - "BTSP_times": Array of times at which BTSP events were applied.
+        - "num_BTSP": Number of BTSP events that were applied in total for each run.
+        - "visit_times": Array of times at which the agent visited the reward location.
+        - "num_visits": Number of visits to the reward location for each run.
+        - "norm_values": Normalization values used for each run.
+        - "seeds": Array of random seeds used for each run.
+    """
+
+    # ragged: PC_weights, PFs, norm_values
+
+    if seed:
+        gen_util.seed_all(PAPER_SEED)
+
+    seeds = np.sort(np.random.choice(10000, size=num_repeats, replace=False))
+
+    if seed:
+        seeds = seeds[seeds != PAPER_SEED][: num_repeats - 1]
+        seeds = np.insert(seeds, 0, PAPER_SEED)
+
+    data_dicts = list()
+    for i in tqdm(range(num_repeats)):
+        gen_util.seed_all(int(seeds[i]))
+        learner = run_openfield_corridor(
+            max_num_steps=max_num_steps,
+            max_time_min=None,
+            teleportation_enabled=False,
+            seed=False,
+            no_logs=True,
+        )
+
+        BTSP_steps = learner.Pyrs.SomaticCompartment.get_BTSP_steps()
+        num_BTSP = len(BTSP_steps)
+        visit_steps = learner.Pyrs.Agent.get_position_visits(position_name="reward")
+        num_visits = len(visit_steps)
+        norm_values = learner.Pyrs.SomaticCompartment.get_normalization_values("PCs")[1]
+
+        data_dict = gather_2D_PF_info(learner)
+        data_dict["BTSP_times"] = BTSP_steps * learner.Pyrs.Agent.dt
+        data_dict["num_BTSP"] = num_BTSP
+        data_dict["visit_times"] = visit_steps * learner.Pyrs.Agent.dt
+        data_dict["num_visits"] = num_visits
+        data_dict["norm_values"] = norm_values[..., 0]
+        data_dicts.append(data_dict)
+
+    max_num_BTSP = max(data_dict["num_BTSP"] for data_dict in data_dicts)
+    BTSP_shape = (len(data_dicts), max_num_BTSP + 1)
+
+    max_num_visits = max(data_dict["num_visits"] for data_dict in data_dicts)
+    visit_shape = (len(data_dicts), max_num_visits)
+
+    data_dict = dict()
+    for key in data_dicts[0].keys():
+        if key in ["PF_centers", "PC_place_centers"]:
+            data_dict[key] = data_dicts[0][key]
+        elif key in [
+            "PC_weights",
+            "PFs",
+            "PF_times",
+            "BTSP_times",
+            "visit_times",
+            "norm_values",
+        ]:
+            shape = visit_shape if key == "visit_times" else BTSP_shape
+            data_dict[key] = np.full(shape + data_dicts[0][key].shape[1:], np.nan)
+            for j, sub_data_dict in enumerate(data_dicts):
+                data = sub_data_dict[key]
+                data_dict[key][j, : data.shape[0]] = data
+        else:
+            data_dict[key] = np.asarray([data_dict[key] for data_dict in data_dicts])
+
+    if seed:
+        data_dict["seeds"] = np.asarray(seeds)
+
+    return data_dict
+
+
+def plot_openfield_corridor_timelines(corridor_data=None, **kwargs):
+    """
+    plot_openfield_corridor_timelines()
+
+    Plots timelines of the openfield corridor experiments.
+
+    Args:
+    - corridor_data (dict): Dictionary containing openfield corridor data
+        (see run_openfield_corridors()). If not provided, data is loaded or
+        experiment is run from scratch. Default is None.
+
+    Keyword args:
+    - **kwargs: Keyword arguments passed to
+        paper_plot_fcts.plot_openfield_corridor_timelines().
+
+    Returns:
+    - sub_ax (plt.Axes): Subplot with openfield corridor timelines plotted.
+    """
+
+    if corridor_data is None:
+        corridor_data = run_openfield_fct("openfield_corridors", overwrite=False)
+
+    sub_ax = paper_plot_fcts.plot_openfield_corridor_timelines(
+        corridor_data["BTSP_times"],
+        corridor_data["visit_times"],
+        corridor_data["PF_times"],
+        **kwargs,
+    )
+
+    return sub_ax
+
+
+def plot_openfield_corridor_PFs(corridor_data=None, PF_type="history", **kwargs):
+    """
+    plot_openfield_corridor_PFs()
+
+    Plots examples of place fields for different openfield corridor experiments.
+
+    Args:
+    - corridor_data (dict): Dictionary containing openfield corridor data
+        (see run_openfield_corridors()). If not provided, data is loaded or
+        experiment is run from scratch. Default is None.
+    - PF_type (str): PF type to plot. Default is "history".
+
+    Keyword args:
+    - **kwargs: Keyword arguments passed to
+        paper_plot_fcts.plot_openfield_corridor_PFs().
+
+    Returns:
+    - axes (2D np.ndarray of plt.Axes): Subplots with example place fields plotted.
+    """
+
+    if corridor_data is None:
+        corridor_data = run_openfield_fct("openfield_corridors", overwrite=False)
+
+    Pyrs = get_openfield_Pyrs(corridor=True)
+
+    PF_key = "PFs" if PF_type == "history" else "PC_weights"
+    PF_center_key = "PF_centers" if PF_type == "history" else "PC_place_centers"
+
+    PFs = list()
+    for data in corridor_data[PF_key]:
+        idx = np.where(np.isfinite(data).any(axis=1))[0][-1]
+        PFs.append(data[idx])
+    PFs = np.asarray(PFs)
+
+    PF_centers = np.asarray(corridor_data[PF_center_key])
+
+    axes = paper_plot_fcts.plot_openfield_corridor_PFs(
+        Pyrs, PFs, PF_centers, PF_type=PF_type, num_BTSP=corridor_data["num_BTSP"]
+    )
+
+    return axes
+
+
+def run_openfield_corridor_teleport(
+    seed=True, max_num_steps=OPENFIELD_MAX_STEPS, min_num_teleports=4
+):
+    """
+    run_openfield_corridor_teleport()
+
+    Runs an openfield corridor experiment with teleportation enabled until a minimum
+    number of teleportation events have occurred.
+
+    Args:
+    - seed (bool): Whether to seed the random number generator with the paper seed.
+        Default is True.
+    - max_num_steps (int): Maximum number of steps to run the environment per learning
+        call until the target number of teleportation events is met. Note that if
+        learner is set to finish final trajectory, max_num_steps will be exceeded to
+        complete any incomplete trajectories. Default is OPENFIELD_MAX_STEPS.
+    - min_num_teleports (int): Minimum number of teleportation events to occur
+        before stopping the experiment. Default is 4.
+
+    Returns:
+    - learner (Learner): The learner object after training.
+    """
+
+    if seed:
+        gen_util.seed_all(PAPER_SEED)
+
+    learner = run_openfield_corridor(seed=False)
+
+    print("\nTeleportation enabled.")
+
+    learner.Agent.set_reward_factor(1)
+    learner.Agent.set_no_target_factor(1)
+
+    learner.Agent.allow_teleportation(True)
+    updater = run_manager.TeleportRewardUpdater(learner.Agent)
+
+    num_teleports = len(learner.Agent.teleportation_df)
+
+    while True:
+        run_manager.learn_openfield_BTSP(
+            Pyrs_or_learner=learner,
+            use_Hebbian=False,
+            max_num_steps=max_num_steps,
+            updater=updater,
+        )
+
+        if len(learner.Agent.teleportation_df) - num_teleports >= min_num_teleports:
+            break
+        else:
+            print(
+                f"\nContinuing to reach at least {min_num_teleports} "
+                "teleportation events."
+            )
+
+    return learner
+
+
+def run_openfield_fct(
+    fct_name="openfield_corridors", num_repeats=10, overwrite=False, seed=True
+):
+    """
+    run_openfield_fct()
+
+    Runs a specified openfield function, loading an existing data dictionary if it
+    exists or rerunning the experiment.
+
+    Args:
+    - fct_name (str): Name of the function to run. Default is 'openfield_corridors'.
+    - num_repeats (int): Number of repeats for the experiment. Default is 10.
+    - overwrite (bool): Whether to overwrite existing data. Default is False.
+    - seed (bool): Whether to seed the random number generator with the paper seed.
+        Default is True.
+
+    Returns:
+    - data_dict (dict): Dictionary containing the results of the experiment.
+    """
+
+    if fct_name == "openfield_corridors":
+        fct = run_openfield_corridors
+        data_name = "corridor_data"
+    else:
+        raise ValueError(f"fct_name '{fct_name}' not recognized.")
+
+    save_path = Path(ratinabox.figure_directory, f"{data_name}_{PAPER_SEED}.npz")
+    if overwrite:
+        gen_util.delete_np_dict(save_path)
+    data_dict = gen_util.load_np_dict(save_path)
+
+    if data_dict is None:
+        print("Running...")
+        start_time = time.perf_counter()
+        data_dict = fct(seed=seed, num_repeats=num_repeats)
+        gen_util.save_np_dict(save_path, data_dict)
+        gen_util.get_duration_str(start_time, log=True)
+
+    if "norm_values" in data_dict.keys():
+        log_max_normalization_value(data_dict["norm_values"])
+
+    return data_dict
 
 
 def plot_figure_panel(*args, fig=1, panel="A", save=True, **kwargs):
@@ -1374,12 +1722,17 @@ def plot_figure_panel(*args, fig=1, panel="A", save=True, **kwargs):
         },
         5: {
             "A-D": (plot_openfield_corridor_components, dict()),
-            "E": (plot_openfield_corridor_PFs, dict()),
+            "E": (plot_openfield_corridor_PF, dict()),
             "F": (plot_openfield_corridor_BTSP_trajectory, dict()),
             "G": (plot_openfield_corridor_timeseries, dict()),
         },
         "5S": {
-            "A": (plot_openfield_corridor_PFs, {"PF_type": "weights"}),
+            "A": (plot_openfield_corridor_PF, {"PF_type": "weights", "fig_side": 2.5}),
+            "B": (plot_openfield_corridor_timelines, dict()),
+            "C": (plot_openfield_corridor_PFs, dict()),
+        },
+        6: {
+            # "A": (plot_openfield_corridor_teleport, dict()),
         },
     }
 

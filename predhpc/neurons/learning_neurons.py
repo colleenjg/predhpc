@@ -2460,11 +2460,13 @@ class BTSPLayer(HebbianLayer):
                     applied_steps.append(step_applied)
                 all_steps.append(step)
 
-        all_steps = np.sort(all_steps)
+        all_steps = np.asarray(all_steps)
 
         if applied_also:
+            applied_steps = np.asarray(applied_steps)
             return all_steps, applied_steps
         else:
+            all_steps = np.sort(all_steps)
             return all_steps
 
     def get_BTSP_info(self, BTSP_idx=0, neuron_idx=0, t_start=None, t_end=None):
@@ -4269,7 +4271,7 @@ class BTSPLayer(HebbianLayer):
         in_steps: bool = False,
         color: str | None = None,
         s: int = 10,
-        marker: str = "x",
+        marker: str | tuple = "x",
         prop_y: float = 0.7,
         lw: float = 1.0,
         zorder: int = 5,
@@ -4453,7 +4455,7 @@ class BTSPLayer(HebbianLayer):
         mark_BTSP: bool = True,
         BTSP_s: int = 10,
         BTSP_lw: float = 1.0,
-        BTSP_marker: str = "x",
+        BTSP_marker: str | tuple = "x",
         in_min: bool = True,
         autosave: bool | None = None,
         **kwargs,

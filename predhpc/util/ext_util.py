@@ -758,47 +758,60 @@ def estimate_1D_place_cell_density(PCs):
     return PC_density_1D
 
 
-def choose_t_start_after_BTSP(
-    NeuronLayer, t_buffer=6, next_trajectory=False, min_total=60
+def get_times_for_each_BTSP_event(
+    NeuronLayer, t_buffer=6, next_trajectory=False, min_total=60, use_nans=False
 ):
     """
-    choose_t_start_after_BTSP
+    get_times_for_each_BTSP_event(NeuronLayer)
 
-    Obtain a start time after the last BTSP event.
+    Obtain a start and end times for each BTSP event.
 
     Args:
     - NeuronLayer: The neuron layer object.
-    - t_buffer (float): Time buffer to add after the last BTSP event.
+    - t_buffer (float): Time buffer to add after each BTSP event. Default is 6.
     - next_trajectory (bool): Whether to use the next trajectory's start time.
-    - min_total (float): Minimum total time required after the last BTSP event.
+        Default is False.
+    - min_total (float): Minimum total time required after each BTSP event.
+        Default is 60.
+    - use_nans (bool): Whether to use NaNs for times if insufficient time around BTSP
+        event. Default is False.
 
     Returns:
-    - t_start (float): The chosen start time.
+    - times (list of tuples): Start and end times for each applied BTSP event.
     """
 
+    if NeuronLayer.n != 1:
+        raise NotImplementedError(
+            "Choosing times for each BTSP event only implemented for layers with 1 neuron."
+        )
+
     BTSP_applied = NeuronLayer.get_BTSP_steps(applied_only=True, apply_step=True)
-    if len(BTSP_applied) == 0:
-        t_start = 0
-    else:
-        t_start = BTSP_applied[-1] * NeuronLayer.Agent.dt + t_buffer
+
+    times = list()
+    t_start = 0
+    for step in BTSP_applied:
+        t_end = step * NeuronLayer.Agent.dt - 1
+        if t_end - t_start >= min_total:
+            times.append((t_start, t_end))
+        elif use_nans:
+            times.append((np.nan, np.nan))
+
+        t_start = t_end + 1 + t_buffer
         if next_trajectory:
             traj_df = NeuronLayer.Agent.trajectory_df
             sub_df = traj_df.loc[traj_df["start_time"] > t_start]
             if len(sub_df) == 0:
                 raise RuntimeError(
-                    "No new trajectories found after last BTSP was event was "
+                    "No new trajectories found after BTSP event was "
                     f"applied using buffer of {t_buffer} seconds."
                 )
             t_start = sub_df.loc[sub_df.index[0]]["start_time"]
 
-    total_time = NeuronLayer.Agent.t - t_start
-    if total_time < min_total:
-        raise RuntimeError(
-            f"Insufficient time after last BTSP event {total_time:.2f} seconds "
-            f"(minimum requested is {min_total} seconds)."
-        )
+    t_end = NeuronLayer.Agent.t
+    if t_end - t_start >= min_total:
+        times.append((t_start, t_end))
 
-    return t_start
+    return times
 
 
 def create_weights_dict(weights, steps, t, steps_triggered=None):

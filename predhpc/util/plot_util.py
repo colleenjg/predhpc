@@ -364,6 +364,68 @@ def get_plot_shape(n: int, target_num_col: int = 10) -> tuple[int, int]:
     return shape
 
 
+def get_s_scatter_squares(fig_side=4.0, num=20):
+    """
+    get_s_scatter_squares()
+
+    Returns the square size (s) needed to contiguously plot square scatterplot markers
+    without overlap, based on the figure size and number of markers per side.
+
+    Sizes were identified manually.
+
+    Args:
+    - fig_side (float, optional): Size of the figure. Default is 4.
+    - num (int, optional): Number of markers per side. Default is 20.
+
+    Returns:
+    - s (float): Suggested starting estimate for the place field square size.
+    """
+
+    approx = False
+    if num == 20:
+        if fig_side == 1:
+            s = 10.2
+        elif fig_side == 2:
+            s = 42.8
+        elif fig_side == 3:
+            s = 99
+        elif fig_side == 4:
+            s = 176.3
+        elif fig_side == 5:
+            s = 278
+        else:
+            s = max(1, 66.8 * np.exp(fig_side * 0.34) - 85.6)
+            approx = True
+
+    elif num == 40:
+        if fig_side == 1:
+            s = 2.55
+        elif fig_side == 2:
+            s = 10.7
+        elif fig_side == 3:
+            s = 24.5
+        elif fig_side == 4:
+            s = 44.08
+        elif fig_side == 5:
+            s = 69
+        else:
+            s = max(1, 17 * np.exp(fig_side * 0.34) - 21.8)
+            approx = True
+
+    else:
+        raise NotImplementedError(
+            f"No proposed place field square size available for num={num}."
+        )
+
+    if approx:
+        print(
+            f"No square marker size recorded for fig_side of {fig_side}. "
+            f"Starting estimate of {s} suggested."
+        )
+
+    return s
+
+
 def pad_axis(sub_ax, axis="y", pad_prop=0.1, prop_high=0.5):
     """
     pad_axis(sub_ax)
@@ -522,9 +584,9 @@ def expand_ticks(
     ticks = [t for t in ticks if lims[0] <= t <= lims[1]]
     tick_min, tick_max = np.asarray(ticks).min(), np.asarray(ticks).max()
     if round_dec is not None:
-        fact = 10**round_dec
-        tick_min = np.floor(tick_min * fact) / fact
-        tick_max = np.ceil(tick_max * fact) / fact
+        factor = 10**round_dec
+        tick_min = np.floor(tick_min * factor) / factor
+        tick_max = np.ceil(tick_max * factor) / factor
 
     ticks = np.linspace(tick_min, tick_max, num_ticks)
     set_fct(ticks)

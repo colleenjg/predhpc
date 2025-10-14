@@ -46,7 +46,7 @@ class VNUpdater:
         Agent,
         target="reward",
         thresh_gradV=0.2,
-        drift_vel_fact=3,
+        drift_vel_factor=3,
         drift_to_random_strength_ratio=0.2,
     ):
         """
@@ -62,7 +62,7 @@ class VNUpdater:
         - thresh_gradV (float, optional): Threshold for the local gradient of the
             ValueNeuron below which the drift velocity will be set to zero. Default is
             0.2.
-        - drift_vel_fact (float, optional): Factor for scaling the drift velocity
+        - drift_vel_factor (float, optional): Factor for scaling the drift velocity
             relative to the agent's mean speed. Default is 3.
         - drift_to_random_strength_ratio (float, optional): Ratio of the strength of
             the drift velocity to the strength of the random velocity component. Default
@@ -71,24 +71,39 @@ class VNUpdater:
 
         self.Agent = Agent
 
+        self.set_target(target=target)
+
+        self.thresh_gradV = thresh_gradV
+        self.drift_vel_factor = drift_vel_factor
+        self.drift_to_random_strength_ratio = drift_to_random_strength_ratio
+
+    def set_target(self, target):
+        """
+        self.set_target(target)
+
+        Set the target position of the VNUpdater.
+
+        Args:
+        - target (str or 1D array): Name of target object in the environment or
+            position of the target. If a string is provided, there must be exactly one
+            object with that name in the environment.
+        """
+
         if isinstance(target, str):
-            targets = self.Agent.Environment.get_object_locations(target)
-            if len(targets) != 1:
+            target_positions = self.Agent.Environment.get_object_locations(target)
+            if len(target_positions) != 1:
                 raise ValueError(
                     "VNUpdater expects exactly one target object in the environment, "
-                    f"but found {len(targets)} '{target}' objects."
+                    f"but found {len(target_positions)} '{target}' objects."
                 )
-            target = targets[0]
+            target_position = target_positions[0]
         else:
-            target = self.Agent.format_position(target)
+            target_position = self.Agent.format_position(target)
 
-        VN_params = params_util.get_VN_params(peak=target)
+        VN_params = params_util.get_VN_params(peak=target_position)
         VN = value_neurons.SimpleValueNeuron(self.Agent, params=VN_params)
 
         self.VN = VN
-        self.thresh_gradV = thresh_gradV
-        self.drift_vel_fact = drift_vel_fact
-        self.drift_to_random_strength_ratio = drift_to_random_strength_ratio
 
     def get_update_kwargs(self, ignore_agent_target=False):
         """
@@ -119,11 +134,97 @@ class VNUpdater:
         ):
             gradV = self.VN.get_local_gradient(thresh_gradV=self.thresh_gradV)
             if gradV is not None:
-                drift_velocity = self.drift_vel_fact * self.Agent.speed_mean * gradV
+                drift_velocity = self.drift_vel_factor * self.Agent.speed_mean * gradV
         update_kwargs = {
             "drift_velocity": drift_velocity,
             "drift_to_random_strength_ratio": self.drift_to_random_strength_ratio,
         }
+
+        return update_kwargs
+
+
+class TeleportRewardUpdater(VNUpdater):
+    def __init__(self, Agent, switch_after=1, targets=["teleport_0_in", "reward"]):
+        """
+        TeleportRewardUpdater
+
+        Custom VNUpdater that switches the agent's target between a teleportation in
+        port and a reward location after a specified number of teleports.
+
+        Args:
+        - Agent (Agent): The agent whose target will be updated.
+        - switch_after (int): Number of teleportation events after which to switch
+            the target to the second location provided. Default is 1.
+        - targets (list): List of two target names. The first should be a teleportation
+            in port, and the second should be the reward location. Default is
+            ["teleport_0_in", "reward"].
+        """
+
+        if len(targets) != 2:
+            raise ValueError("'targets' must be a list of two target names.")
+
+        if "teleport" not in targets[0] and "in" not in targets[0]:
+            raise ValueError(
+                "First target in 'targets' should be a teleportation in port."
+            )
+
+        super().__init__(Agent, target=targets[1])
+
+        self.VN_other = self.VN
+
+        self.set_target(targets[0])
+        self.VN_teleport = self.VN
+
+        self.targets = targets
+
+        self.initial_reward_factor = Agent.reward_factor
+        Agent.set_reward_factor(0)
+
+        self.initial_no_target_factor = Agent.no_target_factor
+        Agent.set_no_target_factor(0)
+
+        self.initial_num_teleports = len(Agent.teleportation_df)
+        self.switch_after = switch_after
+        self._switched = False
+
+    def get_update_kwargs(self, **kwargs):
+        """
+        self.get_update_kwargs()
+
+        Updates the agent's target based on the number of teleportation events, then
+        retrieves and returns update kwargs.
+
+        Returns:
+        - update_kwargs (dict): Dictionary with keyword arguments for updating agent
+            position. See super().get_update_kwargs() for details.
+        """
+
+        if "ignore_agent_target" in kwargs.keys() and kwargs["ignore_agent_target"]:
+            raise NotImplementedError(
+                "'ignore_agent_target' cannot be True for TeleportRewardUpdater."
+            )
+
+        if not self._switched:
+            if (
+                len(self.Agent.teleportation_df)
+                >= self.initial_num_teleports + self.switch_after
+            ):
+                self.Agent.set_reward_factor(self.initial_reward_factor)
+                self.Agent.set_no_target_factor(self.initial_no_target_factor)
+                self._switched = True
+
+        if self.Agent.target_position is None:
+            pass
+        elif (self.VN.peak == self.Agent.target_position).all():
+            pass
+        elif (self.Agent.target_position == self.VN_teleport.peak).all():
+            self.VN = self.VN_teleport
+            self.target = self.targets[0]
+        elif (self.Agent.target_position == self.VN_other.peak).all():
+            self.VN = self.VN_other
+            self.target = self.targets[1]
+
+        update_kwargs = super().get_update_kwargs(**kwargs)
 
         return update_kwargs
 
@@ -838,6 +939,7 @@ def run_learner(
     - no_logs (bool, optional): Whether to disable logging. Default is False.
     """
 
+    initial = 0
     with AdjustMaxTraj(learner, finish_trajectory=finish_trajectory):
         if max_num_steps is None:
 

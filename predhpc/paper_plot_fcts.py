@@ -5,6 +5,8 @@ from pathlib import Path
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib import patches as mpl_patches
+from matplotlib import colors as mpl_colors
+from matplotlib import cm as mpl_cm
 import scipy.stats
 import ratinabox
 
@@ -274,7 +276,7 @@ def plot_1D_PFs(
     shift=0,
     scale_y=4,
     alpha=0.8,
-    shade_fact=1.0,
+    shade_factor=1.0,
     num_hatches=6,
     color="k",
     lw=LW,
@@ -293,7 +295,7 @@ def plot_1D_PFs(
     - shift (float, optional): Shift to apply to the place fields. Default is 0.
     - scale_y (float, optional): Scale factor for the y-axis. Default is 4.
     - alpha (float, optional): Alpha value for the plot line. Default is 0.8.
-    - shade_fact (float, optional): Factor by which to adjust the shading alphas.
+    - shade_factor (float, optional): Factor by which to adjust the shading alphas.
         Default is 1.0.
     - num_hatches (int, optional): Number of hatches to use for shading. Default is 6.
     - color (str, optional): Color of the place cell plot lines. Default is "k".
@@ -314,7 +316,7 @@ def plot_1D_PFs(
 
     plot_PFs = PFs * scale_y + shift
 
-    alphas = [0.3 * shade_fact, 0.5 * shade_fact]
+    alphas = [0.3 * shade_factor, 0.5 * shade_factor]
     hatches = ["/" * num_hatches, "\\" * num_hatches]
     if base is not None:
         base = base * scale_y + shift
@@ -598,17 +600,17 @@ def plot_linear_place_fields(learner):
             PF_centers = PCs.place_cell_centers
             color = PCs.color
             if PF_type == "smoothed_weights":
-                data, PF_centers = metrics.get_smoothed_weights(
+                data, PF_centers = metrics.get_smoothed_1D_weights(
                     data, PF_centers, PCs.widths
                 )
             elif PF_type != "weights":
                 raise ValueError(f"PF_type '{PF_type}' not recognized.")
         else:
-            t_start = ext_util.choose_t_start_after_BTSP(
+            t_start, t_end = ext_util.get_times_for_each_BTSP_event(
                 learner.Pyrs.SomaticCompartment, next_trajectory=True
-            )
+            )[-1]
             data, PF_centers = metrics.evaluate_PFs(
-                learner.Pyrs, method="history", t_start=t_start
+                learner.Pyrs, method="history", t_start=t_start, t_end=t_end
             )
             color = learner.Pyrs.SomaticCompartment.color
 
@@ -673,7 +675,7 @@ def plot_linear_binned_rates(learner, num_bins=150):
             sub_ax,
             Ag=learner.Pyrs.Agent,
             y_1D=3.4,
-            pos_fact=num_bins / 6,
+            pos_factor=num_bins / 6,
             pos_shift=-0.5,
         )
 
@@ -768,7 +770,7 @@ def plot_linear_speed_PF_examples(
     PFs, PF_centers, PF_widths = retrieve_PF_data(speed_data, PF_type=PF_type)
     if "weights" in PF_type:
         color = color or params_util.PC_COLOR
-        ytick_max, ymax = 0.25, 0.28
+        ytick_max, ymax = 0.26, 0.29
         round_dec = 2
     elif PF_type == "history":
         color = color or params_util.PYR_SOMATIC_COLOR
@@ -1075,7 +1077,7 @@ def plot_PF_peak_shift(
 
     Args:
     - PF_data (2D np.ndarray): Place fields to plot (number of place fields x
-        number of PF positions).
+        number of PF centers).
     - sub_ax (plt.Axes): Subplot on which to plot the data.
     - initial_peak_idx (int, optional): Index of the initial peak in the place field
         weights. Default is 0.
@@ -1547,7 +1549,7 @@ def plot_openfield_components(Pyrs, titles=False, traj_idx=8):
     """
 
     _, axes = plt.subplots(
-        2, 2, figsize=(3.8, 3.8), gridspec_kw={"wspace": 0.015, "hspace": 0.19}
+        2, 2, figsize=(4, 4), gridspec_kw={"wspace": 0.015, "hspace": 0.19}
     )
     Env, Ag, PCs, Objs = ext_util.extract_objects_from_Pyrs(Pyrs)
     if Env.D != 2:
@@ -1575,7 +1577,7 @@ def plot_openfield_components(Pyrs, titles=False, traj_idx=8):
         alpha=0.4,
         traj_idxs=[traj_idx],
         cmap_per=True,
-        framerate=8,
+        framerate=1 / Ag.dt,
         s_2D=5,
         plot_target=False,
         plot_agent=False,
@@ -1625,74 +1627,9 @@ def plot_openfield_components(Pyrs, titles=False, traj_idx=8):
     return axes
 
 
-def get_s_openfield_PFs(fig_side=4.0, PF_type="weights"):
+def plot_openfield_PF(Pyrs, fig_side=3.0, lw=LW, alpha=0.8, PF_type="history"):
     """
-    get_s_openfield_PFs(fig_side=4.0, num_x=60)
-
-    Returns the place field square size (s) needed to contiguously plot openfield place
-    fields without overlap, based on the figure size and type of place field to plot.
-
-    For weights, expects the place field plot to consist of a square grid of 60x60
-    input place fields. For history, expects a square grid of 120x120 positions.
-
-    Sizes were identified manually.
-
-    Args:
-    - fig_side (float, optional): Size of the figure. Default is 4.
-    - PF_type (str, optional): PF evaluation method to plot. Default is "weights".
-
-    Returns:
-    - s (float): Suggested starting estimate for the place field square size.
-    """
-
-    approx = False
-    if "weights" in PF_type:
-        if fig_side == 1:
-            s = 10.2
-        elif fig_side == 2:
-            s = 42.8
-        elif fig_side == 3:
-            s = 99
-        elif fig_side == 4:
-            s = 176.3
-        elif fig_side == 5:
-            s = 278
-        else:
-            s = max(1, 66.8 * np.exp(fig_side * 0.34) - 85.6)
-            approx = True
-
-    elif PF_type == "history":
-        if fig_side == 1:
-            s = 2.55
-        elif fig_side == 2:
-            s = 10.7
-        elif fig_side == 3:
-            s = 24.5
-        elif fig_side == 4:
-            s = 44.08
-        elif fig_side == 5:
-            s = 69
-        else:
-            s = max(1, 17 * np.exp(fig_side * 0.34) - 21.8)
-            approx = True
-
-    else:
-        raise NotImplementedError(
-            f"No proposed place field square size available for {PF_type} PF_type."
-        )
-
-    if approx:
-        print(
-            f"No place field square size recorded for fig_side of {fig_side}. "
-            f"Starting estimate of {s} suggested."
-        )
-
-    return s
-
-
-def plot_openfield_PFs(Pyrs, fig_side=3.0, lw=LW, alpha=0.8, PF_type="history"):
-    """
-    plot_openfield_PFs(Pyrs)
+    plot_openfield_PF(Pyrs)
 
     Plots the place field of the Pyr neuron in the openfield corridor.
 
@@ -1725,14 +1662,11 @@ def plot_openfield_PFs(Pyrs, fig_side=3.0, lw=LW, alpha=0.8, PF_type="history"):
         round_dec = 2
         vmax = None
 
-    s = get_s_openfield_PFs(fig_side=fig_side, PF_type=PF_type)
-
     plot_fcts.plot_2D_PFs(
         Pyrs.SomaticCompartment,
         PF_type=PF_type,
         PF_t_start=PF_t_start,
         alpha=alpha,
-        s=s,
         obj_s=30,
         BTSP_s=BTSP_S,
         BTSP_marker=BTSP_ASTERISK,
@@ -1754,6 +1688,99 @@ def plot_openfield_PFs(Pyrs, fig_side=3.0, lw=LW, alpha=0.8, PF_type="history"):
     cax.set_ylabel(clabel)
 
     return sub_ax
+
+
+def plot_openfield_corridor_PFs(
+    Pyrs,
+    PFs,
+    PF_centers,
+    PF_type="history",
+    num_BTSP=None,
+    fig_side=1.5,
+    num_cols=5,
+    lw=LW,
+    alpha=1.0,
+):
+    """
+    plot_openfield_corridor_PFs(Pyrs)
+
+    Plots series of openfield corridor place fields.
+
+    Args:
+    - Pyrs (Pyr): Pyr object for openfield.
+    - PFs (2D np.ndarray): Place fields to plot (number of place fields x
+        number of PF centers).
+    - PF_centers (1D np.ndarray): Centers of the input place fields.
+    - PF_type (str, optional): PF evaluation method to plot. Default is "history".
+    - num_BTSP (int, optional): Number of BTSP events per plot. Default is None.
+    - fig_side (float, optional): Size of the figure. Default is 1.5.
+    - num_cols (int, optional): Number of columns in the subplot grid. Default is 5.
+    - lw (float, optional): Line width. Default is LW.
+    - alpha (float, optional): Transparency level. Default is 1.0.
+
+    Returns:
+    - sub_ax (plt.Axes): The subplot with the plotted PFs.
+    """
+
+    num_plots = len(PFs)
+    num_cols = min(num_cols, num_plots)
+    num_rows = int(np.ceil(num_plots / num_cols))
+    width_ratios = [1] * num_cols + [0.1]
+
+    _, axes = plt.subplots(
+        num_rows,
+        num_cols + 1,
+        figsize=(fig_side * num_cols * 1.04, fig_side * num_rows),
+        gridspec_kw={"width_ratios": width_ratios},
+        squeeze=False,
+    )
+
+    if Pyrs.SomaticCompartment.n != 1:
+        raise ValueError("Only single neuron plotting is supported.")
+
+    cmap = "inferno"
+    vmin = 0
+    if PF_type == "history":
+        vmax = 10
+    else:
+        vmax = np.ceil(np.nanmax(PFs) * 10**2) / 10**2
+
+    plot_fcts.plot_2D_PFs(
+        Pyrs.SomaticCompartment,
+        PF_type=PF_type,
+        PFs=PFs,
+        PF_centers=PF_centers,
+        alpha=alpha,
+        obj_s=1,
+        lw=lw,
+        plot_BTSP_events=False,
+        skip_object_types=["teleport"],
+        no_legend=True,
+        vmin=vmin,
+        vmax=vmax,
+        ax=axes[:, :-1],
+        marker="s",
+        plot_colorbar=False,
+        cbar_side="right",
+        cbar_outline=True,
+    )
+
+    if num_BTSP is not None:
+        if len(num_BTSP) != num_plots:
+            raise ValueError("num_BTSP and PFs must have the same length.")
+        for i, sub_ax in enumerate(axes[:, :-1].ravel()):
+            title_str = "event" if num_BTSP[i] == 1 else "events"
+            sub_ax.set_title(f"{i + 1} ({num_BTSP[i]} BTSP {title_str})", fontsize=10)
+
+    for i, cax in enumerate(axes[:, -1]):
+        norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
+        im = mpl_cm.ScalarMappable(norm=norm, cmap=cmap)
+        plt.colorbar(im, cax=cax)
+        if i == num_rows - 1:
+            clabel = get_PF_label(PF_type, title=False)
+            cax.set_ylabel(clabel)
+
+    return axes
 
 
 def plot_openfield_corridor_BTSP_trajectory(Pyrs, x_lims=None, y_lims=(None, 0.6)):
@@ -1785,7 +1812,7 @@ def plot_openfield_corridor_BTSP_trajectory(Pyrs, x_lims=None, y_lims=(None, 0.6
         ax=sub_ax,
         t_start=t_start,
         t_end=t_end,
-        framerate=30,
+        framerate=1 / Ag.dt,
         s_2D=7,
         colormap=cmap,
         alpha=None,
@@ -1810,5 +1837,66 @@ def plot_openfield_corridor_BTSP_trajectory(Pyrs, x_lims=None, y_lims=(None, 0.6
         sub_ax.set_xlim(x_lims)
     if y_lims is not None:
         sub_ax.set_ylim(y_lims)
+
+    return sub_ax
+
+
+def plot_openfield_corridor_timelines(
+    BTSP_times, visit_times, PF_times, in_min=True, factor=1.5
+):
+
+    _, sub_ax = plt.subplots(figsize=(6, 3.3))
+
+    time_factor = 1 / 60 if in_min else 1
+    time_unit = "min" if in_min else "s"
+
+    num_repeats = len(BTSP_times)
+    for i, repeat_BTSP_times in enumerate(BTSP_times):
+        sub_ax.scatter(
+            repeat_BTSP_times * time_factor,
+            [i + 0.6] * len(repeat_BTSP_times),
+            marker=BTSP_ASTERISK,
+            color=params_util.PYR_SOMATIC_COLOR,
+            s=16 * factor,
+            lw=0.7 * factor,
+            zorder=5,
+        )
+
+    for i, repeat_visit_times in enumerate(visit_times):
+        sub_ax.scatter(
+            repeat_visit_times * time_factor,
+            [i + 1] * len(repeat_visit_times),
+            marker="o",
+            color=params_util.OBJ_COLOR,
+            s=4 * factor,
+            lw=0.7 * factor,
+            zorder=5,
+        )
+
+    for i, repeat_PF_times in enumerate(PF_times):
+        idx = np.where(np.isfinite(repeat_PF_times).all(axis=1))[0][-1]
+        start, end = repeat_PF_times[idx] * time_factor
+        sub_ax.plot(
+            [start, end],
+            [i + 1] * 2,
+            color=params_util.PYR_SOMATIC_COLOR,
+            lw=6 * factor,
+            alpha=0.4,
+            zorder=3,
+        )
+
+    sub_ax.set_xlim(0, None)
+    sub_ax.spines["bottom"].set_bounds(0, sub_ax.get_xlim()[1])
+    plot_util.pad_axis(sub_ax, axis="x", pad_prop=0.02, prop_high=1.0)
+
+    sub_ax.set_ylim(0.2, num_repeats + 0.8)
+    sub_ax.set_yticks(np.arange(num_repeats) + 1)
+    sub_ax.yaxis.set_ticks_position("right")
+    sub_ax.yaxis.set_tick_params(length=3)
+    sub_ax.yaxis.set_inverted(True)
+
+    sub_ax.spines[["top", "left", "right"]].set_visible(False)
+
+    sub_ax.set_xlabel(f"Time ({time_unit})")
 
     return sub_ax

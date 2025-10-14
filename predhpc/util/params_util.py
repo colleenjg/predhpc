@@ -527,7 +527,7 @@ def get_Pyr_params(
         BTSP_LR = 0.2
     else:
         W_INIT_LOC = 0.04
-        REG_ALPHA = 4.25
+        REG_ALPHA = 4.5
         BTSP_LR = 0.15
 
     if two_compartment:
