@@ -1379,7 +1379,7 @@ def plot_openfield_corridor_timeseries(Pyrs=None, **kwargs):
         run_manager.plot_single_neuron_rate_timeseries().
 
     Returns:
-    - sub_ax (plt.Axes): Subplot with openfield corridor weights plotted.
+    - sub_ax (plt.Axes): Subplot with the openfield corridor timeseries plotted.
     """
 
     if Pyrs is None:
@@ -1393,6 +1393,52 @@ def plot_openfield_corridor_timeseries(Pyrs=None, **kwargs):
 
     sub_ax = paper_plot_fcts.plot_single_neuron_rate_timeseries(
         Pyrs.SomaticCompartment, mark_traj_idxs=[EX_TRAJ_IDX], **kwargs
+    )
+
+    return sub_ax
+
+
+def plot_openfield_corridor_BTSP_kernel_timeseries(
+    Pyrs=None, t_start=18.5, t_end=41.5, num_ticks=13, in_min=False, **kwargs
+):
+    """
+    plot_openfield_corridor_BTSP_kernel_timeseries()
+
+    Plots the rate timeseries of the Pyr neuron in the openfield corridor with
+    BTSP kernel.
+
+    Args:
+    - Pyrs (Pyr): Pyr object for openfield corridor.
+        If None, a new Pyr object is created.
+    - t_end (float): End time for the timeseries plot. Default is 60 seconds.
+
+    Keyword Args:
+    - **kwargs: Additional keyword arguments passed to
+        run_manager.plot_openfield_corridor_BTSP_kernel_timeseries().
+
+    Returns:
+    - sub_ax (plt.Axes): Subplot with the openfield corridor timeseries plotted with
+        narrowly around the first BTSP event.
+    """
+
+    if Pyrs is None:
+        learner = run_manager.learn_openfield_BTSP(
+            Pyrs_or_learner=Pyrs,
+            corridor=True,
+            max_num_steps=OPENFIELD_MAX_STEPS,
+            teleportation_enabled=False,
+        )
+        Pyrs = learner.Pyrs
+
+    sub_ax = paper_plot_fcts.plot_single_neuron_rate_timeseries(
+        Pyrs.SomaticCompartment,
+        t_start=t_start,
+        t_end=t_end,
+        in_min=in_min,
+        num_ticks=num_ticks,
+        BTSP_kernel_num=2000,
+        BTSP_kernel_lw=2.5,
+        **kwargs,
     )
 
     return sub_ax
@@ -1429,8 +1475,6 @@ def run_openfield_corridors(
         - "norm_values": Normalization values used for each run.
         - "seeds": Array of random seeds used for each run.
     """
-
-    # ragged: PC_weights, PFs, norm_values
 
     if seed:
         gen_util.seed_all(PAPER_SEED)
@@ -1724,12 +1768,13 @@ def plot_figure_panel(*args, fig=1, panel="A", save=True, **kwargs):
             "A-D": (plot_openfield_corridor_components, dict()),
             "E": (plot_openfield_corridor_PF, dict()),
             "F": (plot_openfield_corridor_BTSP_trajectory, dict()),
-            "G": (plot_openfield_corridor_timeseries, dict()),
+            "G": (plot_openfield_corridor_timeseries, {"BTSP_kernel_lw": 0.03}),
         },
         "5S": {
-            "A": (plot_openfield_corridor_PF, {"PF_type": "weights", "fig_side": 2.5}),
-            "B": (plot_openfield_corridor_timelines, dict()),
-            "C": (plot_openfield_corridor_PFs, dict()),
+            "A": (plot_openfield_corridor_BTSP_kernel_timeseries, dict()),
+            "B": (plot_openfield_corridor_PF, {"PF_type": "weights", "fig_side": 2.5}),
+            "C": (plot_openfield_corridor_timelines, dict()),
+            "D": (plot_openfield_corridor_PFs, dict()),
         },
         6: {
             # "A": (plot_openfield_corridor_teleport, dict()),

@@ -57,7 +57,7 @@ def get_PF_label(PF_type="weights", title=False):
 def add_time_axis(
     sub_ax,
     dt: float = 0.03,
-    in_min: bool = False,
+    in_min: bool = True,
     max_num_minutes: float | int | None = None,
     trajectory_lengths: np.ndarray[tuple[int], np.dtype[np.int64]] | list | None = None,
     **kwargs,
@@ -70,7 +70,7 @@ def add_time_axis(
     Args:
     - sub_ax (plt.Axes): Subplot to create a twin axis from (along x axis).
     - dt (float, optional): Time step. Default is 0.03.
-    - in_min (bool, optional): Whether to plot in minutes. Default is False.
+    - in_min (bool, optional): Whether to plot in minutes. Default is True.
     - max_num_minutes (float, optional): Maximum number of minutes to plot.
         Default is None.
     - trajectory_lengths (1D np.ndarray, optional): Trajectory lengths. Default is None.
@@ -176,7 +176,7 @@ def add_time_axis(
 
 def plot_trajectory_lengths(
     dt: float | None = None,
-    in_min: bool = False,
+    in_min: bool = True,
     max_num_minutes: float | int | None = None,
     trajectory_lengths: np.ndarray[tuple[int], np.dtype[np.int64]] | list | None = None,
     **kwargs,
@@ -189,7 +189,7 @@ def plot_trajectory_lengths(
     Args:
     - dt (float, optional): Time step. If None, time axis is not added. Default is None.
     - in_min (bool, optional): Whether to plot time axis in minutes instead of
-        seconds. Default is False.
+        seconds. Default is True.
     - max_num_minutes (float, optional): Maximum time in minutes. Default is None.
 
     Keyword args:
@@ -253,7 +253,13 @@ def plot_trajectory_lengths(
         sub_ax.set_xlim(0 - pad, len(trajectory_lengths) + pad)
 
     if dt is not None:
-        add_time_axis(sub_ax, dt, in_min, max_num_minutes, trajectory_lengths)
+        add_time_axis(
+            sub_ax,
+            dt,
+            in_min=in_min,
+            max_num_minutes=max_num_minutes,
+            trajectory_lengths=trajectory_lengths,
+        )
 
     return sub_ax, trajectory_lengths
 

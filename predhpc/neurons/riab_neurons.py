@@ -719,7 +719,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
             lw = kwargs.pop("linewidth")
 
         if not in_min:
-            raise NotImplementedError("Plotting in seconds is not implemented.")
+            raise NotImplementedError("Plotting in seconds is not yet implemented.")
 
         kwargs = plot_util.organize_fig_ax_kwargs(
             sub_ax=sub_ax, return_env_fig=True, **kwargs
@@ -762,10 +762,11 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         sub_ax.set_xlabel(xlabel)
 
         if adjust_xlim:
-            xlim = np.asarray([t_start, t_end]) / 60
+            time_factor = 1 / 60 if in_min else 1
+            decimals = 2 if in_min else 0
+            xlim = np.asarray([t_start, t_end]) * time_factor
             sub_ax.set_xlim(*xlim)
-
-            xticks = np.around(xlim, 2)
+            xticks = np.around(xlim, decimals=decimals)
             sub_ax.set_xticks(xticks)
             sub_ax.set_xticklabels(xticks)
 

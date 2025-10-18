@@ -859,7 +859,9 @@ def get_plotting_times(
         end_time = times[-1] + t_end
 
     if end_time <= start_time and raise_error:
-        raise ValueError("End time must be greater than start time.")
+        raise ValueError(
+            f"End time ({end_time:.2f}) must be greater than start time ({start_time:.2f})."
+        )
 
     startid = int(np.argmin(np.abs(times - (start_time))))
     endid = int(np.argmin(np.abs(times - (end_time))))

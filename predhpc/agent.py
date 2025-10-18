@@ -2344,7 +2344,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         if in_min:
             t = t / 60
 
-        xs = [t[x] for x in indices if x >= startid and x < endid]
+        xs = [t[x - startid] for x in indices if x >= startid and x < endid]
         ys = [y] * len(xs)
 
         if len(xs) == 0:

@@ -206,7 +206,7 @@ def add_1D_position_markers(
         )
 
 
-def get_BTSP_times_and_cmap(NeuronLayer):
+def get_BTSP_times_and_cmap(NeuronLayer, BTSP_idx=0):
     """
     get_BTSP_times_and_cmap(NeuronLayer)
 
@@ -221,9 +221,14 @@ def get_BTSP_times_and_cmap(NeuronLayer):
     BTSP_times = NeuronLayer.get_BTSP_steps() * NeuronLayer.Agent.dt
     if len(BTSP_times) == 0:
         raise RuntimeError("No BTSP events found for the neuron layer.")
+    if BTSP_idx >= len(BTSP_times):
+        raise ValueError(
+            f"BTSP index of {BTSP_idx} to high for the number of BTSP events: "
+            f"{len(BTSP_times)}."
+        )
     pre, post = NeuronLayer.get_estimated_num_steps_pre_post_BTSP(as_time=True)
-    t_start = max(0, BTSP_times[0] - pre)
-    t_end = BTSP_times[0] + post
+    t_start = max(0, BTSP_times[BTSP_idx] - pre)
+    t_end = BTSP_times[BTSP_idx] + post
     cmap = NeuronLayer.get_BTSP_kernel_based_cmap(
         t_pre=pre,
         t_post=post,
@@ -234,7 +239,7 @@ def get_BTSP_times_and_cmap(NeuronLayer):
 
 
 def configure_neural_activity_axis(
-    sub_ax, ymin=0, ymax=10, norm=1, right=False, label=True
+    sub_ax, ymin=0, ymax=10, xmin=None, norm=1, right=False, label=True
 ):
     """
     configure_neural_activity_axis(sub_ax)
@@ -245,6 +250,7 @@ def configure_neural_activity_axis(
     - sub_ax (plt.Axes): Subplot for which to configure axis.
     - ymin (float, optional): Minimum value for y axis spine. Default is 0.
     - ymax (float, optional): Maximum value for y axis spine. Default is 10.
+    - xmin (float, optional): Minimum value for x axis spine. Default is None.
     - norm (float, optional): Normalization factor for y axis ticks. Default is 1.
     - right (bool, optional): IF True, y axis spine and labels are moved to the right.
         Default is False.
@@ -265,7 +271,9 @@ def configure_neural_activity_axis(
 
     sub_ax.spines[spine].set_visible(True)
     sub_ax.spines[spine].set_bounds(ymin / norm, ymax / norm)
-    sub_ax.spines["bottom"].set_bounds(0, sub_ax.get_xlim()[1])
+
+    xmin = xmin or 0
+    sub_ax.spines["bottom"].set_bounds(xmin, sub_ax.get_xlim()[1])
     if label:
         sub_ax.set_ylabel("Neural activity", labelpad=labelpad)
 
@@ -353,10 +361,17 @@ def plot_1D_PFs(
 def plot_single_neuron_rate_timeseries(
     NeuronLayer,
     chosen_neuron=0,
+    t_start=None,
+    t_end=None,
+    in_min=True,
     sub_ax=None,
+    fig_size=(10, 1.7),
+    num_ticks=11,
     lw=LW,
     mark_traj_idxs=None,
     mark_BTSP_kernel=True,
+    BTSP_kernel_s=60,
+    BTSP_kernel_lw=1,
 ):
     """
     plot_single_neuron_rate_timeseries(NeuronLayer)
@@ -367,60 +382,117 @@ def plot_single_neuron_rate_timeseries(
     - NeuronLayer (NeuronLayer): The NeuronLayer for which to plot activity.
     - chosen_neuron (int, optional): The index of the neuron to plot activity for.
         Default is 0.
+    - t_start (float, optional): Start time for the plot. Default is None.
+    - t_end (float, optional): End time for the plot. Default is None.
+    - in_min (bool, optional): Whether to plot time in minutes. Default is True.
     - sub_ax (plt.Axes, optional): The subplot to plot on. Default is None.
+    - fig_size (tuple, optional): Size of the figure if sub_ax is None.
+        Default is (10, 1.7).
+    - num_ticks (int, optional): Number of ticks on the x-axis. Default is 11.
     - lw (float, optional): Line width for the plot. Default is LW.
     - mark_traj_idxs (list, optional): List of trajectory indices to mark on the plot.
         Default is None.
     - mark_BTSP_kernel (bool, optional): Whether to mark the BTSP kernel on the plot.
         Default is True.
+    - BTSP_kernel_s (int, optional): Size of the BTSP kernel markers. Default is 60.
+    - BTSP_kernel_lw (float, optional): Line width of the BTSP kernel markers.
+        Default is 1.
 
     Returns:
     - sub_ax (plt.Axes): The axes with the plotted neuron activity.
     """
 
     if sub_ax is None:
-        _, sub_ax = plt.subplots(figsize=(10, 1.7))
+        _, sub_ax = plt.subplots(figsize=fig_size)
 
     NeuronLayer.plot_rate_timeseries(
         sub_ax=sub_ax,
-        lw=lw,
         norm_by="none",
         mark_BTSP=False,
+        t_start=t_start,
+        t_end=t_end,
+        lw=lw,
         chosen_neurons=[chosen_neuron],
     )
 
-    ylow = -0.3 if mark_traj_idxs or mark_BTSP_kernel else -0.2
+    if mark_BTSP_kernel:
+        ylow = -1.0
+    elif mark_traj_idxs:
+        ylow = -0.3
+    else:
+        ylow = -0.2
 
     ymin = min(sub_ax.get_ylim()[0], ylow) + ylow
     ymax = max(sub_ax.get_ylim()[1], 11) * 1.3
     sub_ax.set_ylim(ymin, ymax)
 
     NeuronLayer.add_BTSP_markers_to_plots(
-        ax=sub_ax, s=BTSP_S, prop_y=0.8, lw=lw, marker=BTSP_ASTERISK, timeseries=True
+        ax=sub_ax,
+        s=BTSP_S,
+        prop_y=0.8,
+        marker=BTSP_ASTERISK,
+        timeseries=True,
+        t_start=t_start,
+        t_end=t_end,
+        lw=lw,
+        chosen_neurons=[chosen_neuron],
     )
     sub_ax.set_ylabel("")
-    plot_util.expand_ticks(
-        sub_ax, axis="x", num_ticks=11, alternating=True, round_dec=1
+    xticks = plot_util.expand_ticks(
+        sub_ax, axis="x", num_ticks=num_ticks, alternating=True, round_dec=1
     )
     NeuronLayer.Agent.add_position_across_time_to_plot(
-        sub_ax=sub_ax, position_name="reward", alpha=0.8, y=13.6
+        sub_ax=sub_ax,
+        position_name="reward",
+        alpha=0.8,
+        y=13.6,
+        t_start=t_start,
+        t_end=t_end,
     )
 
-    configure_neural_activity_axis(sub_ax)
+    configure_neural_activity_axis(sub_ax, xmin=xticks[0])
     plot_util.pad_axis(sub_ax, axis="x", pad_prop=0.015, prop_high=0)
+
+    if not in_min:
+        xticks = np.around(sub_ax.get_xticks() * 60, 0) / 60
+        sub_ax.set_xticks(xticks)
+        xticklabels = [f"{tick * 60:.0f}" for tick in xticks]
+        sub_ax.set_xticklabels(xticklabels)
+        sub_ax.set_xlabel("Time (s)")
 
     if mark_traj_idxs is not None:
         t, _, _ = NeuronLayer.Agent.get_trajectory_plotting_times(
-            traj_idxs=mark_traj_idxs
+            traj_idxs=mark_traj_idxs, t_start=t_start, t_end=t_end
         )
         sub_ax.plot(t[[0, -1]] / 60, [ymin / 2] * 2, color="k", lw=2, alpha=0.8)
 
     if mark_BTSP_kernel:
-        t_start, t_end, cmap = get_BTSP_times_and_cmap(NeuronLayer)
-        num = 150
-        x = np.linspace(t_start, t_end, num) / 60  # minutes
-        colors = cmap(np.linspace(0, 1, num))
-        sub_ax.scatter(x, [ymin / 2] * num, color=colors, s=3)
+        num = None
+        for BTSP_idx in range(len(NeuronLayer.get_BTSP_steps())):
+            BTSP_t_start, BTSP_t_end, cmap = get_BTSP_times_and_cmap(
+                NeuronLayer, BTSP_idx
+            )
+            if num is None:
+                num = int((BTSP_t_end - BTSP_t_start) / NeuronLayer.Agent.dt)
+
+            times = np.linspace(BTSP_t_start, BTSP_t_end, num)
+            mask = np.ones_like(times).astype(bool)
+            if t_start is not None:
+                mask[times < t_start] = False
+            if t_end is not None:
+                mask[times > t_end] = False
+
+            times = times[mask]
+            colors = cmap(np.linspace(0, 1, num))[mask]
+
+            sub_ax.scatter(
+                times / 60,
+                [ymin / 2] * mask.sum(),
+                color=colors,
+                marker="|",
+                s=BTSP_kernel_s,
+                lw=BTSP_kernel_lw,
+            )
 
     return sub_ax
 
@@ -1783,7 +1855,9 @@ def plot_openfield_corridor_PFs(
     return axes
 
 
-def plot_openfield_corridor_BTSP_trajectory(Pyrs, x_lims=None, y_lims=(None, 0.6)):
+def plot_openfield_corridor_BTSP_trajectory(
+    Pyrs, BTSP_idx=0, x_lims=None, y_lims=(None, 0.6), no_teleport=True
+):
     """
     plot_openfield_corridor_BTSP_trajectory(Pyrs)
 
@@ -1791,22 +1865,41 @@ def plot_openfield_corridor_BTSP_trajectory(Pyrs, x_lims=None, y_lims=(None, 0.6
 
     Args:
     - Pyrs (Pyr): Pyr object containing the environment, agent, object and place cells.
+    - BTSP_idx (int, optional): Index of the BTSP event to plot. Default is 0.
     - x_lims (list, optional): X-axis limits for the plot. Default is None.
     - y_lims (list, optional): Y-axis limits for the plot. Default is (None, 0.5).
+    - no_teleport (bool, optional): Whether to skip plotting teleportation ports in the
+        plot. Default is True.
 
     Returns:
     - sub_ax (plt.Axes): Subplot with the openfield BTSP trajectory.
     """
 
-    _, sub_ax = plt.subplots(figsize=(2.8, 1.3))
-
     Env, Ag, _, _ = ext_util.extract_objects_from_Pyrs(Pyrs)
     if Env.D != 2:
         raise ValueError("2D plotting is only supported for 2D environments.")
 
-    kwargs = {"skip_object_types": ["teleport"], "no_legend": True, "s": 30}
+    x_prop = 1.0
+    if x_lims is not None:
+        xmin = x_lims[0] or Env.extent[0]
+        xmax = x_lims[1] or Env.extent[1]
+        x_prop = (xmax - xmin) / (Env.extent[1] - Env.extent[0])
 
-    t_start, t_end, cmap = get_BTSP_times_and_cmap(Pyrs.SomaticCompartment)
+    y_prop = 1.0
+    if y_lims is not None:
+        ymin = y_lims[0] or Env.extent[2]
+        ymax = y_lims[1] or Env.extent[3]
+        y_prop = (ymax - ymin) / (Env.extent[3] - Env.extent[2])
+
+    _, sub_ax = plt.subplots(figsize=(2.8 * x_prop, 2.8 * y_prop))
+
+    kwargs = {"no_legend": True, "s": 30}
+    if no_teleport:
+        kwargs["skip_object_types"] = ["teleport"]
+
+    t_start, t_end, cmap = get_BTSP_times_and_cmap(
+        Pyrs.SomaticCompartment, BTSP_idx=BTSP_idx
+    )
 
     Ag.plot_trajectories(
         ax=sub_ax,
@@ -1842,10 +1935,29 @@ def plot_openfield_corridor_BTSP_trajectory(Pyrs, x_lims=None, y_lims=(None, 0.6
 
 
 def plot_openfield_corridor_timelines(
-    BTSP_times, visit_times, PF_times, in_min=True, factor=1.5
+    BTSP_times, visit_times, PF_times, in_min=True, factor=1.2
 ):
+    """
+    plot_openfield_corridor_timelines(BTSP_times, visit_times, PF_times)
 
-    _, sub_ax = plt.subplots(figsize=(6, 3.3))
+    Plots timelines of BTSP events, object visits, and place field evaluations in an
+    openfield corridor experiment.
+
+    Args:
+    - BTSP_times (2D np.ndarray): Array of BTSP event times for each repeat.
+    - visit_times (2D np.ndarray): Arrays of object visit times for each repeat.
+    - PF_times (3D np.ndarray): Arrays of place field evaluation start and end times
+        for each repeat.
+    - in_min (bool, optional): Whether to plot time in minutes instead of seconds.
+        Default is True.
+    - factor (float, optional): Scaling factor for marker sizes and line widths.
+        Default is 1.2.
+
+    Returns:
+    - sub_ax (plt.Axes): Subplot with the plotted timelines.
+    """
+
+    _, sub_ax = plt.subplots(figsize=(6, 3.2))
 
     time_factor = 1 / 60 if in_min else 1
     time_unit = "min" if in_min else "s"
