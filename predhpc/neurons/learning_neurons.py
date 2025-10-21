@@ -1875,6 +1875,7 @@ class BTSPLayer(HebbianLayer):
         • self.plot_BTSP_responses()
         • self.plot_BTSP_locations()
         • self.plot_BTSP_ramp()
+        • self.plot_BTSP_ramp_factors()
         • self.add_BTSP_markers_to_plots()
         • self.plot_rate_map()
         • self.plot_rate_timeseries()
@@ -3192,6 +3193,7 @@ class BTSPLayer(HebbianLayer):
         use_alpha=True,
         min_alpha=0,
         shared_max=True,
+        for_colorbar=False,
     ):
         """
         self.get_BTSP_kernel_based_cmap()
@@ -3212,9 +3214,14 @@ class BTSPLayer(HebbianLayer):
             True. Default is 0.
         - shared_max (bool, optional): Whether to use a shared maximum value
             across positive and negative values. Default is True.
+        - for_colorbar (bool, optional): Whether the colormap is intended for use
+            in a colorbar. If True, the colormap will reflect the strength of the
+            kernel. Default is False.
 
         Returns:
         - cmap (ListedColormap): Colormap based on the BTSP kernel.
+        - vmin (float): Minimum value of the colormap.
+        - vmax (float): Maximum value of the colormap.
         """
 
         gray_RGB = 1 - gray_level
@@ -3227,16 +3234,21 @@ class BTSPLayer(HebbianLayer):
             full_value = gray_RGB
             num_dim = 3
 
-        colors = np.full((len(kernel), num_dim), full_value).astype(float)
-
         if shared_max:
-            max_val = np.absolute(kernel).max()
+            vmax = np.absolute(kernel).max()
+            vmin = -vmax
+        else:
+            vmax = kernel.max()
+            vmin = kernel.min()
+
+        if for_colorbar:
+            kernel = np.linspace(vmin, vmax, 1000)
+
+        colors = np.full((len(kernel), num_dim), full_value).astype(float)
 
         neg_mask = kernel < 0
         if np.any(neg_mask):
-            if not shared_max:
-                max_val = kernel[neg_mask].min()
-            neg_scaled = np.absolute(kernel[neg_mask] / max_val)
+            neg_scaled = np.absolute(kernel[neg_mask] / vmax)
             if use_alpha:
                 colors[neg_mask, 2] = 1.0  # B
                 colors[neg_mask, 3] = neg_scaled
@@ -3247,9 +3259,7 @@ class BTSPLayer(HebbianLayer):
 
         pos_mask = kernel > 0
         if np.any(pos_mask):
-            if not shared_max:
-                max_val = kernel[pos_mask].max()
-            pos_scaled = np.absolute(kernel[pos_mask] / max_val)
+            pos_scaled = np.absolute(kernel[pos_mask] / vmin)
             if use_alpha:
                 colors[pos_mask, 0] = 1.0  # R
                 colors[pos_mask, 3] = pos_scaled
@@ -3263,7 +3273,7 @@ class BTSPLayer(HebbianLayer):
 
         cmap = ListedColormap(colors, name="BTSP_kernel_cmap", N=len(kernel))
 
-        return cmap
+        return cmap, vmin, vmax
 
     def plot_BTSP_kernel(self, autosave: bool | None = None, **kwargs):
         """
@@ -4127,6 +4137,101 @@ class BTSPLayer(HebbianLayer):
 
     def plot_BTSP_ramp(
         self,
+        sub_ax=None,
+        plot_events=True,
+        neuron_idx=0,
+        t_start=None,
+        t_end=None,
+        in_min=True,
+        mark_threshold=True,
+        marker="x",
+        s=10,
+        lw=1.2,
+        autosave=None,
+    ):
+        """
+        self.plot_BTSP_ramp()
+
+        Plot the BTSP ramp of the layer.
+
+        Args:
+        - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
+            created. Default is None.
+        - plot_events (bool, optional): Whether to plot BTSP event markers.
+            Default is True.
+        - neuron_idx (int, optional): Index of the neuron to plot. Default is 0.
+        - t_start (float, optional): Start time of the plot. Default is None.
+        - t_end (float, optional): End time of the plot. Default is None.
+        - in_min (bool, optional): Whether to plot the time in minutes. Default is True.
+        - mark_threshold (bool, optional): Whether to mark the BTSP threshold.
+            Default is True.
+        - marker (str, optional): Marker style for BTSP event markers. Default is "x".
+        - s (int, optional): Marker size for BTSP event markers. Default is 10.
+        - lw (float, optional): Line width for the BTSP ramp plot. Default is 1.2.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the global
+            autosave setting for ratinabox is used. Default is None.
+
+        Returns:
+        - sub_ax (plt.Axes): Subplot with BTSP ramp plotted.
+        """
+
+        if sub_ax is None:
+            _, sub_ax = plt.subplots(figsize=[7, 1.5])
+
+        if neuron_idx >= self.n:
+            raise ValueError(f"Neuron index {neuron_idx} not in range.")
+
+        t, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
+        if in_min:
+            t = t / 60
+
+        BTSP_ramp = np.asarray(self.history["BTSP_ramp"])[
+            startid : endid + 1, neuron_idx
+        ]
+
+        sub_ax.plot(t, BTSP_ramp, lw=lw, color=self.color)
+        sub_ax.fill_between(
+            t,
+            np.zeros(len(t)),
+            BTSP_ramp,
+            lw=0,
+            alpha=0.2,
+            color=self.color,
+        )
+        sub_ax.set_ylabel("Prop. of BTSP\nthreshold reached")
+        sub_ax.spines[["top", "right"]].set_visible(False)
+        if mark_threshold:
+            sub_ax.axhline(1, ls="dashed", lw=lw, color=self.color)
+        plot_util.pad_axis(sub_ax, axis="y", prop_high=1.0)
+
+        xlabel = "Time (min)" if in_min else "Time (s)"
+        sub_ax.set_xlabel(xlabel)
+
+        if plot_events:
+            BTSP_steps = self.get_BTSP_step_dict(t_start=t_start, t_end=t_end)[
+                neuron_idx
+            ]
+
+            if len(BTSP_steps):
+                y = 1
+                sub_ax.scatter(
+                    t[np.asarray(BTSP_steps) - startid],
+                    np.full(len(BTSP_steps), y),
+                    color=(self.color or "k"),
+                    alpha=0.8,
+                    marker=marker,
+                    s=s,
+                    lw=lw,
+                )
+
+        fig = sub_ax.figure
+
+        plot_util.save_figure(fig, f"{self.name}_BTSP_ramp", save=autosave)  # type: ignore[attr-defined]
+
+        return sub_ax
+
+    def plot_BTSP_ramp_factors(
+        self,
         axes=None,
         plot_events=True,
         neuron_idx=0,
@@ -4136,9 +4241,9 @@ class BTSPLayer(HebbianLayer):
         autosave=None,
     ):
         """
-        self.plot_BTSP_ramp()
+        self.plot_BTSP_ramp_factors()
 
-        Plot the BTSP ramp variables of the layer.
+        Plot the BTSP ramp factors of the layer.
 
         Args:
         - axes (1 or 2D np.ndarray): Array of subplots to plot on,
@@ -4177,19 +4282,8 @@ class BTSPLayer(HebbianLayer):
         ]
 
         ax1D = np.asarray(axes).ravel()
-        ax1D[0].plot(t, BTSP_ramp, lw=1.2, color=self.color)
-        ax1D[0].fill_between(
-            t,
-            np.zeros(len(t)),
-            BTSP_ramp,
-            lw=0,
-            alpha=0.2,
-            color=self.color,
-        )
-        ax1D[0].set_ylabel("Prop. of BTSP\nthreshold reached")
-        ax1D[0].spines[["top", "right"]].set_visible(False)
-        ax1D[0].axhline(1, ls="dashed")
-        plot_util.pad_axis(ax1D[0], axis="y", prop_high=1.0)
+        self.plot_BTSP_ramp(ax1D[0])
+        ax1D[0].set_xlabel("")
 
         ax1D[1].plot(t, firingrate, lw=1.2, color=self.color)
         ax1D[1].axhline(self.BTSP_induction_threshold, ls="dashed", color=self.color)
@@ -4233,28 +4327,12 @@ class BTSPLayer(HebbianLayer):
             else:
                 i += num_steps_for_plateau
 
-        if plot_events:
-
-            BTSP_steps = self.get_BTSP_step_dict(t_start=t_start, t_end=t_end)[
-                neuron_idx
-            ]
-
-            if len(BTSP_steps):
-                y = 1
-                ax1D[0].scatter(
-                    t[np.asarray(BTSP_steps) - startid],
-                    np.full(len(BTSP_steps), y),
-                    color=(self.color or "k"),
-                    alpha=0.8,
-                    marker=mpl_markers.MarkerStyle("x"),
-                    s=10,
-                )
         if BTSP_ramp.max() < 0:
             ax1D[1].legend()
 
         fig = ax1D[0].figure
 
-        plot_util.save_figure(fig, f"{self.name}_BTSP_ramp", save=autosave)  # type: ignore[attr-defined]
+        plot_util.save_figure(fig, f"{self.name}_BTSP_ramp_factors", save=autosave)  # type: ignore[attr-defined]
 
         return axes
 
@@ -5114,7 +5192,7 @@ class NMDALayer(BTSPLayer):
         • self.get_incoming_firingrates()
         • self.get_BTSP_targets()
         • self.update()
-        • self.plot_BTSP_ramp()
+        • self.plot_BTSP_ramp_factors()
     """
 
     default_params = {
@@ -5301,7 +5379,7 @@ class NMDALayer(BTSPLayer):
         self.NMDACurrent.update()
         super().update()
 
-    def plot_BTSP_ramp(
+    def plot_BTSP_ramp_factors(
         self,
         axes=None,
         t_start=None,
@@ -5312,9 +5390,9 @@ class NMDALayer(BTSPLayer):
         **kwargs,
     ):
         """
-        self.plot_BTSP_ramp()
+        self.plot_BTSP_ramp_factors()
 
-        Plot the BTSP ramp of the layer.
+        Plot the BTSP ramp factors of the layer.
 
         Args:
         - axes (1 or 2D np.ndarray): Array of subplots to plot on,
@@ -5327,7 +5405,7 @@ class NMDALayer(BTSPLayer):
         autosave setting for ratinabox is used. Default is None.
 
         Keyword args:
-        - **kwargs: Keyword arguments passed to plot_fcts.plot_BTSP_ramp().
+        - **kwargs: Keyword arguments passed to plot_fcts.plot_BTSP_ramp_factors().
 
         Returns:
         - axes (1 or 2D np.ndarray): Array of subplots with BTSP ramp variables plotted.
@@ -5339,7 +5417,7 @@ class NMDALayer(BTSPLayer):
         elif axes.shape != (3, 1) and axes.shape != (3,):
             raise ValueError("axes must have shape (3, 1) or (3, ).")
 
-        super().plot_BTSP_ramp(
+        super().plot_BTSP_ramp_factors(
             t_start=t_start,
             t_end=t_end,
             axes=axes[:2],

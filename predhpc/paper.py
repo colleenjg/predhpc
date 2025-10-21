@@ -192,6 +192,7 @@ def get_linear_Pyrs(
     wait_after_trajectory=0,
     log_BTSP=True,
     seed=True,
+    **Pyr_kwargs,
 ):
     """
     get_linear_Pyrs()
@@ -209,6 +210,10 @@ def get_linear_Pyrs(
     - log_BTSP (bool): Whether to log BTSP events. Default is True.
     - seed (bool): Whether to seed the random number generator with the paper seed.
         Default is True.
+
+    Keyword Args:
+    - **Pyr_kwargs: Additional keyword arguments passed to
+        params_util.get_Pyr_params().
 
     Returns:
     - Pyrs (Pyr): Pyr object initialized with the specified parameters.
@@ -238,8 +243,7 @@ def get_linear_Pyrs(
     )
 
     Pyr_params = params_util.get_Pyr_params(
-        environment="linear",
-        log_BTSP=log_BTSP,
+        environment="linear", log_BTSP=log_BTSP, **Pyr_kwargs
     )
 
     Obj_params = params_util.get_Obj_params(
@@ -312,7 +316,14 @@ def plot_BTSP_kernel(Pyrs=None, **kwargs):
 
 
 def run_linear(
-    Pyrs=None, max_num_steps=3800, max_time_min=None, BTSP_on=None, seed=True, **kwargs
+    Pyrs=None,
+    max_num_steps=3800,
+    max_time_min=None,
+    BTSP_on=None,
+    seed=True,
+    inhibition="balanced",
+    factor=2.0,
+    **kwargs,
 ):
     """
     run_linear()
@@ -331,6 +342,10 @@ def run_linear(
         exceeded to complete any incomplete trajectories. Default is None.
     - BTSP_on (int): Trajectory on which to turn on BTSP. 1 for first trajectory.
         Default is None.
+    - inhibition (str): Type of inhibition to apply. Options are "balanced",
+        "excessive", or "insufficient". Default is "balanced".
+    - factor (float): Factor by which to adjust inhibitory weight for "excessive" or
+        "insufficient" inhibition. Default is 2.0.
     - seed (bool): Whether to seed the random number generator with the paper seed.
         Default is True.
 
@@ -343,8 +358,23 @@ def run_linear(
         gen_util.seed_all(PAPER_SEED)
 
     if Pyrs is None:
+        if inhibition in ["balanced", "excessive", "insufficient"]:
+            inhibitory_weight = params_util.get_Pyr_params()["inhibitory_weight"]
+            if inhibition == "excessive":
+                inhibitory_weight *= factor
+            elif inhibition == "insufficient":
+                inhibitory_weight /= factor
+            if inhibition != "balanced":
+                print(
+                    f"Using {inhibition} inhibition (weight: {inhibitory_weight:.2f})."
+                )
+        else:
+            raise ValueError(f"Unknown inhibition type: {inhibition}.")
+
         Pyrs = get_linear_Pyrs(
-            seed=False, wait_after_trajectory=params_util.WAIT_LINEAR
+            seed=False,
+            wait_after_trajectory=params_util.WAIT_LINEAR,
+            inhibitory_weight=inhibitory_weight,
         )
 
     if max_time_min is not None:
@@ -382,6 +412,43 @@ def plot_linear_summary(learner=None, max_time_min=2.0, **kwargs):
         learner = run_linear(max_time_min=max_time_min)
 
     ax1D = paper_plot_fcts.plot_linear_summary(learner, **kwargs)
+
+    return ax1D
+
+
+def plot_linear_neural_activity(
+    learner, max_time_min=2.0, inhibition="balanced", factor=1.8, **kwargs
+):
+    """
+    plot_linear_neural_activity(learner)
+
+    Plots pyramidal neuron activity for a linear environment.
+
+    Args:
+    - learner (Learner): Learner object.
+    - max_time_min (float, optional): Maximum time in minutes to run the environment.
+        If specified, it overrides max_num_steps based on the agent's time step. Note
+        that if learner is set to finish final trajectory, max_time_min will be
+        exceeded to complete any incomplete trajectories. Default is 2.0.
+    - inhibition (str): Type of inhibition to apply. Options are "balanced",
+        "excessive", or "insufficient". Default is "balanced".
+    - factor (float): Factor by which to adjust inhibitory weight for "excessive" or
+        "insufficient" inhibition. Default is 1.8.
+
+    Keywords args:
+    - **kwargs: Additional keyword arguments passed to
+        paper_plot_fcts.plot_linear_neural_activity().
+
+    Returns:
+    - ax1D (1D np.ndarray of plt.Axes): Subplots with the neural activity plotted.
+    """
+
+    if learner is None:
+        learner = run_linear(
+            max_time_min=max_time_min, inhibition=inhibition, factor=factor
+        )
+
+    ax1D = paper_plot_fcts.plot_linear_neural_activity(learner, **kwargs)
 
     return ax1D
 
@@ -1436,7 +1503,6 @@ def plot_openfield_corridor_BTSP_kernel_timeseries(
         t_end=t_end,
         in_min=in_min,
         num_ticks=num_ticks,
-        BTSP_kernel_num=2000,
         BTSP_kernel_lw=2.5,
         **kwargs,
     )
@@ -1752,6 +1818,10 @@ def plot_figure_panel(*args, fig=1, panel="A", save=True, **kwargs):
             "B": (plot_linear_place_fields, dict()),
             "C": (plot_linear_binned_rates, dict()),
         },
+        "2S": {
+            "A": (plot_linear_neural_activity, {"inhibition": "insufficient"}),
+            "B": (plot_linear_neural_activity, {"inhibition": "excessive"}),
+        },
         3: {
             "A": (plot_linear_speed_PF_examples, dict()),
             "B": (plot_linear_speed_PF_widths, dict()),
@@ -1768,7 +1838,7 @@ def plot_figure_panel(*args, fig=1, panel="A", save=True, **kwargs):
             "A-D": (plot_openfield_corridor_components, dict()),
             "E": (plot_openfield_corridor_PF, dict()),
             "F": (plot_openfield_corridor_BTSP_trajectory, dict()),
-            "G": (plot_openfield_corridor_timeseries, {"BTSP_kernel_lw": 0.03}),
+            "G": (plot_openfield_corridor_timeseries, {"BTSP_kernel_lw": 0.02}),
         },
         "5S": {
             "A": (plot_openfield_corridor_BTSP_kernel_timeseries, dict()),

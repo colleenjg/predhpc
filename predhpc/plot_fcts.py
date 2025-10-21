@@ -269,6 +269,7 @@ def mark_target_and_reset_points(
     sub_ax: plt.Axes,
     restore_xlims: bool = True,
     lw: float = 1.0,
+    alpha: float = 0.7,
     omit_reset: bool = False,
     min_steps_btw: float = 0.0,
 ):
@@ -282,6 +283,7 @@ def mark_target_and_reset_points(
     - sub_ax (plt.Axes): Subplot to add target and reset points to.
     - restore_xlims (bool, optional): Whether to restore x limits. Default is True.
     - lw (float, optional): Line width of the vertical lines. Default is 1.0.
+    - alpha (float, optional): Alpha of the vertical lines. Default is 0.7.
     - omit_reset (bool, optional): Whether to omit reset points. Default is False.
     - min_steps_btw (float, optional): Minimum steps between points for plotting.
         Default is 0.0.
@@ -310,7 +312,7 @@ def mark_target_and_reset_points(
         for t in time_min:
             sub_ax.axvline(
                 t,
-                alpha=0.7,
+                alpha=alpha,
                 zorder=-1,
                 lw=lw,
                 ls=ls,
@@ -1751,7 +1753,9 @@ def plot_1D_BTSP_stats(
     _, PCs_sub_ax = plt.subplots(figsize=(7, 2))
 
     if hasattr(Pyrs, "ApicalCompartment"):
-        Pyrs.SomaticCompartment.plot_BTSP_ramp(axes=BTSP_ramp_ax1D, in_min=in_min)
+        Pyrs.SomaticCompartment.plot_BTSP_ramp_factors(
+            axes=BTSP_ramp_ax1D, in_min=in_min
+        )
         BTSP_ramp_ax1D[1].get_lines()[-1].set_label("somatic")
         for i, comp in enumerate([Pyrs.ApicalCompartment, Pyrs.ApicalInhibition]):
             t = np.asarray(comp.history["t"])
@@ -1769,7 +1773,7 @@ def plot_1D_BTSP_stats(
             )
         BTSP_ramp_ax1D[1].legend(loc="upper right", ncols=2)
     else:
-        Pyrs.plot_BTSP_ramp(axes=BTSP_ramp_ax1D, in_min=in_min)
+        Pyrs.plot_BTSP_ramp_factors(axes=BTSP_ramp_ax1D, in_min=in_min)
 
     if PF_centers is None:
         _, _, PCs, _ = ext_util.extract_objects_from_Pyrs(Pyrs)

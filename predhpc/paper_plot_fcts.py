@@ -70,6 +70,24 @@ def initialize_paper_parameters(gen_dir=".", notebook=False):
     stylize_plots_for_paper(notebook=notebook)
 
 
+def get_somatic_compartment(Pyrs):
+    """
+    get_somatic_compartment(Pyrs)
+
+    Get the somatic compartment of the Pyr object.
+
+    Args:
+    - Pyrs (Pyr): Pyramidal neuron layer object.
+
+    Returns:
+    - Pyrs (SomaticCompartment): Somatic compartment of the Pyr object.
+    """
+
+    if hasattr(Pyrs, "SomaticCompartment"):
+        Pyrs = Pyrs.SomaticCompartment
+    return Pyrs
+
+
 def get_PF_label(PF_type="weights", title=False):
     """
     get_PF_label(PF_type)
@@ -229,7 +247,7 @@ def get_BTSP_times_and_cmap(NeuronLayer, BTSP_idx=0):
     pre, post = NeuronLayer.get_estimated_num_steps_pre_post_BTSP(as_time=True)
     t_start = max(0, BTSP_times[BTSP_idx] - pre)
     t_end = BTSP_times[BTSP_idx] + post
-    cmap = NeuronLayer.get_BTSP_kernel_based_cmap(
+    cmap, _, _ = NeuronLayer.get_BTSP_kernel_based_cmap(
         t_pre=pre,
         t_post=post,
         use_alpha=True,
@@ -372,6 +390,7 @@ def plot_single_neuron_rate_timeseries(
     mark_BTSP_kernel=True,
     BTSP_kernel_s=60,
     BTSP_kernel_lw=1,
+    plot_colorbar=True,
 ):
     """
     plot_single_neuron_rate_timeseries(NeuronLayer)
@@ -397,6 +416,8 @@ def plot_single_neuron_rate_timeseries(
     - BTSP_kernel_s (int, optional): Size of the BTSP kernel markers. Default is 60.
     - BTSP_kernel_lw (float, optional): Line width of the BTSP kernel markers.
         Default is 1.
+    - plot_colorbar (bool, optional): Whether to plot a colorbar for the BTSP kernel.
+        Default is True.
 
     Returns:
     - sub_ax (plt.Axes): The axes with the plotted neuron activity.
@@ -467,15 +488,16 @@ def plot_single_neuron_rate_timeseries(
         sub_ax.plot(t[[0, -1]] / 60, [ymin / 2] * 2, color="k", lw=2, alpha=0.8)
 
     if mark_BTSP_kernel:
-        num = None
-        for BTSP_idx in range(len(NeuronLayer.get_BTSP_steps())):
+        num_lines = None
+        num_BTSP = len(NeuronLayer.get_BTSP_steps())
+        for BTSP_idx in range(num_BTSP):
             BTSP_t_start, BTSP_t_end, cmap = get_BTSP_times_and_cmap(
                 NeuronLayer, BTSP_idx
             )
-            if num is None:
-                num = int((BTSP_t_end - BTSP_t_start) / NeuronLayer.Agent.dt)
+            if num_lines is None:
+                num_lines = int((BTSP_t_end - BTSP_t_start) / NeuronLayer.Agent.dt)
 
-            times = np.linspace(BTSP_t_start, BTSP_t_end, num)
+            times = np.linspace(BTSP_t_start, BTSP_t_end, num_lines)
             mask = np.ones_like(times).astype(bool)
             if t_start is not None:
                 mask[times < t_start] = False
@@ -483,7 +505,7 @@ def plot_single_neuron_rate_timeseries(
                 mask[times > t_end] = False
 
             times = times[mask]
-            colors = cmap(np.linspace(0, 1, num))[mask]
+            colors = cmap(np.linspace(0, 1, num_lines))[mask]
 
             sub_ax.scatter(
                 times / 60,
@@ -492,6 +514,21 @@ def plot_single_neuron_rate_timeseries(
                 marker="|",
                 s=BTSP_kernel_s,
                 lw=BTSP_kernel_lw,
+            )
+
+        if plot_colorbar and num_BTSP:
+            cmap, vmin, vmax = NeuronLayer.get_BTSP_kernel_based_cmap(for_colorbar=True)
+            norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
+            cbar = mpl_cm.ScalarMappable(norm=norm, cmap=cmap)
+            plot_util.add_colorbars(
+                sub_ax,
+                cbar,
+                vmin=vmin,
+                vmax=vmax,
+                label="BTSP kernel\nstrength",
+                outline=True,
+                size="1.5%",
+                pad=0.2,
             )
 
     return sub_ax
@@ -565,6 +602,135 @@ def plot_BTSP_kernel(Pyrs, xlims=None):
     sub_ax.set_xlabel("Time relative to BTSP event (s)")
 
     return sub_ax
+
+
+def plot_BTSP_ramp(Pyrs, sub_ax=None):
+    """
+    plot_BTSP_ramp(Pyrs)
+
+    Plots the BTSP ramp for the given Pyrs object.
+
+    Args:
+    - Pyrs (Pyr): Pyr object containing the agent and place cells.
+    - sub_ax (plt.Axes, optional): The subplot to plot on. If None, a new figure
+        and subplot are created. Default is None.
+
+    Returns:
+    - sub_ax (plt.Axes): The subplot with the plotted BTSP ramp.
+    """
+
+    if sub_ax is None:
+        _, sub_ax = plt.subplots(figsize=(5.8, 1.6))
+
+    Pyrs = get_somatic_compartment(Pyrs)
+
+    if Pyrs.n > 1:
+        raise NotImplementedError(
+            "BTSP ramp plotting only implemented for single neuron layers."
+        )
+
+    Pyrs.plot_BTSP_ramp(sub_ax=sub_ax, lw=LW, mark_threshold=False, plot_events=False)
+    xmax = Pyrs.Agent.t / 60
+    sub_ax.axhline(
+        1, ls="dotted", lw=LW, color=Pyrs.color, alpha=1.0, xmin=0, xmax=xmax
+    )
+
+    plot_fcts.mark_target_and_reset_points(Pyrs, sub_ax=sub_ax, lw=LW, alpha=0.5)
+    sub_ax.set_title("BTSP criterion", y=1.2)
+
+    sub_ax.set_ylabel("Prop. reached")
+    max_val = max(1, int(sub_ax.get_ylim()[1]))
+    sub_ax.set_yticks([0, max_val])
+    sub_ax.spines["left"].set_bounds(0, max_val)
+    plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.1)
+
+    sub_ax.set_xlabel("")
+    sub_ax.spines["bottom"].set_visible(False)
+    sub_ax.tick_params(axis="x", bottom=False)
+
+    BTSP_steps = Pyrs.get_BTSP_steps()
+    if len(BTSP_steps):
+        times = np.asarray(Pyrs.Agent.history["t"])[BTSP_steps] / 60
+        sub_ax.scatter(
+            times,
+            np.full(len(BTSP_steps), max_val),
+            color=(Pyrs.color or "k"),
+            marker=BTSP_ASTERISK,
+            s=BTSP_S,
+            lw=LW,
+        )
+
+    return sub_ax
+
+
+def plot_linear_neural_activity(learner):
+    """
+    plot_linear_neural_activity()
+
+    Plots neural activity for linear experiment.
+
+    Args:
+    - learner (Learner): Learner object.
+
+    Returns:
+    - ax1D (1D np.ndarray of plt.Axes): Subplots with neural activity plotted.
+    """
+
+    _, ax1D = plt.subplots(
+        nrows=4,
+        figsize=(5.8, 5.4),
+        gridspec_kw={"hspace": 0.45},
+        sharex=True,
+        squeeze=True,
+    )
+
+    learner.Pyrs.plot_rate_timeseries(
+        ax=ax1D[1:],
+        chosen_neurons="all",
+        shift=-10,
+        overlap=1,
+        lw=LW,
+        BTSP_s=BTSP_S,
+        BTSP_lw=LW,
+        BTSP_marker=BTSP_ASTERISK,
+        separate_axes=True,
+        norm_by="none",
+        no_legend=True,
+        autosave=False,
+    )
+    ax1D[1].set_title("Pyramidal neuron", y=1.2)
+    ax1D[2].set_title("")
+    ax1D[3].set_title("Inhibitory interneuron", y=1.02)
+
+    plot_util.match_y_axis_scales(ax1D[1:])
+
+    plot_util.expand_ticks(
+        ax1D[-1], axis="x", num_ticks=7, alternating=True, round_dec=1
+    )
+    plot_util.pad_axis(ax1D[0], axis="x", pad_prop=0.02, prop_high=0)
+    ax1D[0].set_xlim([None, ax1D[0].get_xticks()[-1]])
+
+    for i, comp in enumerate(["somatic", "apical"]):
+        learner.Pyrs.add_compartment_legend(
+            ax1D[i + 1],
+            compartment=comp,
+            lw=LW,
+            loc=(0.725, 0.65),
+            handlelength=0.8,
+            handletextpad=0.5,
+            frameon=False,
+            fontsize=11,
+        )
+
+    # mark axes for neural activity
+    for i, sub_ax in enumerate(ax1D[1:]):
+        label = True if i == 1 else False
+        sub_ax.set_ylabel("")
+        configure_neural_activity_axis(sub_ax, label=label)
+
+    plot_BTSP_ramp(learner.Pyrs, sub_ax=ax1D[0])
+
+    return ax1D
 
 
 def plot_linear_summary(learner):
@@ -696,12 +862,22 @@ def plot_linear_place_fields(learner):
             sub_ax=ax1D[i],
         )
 
+        if PF_type == "history":
+            ymin, ymax = ax1D[i].get_ylim()
+            ax1D[i].set_ylim(min(0, ymin), max(6, ymax))
+            learner.Pyrs.SomaticCompartment.add_BTSP_markers_to_plots(
+                ax=ax1D[i],
+                s=BTSP_S,
+                marker=BTSP_ASTERISK,
+                prop_y=0.95,
+            )
+
         format_1D_PF_xaxis(ax1D[i], PF_type=PF_type)
         mark_1D_target(ax1D[i], Ag=Ag)
 
-    plot_util.expand_ticks(
-        ax1D[0], axis="y", num_ticks=5, alternating=True, round_dec=1
-    )
+        plot_util.expand_ticks(
+            ax1D[i], axis="y", num_ticks=5, alternating=True, round_dec=1
+        )
     add_1D_position_markers(ax1D[0], Ag=Ag, y_1D=0.2)
 
     ax1D[0].set_xlabel("")
@@ -715,7 +891,7 @@ def plot_linear_place_fields(learner):
 
 
 def plot_linear_binned_rates(learner, num_bins=150):
-    """
+    """position
     plot_linear_binned_rates(learner)
 
     Plots binned rates for linear experiment.
@@ -728,7 +904,7 @@ def plot_linear_binned_rates(learner, num_bins=150):
     - ax1D (1D np.ndarray of plt.Axes): Subplots with linear binned rates plotted.
     """
 
-    _, ax1D = plt.subplots(3, 1, figsize=(3.5, 4.8), squeeze=True)
+    _, ax1D = plt.subplots(3, 1, figsize=(3.5, 4.6), squeeze=True)
 
     kwargs = {
         "num_bins": num_bins,
@@ -742,12 +918,13 @@ def plot_linear_binned_rates(learner, num_bins=150):
     }
 
     learner.Pyrs.plot_binned_rates(axes=ax1D.reshape(-1, 1), **kwargs)
+    env_scale = learner.Pyrs.Agent.Environment.scale
     for sub_ax in ax1D:
         add_1D_position_markers(
             sub_ax,
             Ag=learner.Pyrs.Agent,
-            y_1D=3.4,
-            pos_factor=num_bins / 6,
+            y_1D=-0.4,
+            pos_factor=num_bins / env_scale,
             pos_shift=-0.5,
         )
 
@@ -755,7 +932,17 @@ def plot_linear_binned_rates(learner, num_bins=150):
     for i, sub_ax in enumerate(ax1D):
         sub_ax.set_title("")
         sub_ax.set_ylabel(labels[i])
-    ax1D[-1].set_xlabel(f"Spatial bin ({num_bins})", labelpad=12)
+
+    # Add position xaxis
+    ax1D[-1].set_xlabel("")
+    pos_sub_ax = ax1D[-1].twiny()
+    pos_sub_ax.set_xlim(0, env_scale)
+    pos_sub_ax.spines[["top", "right", "left"]].set_visible(False)
+    pos_sub_ax.xaxis.set_ticks_position("bottom")
+    pos_sub_ax.xaxis.set_label_position("bottom")
+    pos_sub_ax.set_xlabel(f"Position (m)")  # , labelpad=8)
+
+    # ax1D[-1].set_xlabel(f"Spatial bin ({num_bins})", labelpad=12)
 
     return ax1D
 
@@ -1718,24 +1905,24 @@ def plot_openfield_PF(Pyrs, fig_side=3.0, lw=LW, alpha=0.8, PF_type="history"):
 
     fig, sub_ax = plt.subplots(figsize=(fig_side, fig_side))
 
-    if Pyrs.SomaticCompartment.n != 1:
+    Pyrs = get_somatic_compartment(Pyrs)
+
+    if Pyrs.n != 1:
         raise ValueError("Only single neuron plotting is supported.")
 
     PF_t_start = None
     if PF_type == "history":
         round_dec = 0
-        BTSP_applied = Pyrs.SomaticCompartment.get_BTSP_steps(
-            applied_only=True, apply_step=True
-        )
+        BTSP_applied = Pyrs.get_BTSP_steps(applied_only=True, apply_step=True)
         vmax = 10
         if len(BTSP_applied):
-            PF_t_start = BTSP_applied[-1] * Pyrs.SomaticCompartment.Agent.dt
+            PF_t_start = BTSP_applied[-1] * Pyrs.Agent.dt
     else:
         round_dec = 2
         vmax = None
 
     plot_fcts.plot_2D_PFs(
-        Pyrs.SomaticCompartment,
+        Pyrs,
         PF_type=PF_type,
         PF_t_start=PF_t_start,
         alpha=alpha,
@@ -1794,6 +1981,8 @@ def plot_openfield_corridor_PFs(
     - sub_ax (plt.Axes): The subplot with the plotted PFs.
     """
 
+    Pyrs = get_somatic_compartment(Pyrs)
+
     num_plots = len(PFs)
     num_cols = min(num_cols, num_plots)
     num_rows = int(np.ceil(num_plots / num_cols))
@@ -1807,7 +1996,7 @@ def plot_openfield_corridor_PFs(
         squeeze=False,
     )
 
-    if Pyrs.SomaticCompartment.n != 1:
+    if Pyrs.n != 1:
         raise ValueError("Only single neuron plotting is supported.")
 
     cmap = "inferno"
@@ -1818,7 +2007,7 @@ def plot_openfield_corridor_PFs(
         vmax = np.ceil(np.nanmax(PFs) * 10**2) / 10**2
 
     plot_fcts.plot_2D_PFs(
-        Pyrs.SomaticCompartment,
+        Pyrs,
         PF_type=PF_type,
         PFs=PFs,
         PF_centers=PF_centers,
@@ -1879,6 +2068,8 @@ def plot_openfield_corridor_BTSP_trajectory(
     if Env.D != 2:
         raise ValueError("2D plotting is only supported for 2D environments.")
 
+    Pyrs = get_somatic_compartment(Pyrs)
+
     x_prop = 1.0
     if x_lims is not None:
         xmin = x_lims[0] or Env.extent[0]
@@ -1891,15 +2082,13 @@ def plot_openfield_corridor_BTSP_trajectory(
         ymax = y_lims[1] or Env.extent[3]
         y_prop = (ymax - ymin) / (Env.extent[3] - Env.extent[2])
 
-    _, sub_ax = plt.subplots(figsize=(2.8 * x_prop, 2.8 * y_prop))
+    _, sub_ax = plt.subplots(figsize=(4.2 * x_prop, 2.85 * y_prop))
 
     kwargs = {"no_legend": True, "s": 30}
     if no_teleport:
         kwargs["skip_object_types"] = ["teleport"]
 
-    t_start, t_end, cmap = get_BTSP_times_and_cmap(
-        Pyrs.SomaticCompartment, BTSP_idx=BTSP_idx
-    )
+    t_start, t_end, cmap = get_BTSP_times_and_cmap(Pyrs, BTSP_idx=BTSP_idx)
 
     Ag.plot_trajectories(
         ax=sub_ax,
@@ -1924,12 +2113,25 @@ def plot_openfield_corridor_BTSP_trajectory(
         "lw": LW,
     }
 
-    Pyrs.SomaticCompartment.add_BTSP_markers_to_plots(ax=sub_ax, **BTSP_kwargs)
+    Pyrs.add_BTSP_markers_to_plots(ax=sub_ax, **BTSP_kwargs)
 
     if x_lims is not None:
         sub_ax.set_xlim(x_lims)
     if y_lims is not None:
         sub_ax.set_ylim(y_lims)
+
+    cmap, vmin, vmax = Pyrs.get_BTSP_kernel_based_cmap(for_colorbar=True)
+    norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
+    cbar = mpl_cm.ScalarMappable(norm=norm, cmap=cmap)
+    plot_util.add_colorbars(
+        sub_ax,
+        cbar,
+        vmin=vmin,
+        vmax=vmax,
+        label="BTSP\nkernel\nstrength",
+        outline=True,
+        size="5%",
+    )
 
     return sub_ax
 
