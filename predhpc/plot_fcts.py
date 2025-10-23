@@ -2549,7 +2549,7 @@ def plot_2D_PFs(
                 vmax=vmax,
                 cmap=cmap,
                 zorder=zorder,
-                aspect="auto",
+                aspect=1,
                 interpolation="nearest",
             )
 
@@ -2929,7 +2929,7 @@ def plot_overlayed_rate_maps(
     # PLOT 2D
     if NeuronLayer.Agent.Environment.dimensionality == "2D":
         ex = NeuronLayer.Agent.Environment.extent
-        im = sub_ax.imshow(rate_map, extent=ex, zorder=0, cmap="inferno")
+        im = sub_ax.imshow(rate_map, extent=ex, zorder=0, cmap="inferno", aspect=1)
 
         if colorbar == True:
             plot_util.add_colorbars(axes=sub_ax, im=im, label="")

@@ -391,6 +391,7 @@ def plot_single_neuron_rate_timeseries(
     BTSP_kernel_s=60,
     BTSP_kernel_lw=1,
     plot_colorbar=True,
+    plot_teleportation=True,
 ):
     """
     plot_single_neuron_rate_timeseries(NeuronLayer)
@@ -531,6 +532,12 @@ def plot_single_neuron_rate_timeseries(
                 pad=0.2,
             )
 
+    if plot_teleportation and len(NeuronLayer.Agent.teleportation_df) > 0:
+        plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.04, prop_high=1.0)
+        NeuronLayer.Agent.add_teleportation_markers_to_plots(
+            ax=sub_ax, timeseries=True, plot_lines=False, no_legend=True
+        )
+
     return sub_ax
 
 
@@ -629,36 +636,29 @@ def plot_BTSP_ramp(Pyrs, sub_ax=None):
             "BTSP ramp plotting only implemented for single neuron layers."
         )
 
-    Pyrs.plot_BTSP_ramp(sub_ax=sub_ax, lw=LW, mark_threshold=False, plot_events=False)
-    xmax = Pyrs.Agent.t / 60
-    sub_ax.axhline(
-        1, ls="dotted", lw=LW, color=Pyrs.color, alpha=1.0, xmin=0, xmax=xmax
+    Pyrs.plot_BTSP_ramp(
+        sub_ax=sub_ax,
+        lw=LW,
+        mark_threshold=False,
+        mark_BTSP=True,
+        s=BTSP_S,
+        marker=BTSP_ASTERISK,
     )
+    xmax = Pyrs.Agent.t / 60
+    sub_ax.plot([0, xmax], [1, 1], ls="dotted", lw=LW, color=Pyrs.color, alpha=1.0)
 
     plot_fcts.mark_target_and_reset_points(Pyrs, sub_ax=sub_ax, lw=LW, alpha=0.5)
-    sub_ax.set_title("BTSP criterion", y=1.2)
+    sub_ax.set_title("BTSP criterion", y=1.15)
 
     sub_ax.set_ylabel("Prop. reached")
     max_val = max(1, int(sub_ax.get_ylim()[1]))
     sub_ax.set_yticks([0, max_val])
     sub_ax.spines["left"].set_bounds(0, max_val)
-    plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.1)
+    plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.1, prop_high=0.5)
 
     sub_ax.set_xlabel("")
     sub_ax.spines["bottom"].set_visible(False)
     sub_ax.tick_params(axis="x", bottom=False)
-
-    BTSP_steps = Pyrs.get_BTSP_steps()
-    if len(BTSP_steps):
-        times = np.asarray(Pyrs.Agent.history["t"])[BTSP_steps] / 60
-        sub_ax.scatter(
-            times,
-            np.full(len(BTSP_steps), max_val),
-            color=(Pyrs.color or "k"),
-            marker=BTSP_ASTERISK,
-            s=BTSP_S,
-            lw=LW,
-        )
 
     return sub_ax
 
@@ -678,8 +678,8 @@ def plot_linear_neural_activity(learner):
 
     _, ax1D = plt.subplots(
         nrows=4,
-        figsize=(5.8, 5.4),
-        gridspec_kw={"hspace": 0.45},
+        figsize=(8.8, 4.0),
+        gridspec_kw={"hspace": 0.5},
         sharex=True,
         squeeze=True,
     )
@@ -698,9 +698,9 @@ def plot_linear_neural_activity(learner):
         no_legend=True,
         autosave=False,
     )
-    ax1D[1].set_title("Pyramidal neuron", y=1.2)
+    ax1D[1].set_title("Pyramidal neuron", y=1.15)
     ax1D[2].set_title("")
-    ax1D[3].set_title("Inhibitory interneuron", y=1.02)
+    ax1D[3].set_title("Inhibitory interneuron", y=1.04)
 
     plot_util.match_y_axis_scales(ax1D[1:])
 
@@ -1472,6 +1472,7 @@ def plot_linear_shift_PF_examples(
     color=None,
     plot_cmap=False,
     PF_type="weights",
+    mark_pos_range=None,
 ):
     """
     plot_linear_shift_PF_examples()
@@ -1487,6 +1488,8 @@ def plot_linear_shift_PF_examples(
     - plot_cmap (bool): Whether to plot the place field colormap instead of a peak shift
         plot. Default is False.
     - PF_type (str, optional): PF evaluation method to plot. Default is "weights".
+    - mark_pos_range (tuple, optional): Range of target shift positions to highlight
+        on the plot (min_shift, max_shift). Default is None.
 
     Returns:
     - axes (2D np.ndarray of plt.Axes): Subplots with example place fields plotted.
@@ -1502,18 +1505,28 @@ def plot_linear_shift_PF_examples(
     shifts_to_plot = [
         shift for i, shift in enumerate(shift_data["target_shifts"]) if i != base_idx
     ]
+    num_plots = len(shifts_to_plot)
 
-    height = 1.2 * len(shifts_to_plot)
+    height = 1.2 * num_plots
     figsize = (8.7, height) if plot_cmap else (10.01, height)
     width_ratios = [1.7, 1] if plot_cmap else [3, 1]
+    height_ratios = [1] * num_plots
+
+    offset = 0
+    if mark_pos_range is not None:
+        num_plots += 1
+        figsize = (figsize[0], figsize[1] + 0.2)
+        height_ratios = [0.1] + height_ratios
+        offset = 1
 
     _, axes = plt.subplots(
-        len(shifts_to_plot),
+        num_plots,
         2,
         figsize=figsize,
         sharex=True,
         sharey="col",
         width_ratios=width_ratios,
+        height_ratios=height_ratios,
         gridspec_kw={"wspace": 0.08, "hspace": 0.4},
         squeeze=False,
     )
@@ -1545,6 +1558,7 @@ def plot_linear_shift_PF_examples(
             continue
 
         idx = np.where(shift_data["target_shifts"] == target_shift)[0][0]
+        ax_idx = i + offset
 
         plot_1D_PFs(
             PF_centers,
@@ -1552,22 +1566,22 @@ def plot_linear_shift_PF_examples(
             scale_y=1,
             base=base,
             color=color,
-            sub_ax=axes[i, 0],
+            sub_ax=axes[ax_idx, 0],
             alpha=alpha,
             mark_original=True,
         )
-        axes[i, 0].text(
+        axes[ax_idx, 0].text(
             1.8, ymax * 0.78, f"{target_shift:.1f} m shift", ha="center", fontsize=12
         )
 
         if Ag is not None:
-            mark_1D_target(axes[i, 0], Ag=Ag, target_shift=target_shift)
+            mark_1D_target(axes[ax_idx, 0], Ag=Ag, target_shift=target_shift)
 
-        mark_1D_target(axes[i, 1], Ag=Ag, target_shift=target_shift)
+        mark_1D_target(axes[ax_idx, 1], Ag=Ag, target_shift=target_shift)
         if plot_cmap:
             plot_PF_cmap(
-                PFs[idx],
-                sub_ax=axes[i, 1],
+                PFs[idx].reshape(1, -1),
+                sub_ax=axes[ax_idx, 1],
                 vmax=vmax,
                 x_vals=PF_centers,
                 PF_type=PF_type,
@@ -1577,7 +1591,7 @@ def plot_linear_shift_PF_examples(
         else:
             plot_PF_peak_shift(
                 PFs[idx].reshape(1, -1),
-                sub_ax=axes[i, 1],
+                sub_ax=axes[ax_idx, 1],
                 initial_peak_idx=peak_idx,
                 # initial_peak_value=base[peak_idx],
                 s=35,
@@ -1596,7 +1610,7 @@ def plot_linear_shift_PF_examples(
             sub_ax, axis="y", num_ticks=3, alternating=True, round_dec=round_dec
         )
 
-    for i, sub_ax in enumerate(axes.T.ravel()):
+    for i, sub_ax in enumerate(axes[offset:].T.ravel()):
         format_1D_PF_xaxis(sub_ax, PF_type=PF_type)
         if i != axes.size // 4:
             sub_ax.set_ylabel("")
@@ -1608,8 +1622,19 @@ def plot_linear_shift_PF_examples(
         for i, target_shift in enumerate(shifts_to_plot):
             for j, y_1D in enumerate([ymax * 0.95, 0.8]):
                 add_1D_position_markers(
-                    axes[i, j], Ag=Ag, y_1D=y_1D, target_shift=target_shift
+                    axes[i + offset, j], Ag=Ag, y_1D=y_1D, target_shift=target_shift
                 )
+
+    if mark_pos_range is not None:
+        start, end = mark_pos_range
+        print(
+            "Only one BTSP event recorded for shifts to positions between "
+            f"{start:.1f}m and {end:.1f}m"
+        )
+        color = params_util.OBJ_COLOR
+        for i in range(2):
+            axes[0, i].axvspan(start, end, color=color, alpha=0.8, lw=0)
+            axes[0, i].axis("off")
 
     for ax1D in axes.T:
         plot_util.clear_bottom(ax1D[:-1])
@@ -1624,6 +1649,7 @@ def plot_target_shift_PFs(
     plot_cmap=False,
     color=None,
     PF_type="weights",
+    mark_one_BTSP_range=True,
 ):
     """
     plot_target_shift_PFs()
@@ -1642,6 +1668,8 @@ def plot_target_shift_PFs(
         plot. Default is False.
     - color (str): Color to use for place cell plots. Default is None.
     - PF_type (str, optional): PF evaluation method to plot. Default is "weights".
+    - mark_one_BTSP_range (bool): Whether to highlight the range of target shifts
+        that received only one BTSP event. Default is True.
 
     Returns:
     - ax1D (1D np.ndarray of plt.Axes): Subplots with target shifts and place field
@@ -1724,6 +1752,29 @@ def plot_target_shift_PFs(
     ax1D[0].spines["left"].set_bounds(ymin, ymax)
     ax1D[0].set_yticks(yticks)
 
+    if mark_one_BTSP_range:
+        one_BTSP_range_idxs = gen_util.get_value_index_range(
+            shift_data["num_BTSP_applied"], 1, single_range_only=True
+        )
+
+        one_BTSP_shift_range = [
+            shift_data["target_shifts"][one_BTSP_range_idxs[0]],
+            shift_data["target_shifts"][one_BTSP_range_idxs[1] - 1],
+        ]
+
+        ax1D[0].axhspan(
+            *one_BTSP_shift_range,
+            color=params_util.OBJ_COLOR,
+            alpha=0.8,
+            lw=0,
+            xmin=0.99,
+        )
+        print(
+            "Only one BTSP event recorded for shifts between {:.1f}m and {:.1f}m".format(
+                *one_BTSP_shift_range
+            )
+        )
+
     for idx in np.where(shift_data["target_shifts"] == 0)[0]:
         PFs[idx] = PFs[idx]
 
@@ -1750,16 +1801,6 @@ def plot_target_shift_PFs(
             head_length=0.04,
             keep_yticks=True,
         )
-
-        # ax1D[1].plot(
-        #     target_positions,
-        #     shift_data["target_shifts"],
-        #     color="k",
-        #     lw=LW,
-        #     alpha=0.8,
-        #     ls="dotted",
-        #     zorder=-5,
-        # )
 
         x_loc = gen_util.get_proportion_edges(PF_centers, 0.01)
         for target_shift in mark_examples:
@@ -1886,11 +1927,13 @@ def plot_openfield_components(Pyrs, titles=False, traj_idx=8):
     return axes
 
 
-def plot_openfield_PF(Pyrs, fig_side=3.0, lw=LW, alpha=0.8, PF_type="history"):
+def plot_last_openfield_PF(
+    Pyrs, fig_side=3.0, lw=LW, alpha=0.8, PF_type="history", sub_ax=None
+):
     """
     plot_openfield_PF(Pyrs)
 
-    Plots the place field of the Pyr neuron in the openfield corridor.
+    Plots the last recorded place field of the Pyr neuron in the openfield corridor.
 
     Args:
     - Pyrs (Pyr): Pyr object for openfield.
@@ -1903,7 +1946,10 @@ def plot_openfield_PF(Pyrs, fig_side=3.0, lw=LW, alpha=0.8, PF_type="history"):
     - sub_ax (plt.Axes): The subplot with the plotted PFs.
     """
 
-    fig, sub_ax = plt.subplots(figsize=(fig_side, fig_side))
+    if sub_ax is None:
+        fig, sub_ax = plt.subplots(figsize=(fig_side, fig_side))
+    else:
+        fig = sub_ax.figure
 
     Pyrs = get_somatic_compartment(Pyrs)
 
@@ -1956,9 +2002,12 @@ def plot_openfield_corridor_PFs(
     PF_type="history",
     num_BTSP=None,
     fig_side=1.5,
+    obj_s=1,
     num_cols=5,
     lw=LW,
     alpha=1.0,
+    no_teleport=True,
+    axes=None,
 ):
     """
     plot_openfield_corridor_PFs(Pyrs)
@@ -1971,11 +2020,19 @@ def plot_openfield_corridor_PFs(
         number of PF centers).
     - PF_centers (1D np.ndarray): Centers of the input place fields.
     - PF_type (str, optional): PF evaluation method to plot. Default is "history".
-    - num_BTSP (int, optional): Number of BTSP events per plot. Default is None.
+    - num_BTSP (int, optional): Number of BTSP events per plot, to use in plot titles.
+        Default is None.
     - fig_side (float, optional): Size of the figure. Default is 1.5.
+    - obj_s (float, optional): Size of the object markers. Default is 1.
     - num_cols (int, optional): Number of columns in the subplot grid. Default is 5.
     - lw (float, optional): Line width. Default is LW.
     - alpha (float, optional): Transparency level. Default is 1.0.
+    - no_teleport (bool, optional): Whether to skip plotting teleportation ports in the
+        plot. Default is True.
+    - axes (np.ndarray of plt.Axes, optional): Array of subplots to plot on. If None,
+        a new array is created. If provided, it should either have the same number of
+        subplots as the number of PFs to plot, or one extra per row for the colorbar.
+        Default is None.
 
     Returns:
     - sub_ax (plt.Axes): The subplot with the plotted PFs.
@@ -1983,18 +2040,41 @@ def plot_openfield_corridor_PFs(
 
     Pyrs = get_somatic_compartment(Pyrs)
 
-    num_plots = len(PFs)
-    num_cols = min(num_cols, num_plots)
-    num_rows = int(np.ceil(num_plots / num_cols))
-    width_ratios = [1] * num_cols + [0.1]
+    num_PFs = len(PFs)
 
-    _, axes = plt.subplots(
-        num_rows,
-        num_cols + 1,
-        figsize=(fig_side * num_cols * 1.04, fig_side * num_rows),
-        gridspec_kw={"width_ratios": width_ratios},
-        squeeze=False,
-    )
+    if axes is None:
+        num_cols = min(num_cols, num_PFs)
+        num_rows = int(np.ceil(num_PFs / num_cols))
+        width_ratios = [1] * num_cols + [0.1]
+
+        _, axes = plt.subplots(
+            num_rows,
+            num_cols + 1,
+            figsize=(fig_side * num_cols * 1.04, fig_side * num_rows),
+            gridspec_kw={"width_ratios": width_ratios},
+            squeeze=False,
+        )
+
+        PF_axes = axes[:, :-1].ravel()
+        caxes = axes[:, -1]
+
+    else:
+        axes = np.asarray(axes)
+        if axes.size < num_PFs:
+            raise ValueError(
+                f"Provided array of {axes.size} subplots, but {num_PFs} PFs."
+            )
+        elif axes.size == num_PFs:
+            PF_axes = axes.ravel()
+            caxes = plot_util.add_colorbar_axes(axes, end_only=True, size="5%")
+        elif axes.reshape(1, -1)[:, :-1].size <= num_PFs:
+            PF_axes = axes.reshape(1, -1)[:, :-1].ravel()[:num_PFs]
+            caxes = axes.reshape(1, -1)[:, -1:]
+        else:
+            raise NotImplementedError(
+                "Unclear how to include colorbar subplots given array of subplots with "
+                f"shape {axes.shape} and {num_PFs} PFs to plot."
+            )
 
     if Pyrs.n != 1:
         raise ValueError("Only single neuron plotting is supported.")
@@ -2006,20 +2086,24 @@ def plot_openfield_corridor_PFs(
     else:
         vmax = np.ceil(np.nanmax(PFs) * 10**2) / 10**2
 
+    skip_object_types = list()
+    if no_teleport:
+        skip_object_types.append("teleport")
+
     plot_fcts.plot_2D_PFs(
         Pyrs,
         PF_type=PF_type,
         PFs=PFs,
         PF_centers=PF_centers,
         alpha=alpha,
-        obj_s=1,
+        obj_s=obj_s,
         lw=lw,
         plot_BTSP_events=False,
-        skip_object_types=["teleport"],
+        skip_object_types=skip_object_types,
         no_legend=True,
         vmin=vmin,
         vmax=vmax,
-        ax=axes[:, :-1],
+        ax=PF_axes,
         marker="s",
         plot_colorbar=False,
         cbar_side="right",
@@ -2027,17 +2111,17 @@ def plot_openfield_corridor_PFs(
     )
 
     if num_BTSP is not None:
-        if len(num_BTSP) != num_plots:
+        if len(num_BTSP) != num_PFs:
             raise ValueError("num_BTSP and PFs must have the same length.")
         for i, sub_ax in enumerate(axes[:, :-1].ravel()):
             title_str = "event" if num_BTSP[i] == 1 else "events"
             sub_ax.set_title(f"{i + 1} ({num_BTSP[i]} BTSP {title_str})", fontsize=10)
 
-    for i, cax in enumerate(axes[:, -1]):
+    for i, cax in enumerate(caxes):
         norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
         im = mpl_cm.ScalarMappable(norm=norm, cmap=cmap)
         plt.colorbar(im, cax=cax)
-        if i == num_rows - 1:
+        if i == axes.shape[0] - 1:
             clabel = get_PF_label(PF_type, title=False)
             cax.set_ylabel(clabel)
 
@@ -2045,7 +2129,13 @@ def plot_openfield_corridor_PFs(
 
 
 def plot_openfield_corridor_BTSP_trajectory(
-    Pyrs, BTSP_idx=0, x_lims=None, y_lims=(None, 0.6), no_teleport=True
+    Pyrs,
+    BTSP_idx=0,
+    sub_ax=None,
+    x_lims=None,
+    y_lims=(None, 0.6),
+    no_teleport=True,
+    plot_colorbar=True,
 ):
     """
     plot_openfield_corridor_BTSP_trajectory(Pyrs)
@@ -2055,10 +2145,14 @@ def plot_openfield_corridor_BTSP_trajectory(
     Args:
     - Pyrs (Pyr): Pyr object containing the environment, agent, object and place cells.
     - BTSP_idx (int, optional): Index of the BTSP event to plot. Default is 0.
+    - sub_ax (plt.Axes, optional): Subplot on which to plot the data. If None, a new
+        subplot is created. Default is None.
     - x_lims (list, optional): X-axis limits for the plot. Default is None.
     - y_lims (list, optional): Y-axis limits for the plot. Default is (None, 0.5).
     - no_teleport (bool, optional): Whether to skip plotting teleportation ports in the
         plot. Default is True.
+    - plot_colorbar (bool, optional): Whether to plot a colorbar showing BTSP
+        kernel strength. Default is True.
 
     Returns:
     - sub_ax (plt.Axes): Subplot with the openfield BTSP trajectory.
@@ -2070,19 +2164,23 @@ def plot_openfield_corridor_BTSP_trajectory(
 
     Pyrs = get_somatic_compartment(Pyrs)
 
-    x_prop = 1.0
-    if x_lims is not None:
-        xmin = x_lims[0] or Env.extent[0]
-        xmax = x_lims[1] or Env.extent[1]
-        x_prop = (xmax - xmin) / (Env.extent[1] - Env.extent[0])
+    split_clabel = False
+    if sub_ax is None:
+        x_prop = 1.0
+        if x_lims is not None:
+            xmin = x_lims[0] or Env.extent[0]
+            xmax = x_lims[1] or Env.extent[1]
+            x_prop = (xmax - xmin) / (Env.extent[1] - Env.extent[0])
 
-    y_prop = 1.0
-    if y_lims is not None:
-        ymin = y_lims[0] or Env.extent[2]
-        ymax = y_lims[1] or Env.extent[3]
-        y_prop = (ymax - ymin) / (Env.extent[3] - Env.extent[2])
+        y_prop = 1.0
+        if y_lims is not None:
+            ymin = y_lims[0] or Env.extent[2]
+            ymax = y_lims[1] or Env.extent[3]
+            y_prop = (ymax - ymin) / (Env.extent[3] - Env.extent[2])
+            if y_prop < 0.5:
+                split_clabel = True
 
-    _, sub_ax = plt.subplots(figsize=(4.2 * x_prop, 2.85 * y_prop))
+        _, sub_ax = plt.subplots(figsize=(4.2 * x_prop, 2.85 * y_prop))
 
     kwargs = {"no_legend": True, "s": 30}
     if no_teleport:
@@ -2120,18 +2218,22 @@ def plot_openfield_corridor_BTSP_trajectory(
     if y_lims is not None:
         sub_ax.set_ylim(y_lims)
 
-    cmap, vmin, vmax = Pyrs.get_BTSP_kernel_based_cmap(for_colorbar=True)
-    norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
-    cbar = mpl_cm.ScalarMappable(norm=norm, cmap=cmap)
-    plot_util.add_colorbars(
-        sub_ax,
-        cbar,
-        vmin=vmin,
-        vmax=vmax,
-        label="BTSP\nkernel\nstrength",
-        outline=True,
-        size="5%",
-    )
+    if plot_colorbar:
+        cmap, vmin, vmax = Pyrs.get_BTSP_kernel_based_cmap(for_colorbar=True)
+        norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
+        cbar = mpl_cm.ScalarMappable(norm=norm, cmap=cmap)
+        clabel = "BTSP kernel strength"
+        if split_clabel:
+            clabel = clabel.replace(" ", "\n")
+        plot_util.add_colorbars(
+            sub_ax,
+            cbar,
+            vmin=vmin,
+            vmax=vmax,
+            label=clabel,
+            outline=True,
+            size="5%",
+        )
 
     return sub_ax
 

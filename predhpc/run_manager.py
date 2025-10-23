@@ -19,9 +19,9 @@ from predhpc.util import ext_util, gen_util, plot_util, params_util
 
 
 class AdjustMaxTraj:
-    def __init__(self, learner, finish_trajectory=True):
+    def __init__(self, learner, complete_trajectory=True):
         self.learner = learner
-        self.finish_trajectory = finish_trajectory
+        self.complete_trajectory = complete_trajectory
         self.original_max_num_traj = learner.max_num_traj
 
     def __enter__(self):
@@ -144,20 +144,31 @@ class VNUpdater:
 
 
 class TeleportRewardUpdater(VNUpdater):
-    def __init__(self, Agent, switch_after=1, targets=["teleport_0_in", "reward"]):
+    def __init__(
+        self,
+        Agent,
+        reenable_after=1,
+        targets=["teleport_0_in", "reward"],
+        disable_teleportation=0,
+    ):
         """
-        TeleportRewardUpdater
+        TeleportRewardUpdater()
 
         Custom VNUpdater that switches the agent's target between a teleportation in
         port and a reward location after a specified number of teleports.
 
+        Can also disable teleportation for a set number of update steps after a
+        teleportation event.
+
         Args:
         - Agent (Agent): The agent whose target will be updated.
-        - switch_after (int): Number of teleportation events after which to switch
-            the target to the second location provided. Default is 1.
+        - reenable_after (int): Number of teleportation events after which to re-enable
+            reward target or no target. Default is 1.
         - targets (list): List of two target names. The first should be a teleportation
             in port, and the second should be the reward location. Default is
             ["teleport_0_in", "reward"].
+        - disable_teleportation (int): Number of update steps during which to disable
+            teleportation after a teleportation event. Default is 0.
         """
 
         if len(targets) != 2:
@@ -184,8 +195,12 @@ class TeleportRewardUpdater(VNUpdater):
         Agent.set_no_target_factor(0)
 
         self.initial_num_teleports = len(Agent.teleportation_df)
-        self.switch_after = switch_after
-        self._switched = False
+        self.reenable_after = reenable_after
+        self._reenabled = False
+
+        self.disable_teleportation = disable_teleportation
+        self.num_teleportations = 0
+        self._teleportation_disabled_steps = 0
 
     def get_update_kwargs(self, **kwargs):
         """
@@ -204,14 +219,25 @@ class TeleportRewardUpdater(VNUpdater):
                 "'ignore_agent_target' cannot be True for TeleportRewardUpdater."
             )
 
-        if not self._switched:
+        if not self._reenabled:
             if (
                 len(self.Agent.teleportation_df)
-                >= self.initial_num_teleports + self.switch_after
+                >= self.initial_num_teleports + self.reenable_after
             ):
                 self.Agent.set_reward_factor(self.initial_reward_factor)
                 self.Agent.set_no_target_factor(self.initial_no_target_factor)
-                self._switched = True
+                self._reenabled = True
+
+        if self.disable_teleportation > 0:
+            if len(self.Agent.teleportation_df) > self.num_teleportations:
+                self.num_teleportations = len(self.Agent.teleportation_df)
+                self._teleportation_disabled_steps = self.disable_teleportation
+                self.Agent.allow_teleportation(False)
+
+            if self._teleportation_disabled_steps > 0:
+                self._teleportation_disabled_steps -= 1
+                if self._teleportation_disabled_steps == 0:
+                    self.Agent.allow_teleportation(True)
 
         if self.Agent.target_position is None:
             pass
@@ -882,11 +908,11 @@ def init_env_objects(
         return Pyrs
 
 
-def finish_learn_trajectory(learner, updater=dict(), no_logs=False):
+def complete_learn_trajectory(learner, updater=dict(), no_logs=False):
     """
-    finish_learn_trajectory(learner)
+    complete_learn_trajectory(learner)
 
-    Finish the current trajectory for a learner.
+    Complete the current trajectory for a learner.
 
     Args:
     - learner (Learner): Learner object.
@@ -899,7 +925,7 @@ def finish_learn_trajectory(learner, updater=dict(), no_logs=False):
         return
 
     if not no_logs:
-        print("Finishing last trajectory.")
+        print("Completing last trajectory.")
 
     def generator():
         while True:
@@ -918,7 +944,7 @@ def run_learner(
     learner,
     updater=dict(),
     max_num_steps=10000,
-    finish_trajectory=False,
+    complete_trajectory=False,
     no_logs=False,
 ):
     """
@@ -934,13 +960,13 @@ def run_learner(
         other stopping conditions (number of target reaches or trajectories). Pass None
         to avoid constraining these by number of steps, and learning will only stop
         when one of those conditions are reached, if provided. Default is 10000.
-    - finish_trajectory (bool, optional): Whether to finish the last trajectory.
+    - complete_trajectory (bool, optional): Whether to complete the last trajectory.
         Default is False.
     - no_logs (bool, optional): Whether to disable logging. Default is False.
     """
 
     initial = 0
-    with AdjustMaxTraj(learner, finish_trajectory=finish_trajectory):
+    with AdjustMaxTraj(learner, complete_trajectory=complete_trajectory):
         if max_num_steps is None:
 
             def infinite_generator():
@@ -957,8 +983,8 @@ def run_learner(
             if stop:
                 break
 
-    if finish_trajectory:
-        finish_learn_trajectory(learner, no_logs=no_logs)
+    if complete_trajectory:
+        complete_learn_trajectory(learner, no_logs=no_logs)
 
     learner.wrap_up(no_logs=no_logs)
 
@@ -970,7 +996,7 @@ def learn(
     max_num_target_reaches=None,
     max_num_traj=None,
     max_num_steps=10000,
-    finish_trajectory=False,
+    complete_trajectory=False,
     record_weights_at_BTSP=True,
     weight_recording_freq=100,
     use_Hebbian=False,
@@ -996,7 +1022,7 @@ def learn(
         other stopping conditions (number of target reaches or trajectories). Pass None
         to avoid constraining these by number of steps, and learning will only stop
         when one of those conditions are reached, if provided. Default is 10000.
-    - finish_trajectory (bool, optional): Whether to finish the last trajectory.
+    - complete_trajectory (bool, optional): Whether to complete the last trajectory.
         Default is False.
     - record_weights_at_BTSP (bool, optional): Whether to record weights at BTSP events.
         Default is True.
@@ -1042,7 +1068,7 @@ def learn(
         learner,
         updater=updater,
         max_num_steps=max_num_steps,
-        finish_trajectory=finish_trajectory,
+        complete_trajectory=complete_trajectory,
         no_logs=no_logs,
     )
 
@@ -1057,7 +1083,7 @@ def learn_openfield_BTSP(
         learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | Learner | None
     ) = None,
     max_num_steps: int | None = 10000,
-    finish_trajectory: bool = False,
+    complete_trajectory: bool = False,
     record_weights_at_BTSP: bool = True,
     weight_recording_freq: int = 100,
     use_Hebbian: bool = False,
@@ -1082,7 +1108,7 @@ def learn_openfield_BTSP(
         Pass None to avoid constraining these by number of steps, and learning will
         only stop when one of those conditions are reached, if provided.
         Default is 10000.
-    - finish_trajectory (bool, optional): Whether to finish the last trajectory.
+    - complete_trajectory (bool, optional): Whether to complete the last trajectory.
         Default is False.
     - record_weights_at_BTSP (bool, optional): Whether to record weights at BTSP events.
         Default is True.
@@ -1144,7 +1170,7 @@ def learn_openfield_BTSP(
         Pyrs_or_learner,
         BTSP_on=None,
         max_num_steps=max_num_steps,
-        finish_trajectory=finish_trajectory,
+        complete_trajectory=complete_trajectory,
         record_weights_at_BTSP=record_weights_at_BTSP,
         weight_recording_freq=weight_recording_freq,
         use_Hebbian=use_Hebbian,
@@ -1252,7 +1278,7 @@ def learn_T_maze_BTSP(
     max_num_target_reaches: int = 200,
     max_num_traj: int | None = None,
     max_num_steps: int | None = 10000,
-    finish_trajectory: bool = True,
+    complete_trajectory: bool = True,
     record_weights_at_BTSP: bool = True,
     weight_recording_freq: int = 100,
     use_Hebbian: bool = False,
@@ -1279,7 +1305,7 @@ def learn_T_maze_BTSP(
         other stopping conditions (number of target reaches or trajectories). Pass None
         to avoid constraining these by number of steps, and learning will only stop
         when one of those conditions are reached, if provided. Default is 10000.
-    - finish_trajectory (bool, optional): Whether to finish the last trajectory.
+    - complete_trajectory (bool, optional): Whether to complete the last trajectory.
         Default is True.
     - record_weights_at_BTSP (bool, optional): Whether to record weights at BTSP events.
         Default is True.
@@ -1337,7 +1363,7 @@ def learn_T_maze_BTSP(
         max_num_target_reaches=max_num_target_reaches,
         max_num_traj=max_num_traj,
         max_num_steps=max_num_steps,
-        finish_trajectory=finish_trajectory,
+        complete_trajectory=complete_trajectory,
         record_weights_at_BTSP=record_weights_at_BTSP,
         weight_recording_freq=weight_recording_freq,
         use_Hebbian=use_Hebbian,
@@ -1372,7 +1398,7 @@ def learn_1D_BTSP(
     max_num_target_reaches: int = 10,
     max_num_traj: int | None = None,
     max_num_steps: int | None = 5000,
-    finish_trajectory: bool = True,
+    complete_trajectory: bool = True,
     record_weights_at_BTSP: bool = True,
     weight_recording_freq: int = 100,
     use_Hebbian: bool = False,
@@ -1400,7 +1426,7 @@ def learn_1D_BTSP(
         other stopping conditions (number of target reaches or trajectories). Pass None
         to avoid constraining these by number of steps, and learning will only stop
         when one of those conditions are reached, if provided. Default is 5000.
-    - finish_trajectory (bool, optional): Whether to finish the last trajectory.
+    - complete_trajectory (bool, optional): Whether to complete the last trajectory.
         Default is True.
     - record_weights_at_BTSP (bool, optional): Whether to record weights at BTSP events.
         Default is True.
@@ -1454,7 +1480,7 @@ def learn_1D_BTSP(
         max_num_target_reaches=max_num_target_reaches,
         max_num_traj=max_num_traj,
         max_num_steps=max_num_steps,
-        finish_trajectory=finish_trajectory,
+        complete_trajectory=complete_trajectory,
         record_weights_at_BTSP=record_weights_at_BTSP,
         weight_recording_freq=weight_recording_freq,
         use_Hebbian=use_Hebbian,

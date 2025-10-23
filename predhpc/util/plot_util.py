@@ -942,6 +942,44 @@ def add_dummy_colorbar_axis(
     return cax
 
 
+def add_colorbar_axes(
+    axes,
+    end_only=False,
+    side="right",
+    size="5%",
+    pad=0.05,
+):
+    """
+    add_colorbar_axes(axes)
+
+    Add a colorbar axes to each subplot or at the end of each row of subplots.
+
+    Args:
+    - axes (list or np.ndarray): List or array of axes to add the colorbar axis to.
+    - end_only (bool, optional): Whether to add colorbars only to the end of each row.
+        Default is False.
+    - side (str, optional): Side of the axes to add the colorbar to. Default is "right".
+    - size (str, optional): Size of the colorbar. Default is "5%".
+    - pad (float, optional): Padding between the axes and the colorbar. Default is 0.05.
+
+    Returns:
+    - caxes (list): Colorbar axes.
+    """
+
+    axes = np.asarray(axes)
+    if len(axes.shape) < 2 or end_only:
+        dividers = [make_axes_locatable(axes.ravel()[-1])]
+    else:
+        dividers = [make_axes_locatable(ax_row[-1]) for ax_row in axes]
+
+    caxes = list()
+    for divider in dividers:
+        cax = divider.append_axes(side, size=size, pad=pad)
+        caxes.append(cax)
+
+    return caxes
+
+
 def add_colorbars(
     axes,
     im,
@@ -982,10 +1020,7 @@ def add_colorbars(
         label = "Firing rate (Hz)"
 
     axes = np.asarray(axes)
-    if len(axes.shape) < 2 or end_only:
-        dividers = [make_axes_locatable(axes.ravel()[-1])]
-    else:
-        dividers = [make_axes_locatable(ax_row[-1]) for ax_row in axes]
+    caxes = add_colorbar_axes(axes, end_only=end_only, side=side, size=size, pad=pad)
 
     if vmin is None:
         vmin = im.get_array().min()
@@ -996,8 +1031,7 @@ def add_colorbars(
         round = -int(np.floor(np.log10(np.absolute(vmax - vmin))))
 
     cbars = list()
-    for divider in dividers:
-        cax = divider.append_axes(side, size=size, pad=pad)
+    for cax in caxes:
         cbar = plt.colorbar(im, cax=cax, location=side)
         if not outline:
             cbar.ax.tick_params(length=0)

@@ -1915,7 +1915,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             scale = max(np.diff(extent[:2]), np.diff(extent[2:]))
             occupancy = rutils.bin_data_for_histogramming(
                 data=position,
-                extent=self.Environment.extent,
+                extent=extent,
                 dx=scale / nbins,
                 norm_by_bincount=False,
                 return_zero_bins=False,
@@ -1925,7 +1925,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 occupancy,
                 extent=extent,
                 cmap="viridis",
-                aspect="auto",
+                aspect=1,
                 interpolation="none",
                 zorder=0,
             )
@@ -4078,7 +4078,7 @@ class OpenFieldAgent(ResetableAgent):
         )
 
         # add target probabilities
-        target_probability_df.loc[:, "target_factor"] = 1
+        target_probability_df.loc[:, "target_factor"] = 1.0
         target_probability_df.loc[
             target_probability_df["object_type_name"] == "reward", "target_factor"
         ] = self.reward_factor  # type: ignore[attr-defined]
@@ -4341,7 +4341,6 @@ class OpenFieldAgent(ResetableAgent):
         self,
         teleport_pair_num: int = 0,
         max_attempts: int = 100,
-        # adjust_backwards: bool = True,
     ) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
         """
         self.sample_teleport_out_position()
@@ -4943,8 +4942,9 @@ class OpenFieldAgent(ResetableAgent):
         t_end: float | None = None,
         timeseries: bool = False,
         in_min: bool = True,
+        y_prop: float = 0.98,
         plot_lines: bool = True,
-        legend: bool = True,
+        no_legend: bool = False,
     ):
         """
         self.add_teleportation_markers_to_plots()
@@ -4959,9 +4959,11 @@ class OpenFieldAgent(ResetableAgent):
         - timeseries (bool, optional): Whether the plot is timeseries. Default is False.
         - in_min (bool, optional): Whether the timeseries is in minutes.
             Default is True.
+        - y_prop (float, optional): Proportion of the y-axis to plot the markers at,
+            if timeseries is True. Default is 0.98.
         - plot_lines (bool, optional): Whether to plot lines for teleportation events,
             if timeseries is True. Default is True.
-        - legend (bool, optional): Whether to add a legend. Default is True.
+        - no_legend (bool, optional): Whether to omit a legend. Default is False.
         """
 
         t, startid, _ = self.get_plotting_times(t_start=t_start, t_end=t_end)
@@ -4979,7 +4981,7 @@ class OpenFieldAgent(ResetableAgent):
             plotted = list()
             if timeseries:
                 y_min, y_max = sub_ax.get_ylim()
-                y_pos = (y_max - y_min) * 0.98 + y_min
+                y_pos = (y_max - y_min) * y_prop + y_min
 
             for i in np.argsort(object_in_type_nums):
                 step_num = step_nums[i]
@@ -4996,7 +4998,7 @@ class OpenFieldAgent(ResetableAgent):
 
                 plot_params = copy.deepcopy(env_plot_params[obj_num])
                 name = plot_params.pop("name")
-                if legend and name not in plotted:
+                if not no_legend and name not in plotted:
                     label = name.replace("_", " ").replace(" in", "")
                     plotted.append(name)
                 else:
@@ -5027,7 +5029,7 @@ class OpenFieldAgent(ResetableAgent):
 
                 sub_ax.scatter(*pos, alpha=alpha, label=label, **plot_params)
 
-            if legend and len(plotted):
+            if not no_legend and len(plotted):
                 sub_ax.legend()
 
     def add_target_to_plot(

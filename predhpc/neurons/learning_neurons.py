@@ -4135,10 +4135,124 @@ class BTSPLayer(HebbianLayer):
 
         return sub_ax
 
+    def add_BTSP_markers_to_plots(
+        self,
+        ax: np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]] | plt.Axes,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        chosen_neurons: (
+            str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
+        ) = "all",
+        timeseries: bool = False,
+        in_min: bool = True,
+        in_steps: bool = False,
+        color: str | None = None,
+        s: int = 10,
+        marker: str | tuple = "x",
+        prop_y: float = 0.95,
+        lw: float = 1.0,
+        zorder: int = 5,
+    ):
+        """
+        self.add_BTSP_markers_to_plots()
+
+        Adds BTSP markers to timeseries or rate map plots.
+
+        Args:
+        - ax (np.ndarray or plt.Axes): Subplot or array of subplots. Single subplot
+            if plotting timeseries or 1D rate map. Otherwise, an array of subplots.
+        - t_start (float, optional): Start time of the plot. Default is None.
+        - t_end (float, optional): End time. Default is None.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
+            Default is "all".
+        - timeseries (bool, optional): Whether the plot is timeseries (map expected,
+            otherwise). Default is False.
+        - in_min (bool, optional): Whether to plot time in minutes if timeseries is
+            True. Default is True.
+        - in_steps (bool, optional): Whether to plot time in steps if timeseries is
+            True. If True, takes precedence over in_min. Default is False.
+        - color (str, optional): Color of the BTSP markers. Default is None.
+        - s (int, optional): Size of the BTSP markers. Default is 10.
+        - marker (str, optional): Marker style for the BTSP markers. Default is "x".
+        - prop_y (float, optional): Proportional y-offset for the markers if timeseries
+            is True. Default is 0.95.
+        - lw (float, optional): Line width of the markers. Default is 1.
+        - zorder (int, optional): Z-order of the markers. Default is 5.
+        """
+
+        if color is None:
+            color = self.color or "C1"
+
+        chosen_neurons = self.return_list_of_neurons(chosen_neurons=chosen_neurons)  # type: ignore[arg-type]
+        num_neurons = len(chosen_neurons)
+
+        t, startid, _ = self.get_plotting_times(
+            t_start=t_start, t_end=t_end, raise_error=False
+        )
+        if len(t) == 0:
+            return
+
+        ax1D = np.asarray(ax).ravel()
+        if timeseries or self.Agent.Environment.dimensionality == "1D":
+            if len(ax1D) != 1:
+                raise ValueError(
+                    "Only one axis expected for timeseries or 1D rate map."
+                )
+            sub_ax = ax1D[0]
+            ymax = sub_ax.get_ylim()[1]
+
+        min_not_yet = self.num_steps_total - self.BTSP_buffer["num_steps"].max()
+
+        BTSP_step_dict = self.get_BTSP_step_dict(t_end=t_end)
+        for target, steps in BTSP_step_dict.items():
+            for step in steps:
+                if step < startid:
+                    alpha = 0.7  # happened before
+                elif step >= min_not_yet:
+                    alpha = 0.5  # not yet applied
+                else:
+                    alpha = 1.0
+
+                if target not in chosen_neurons:
+                    continue
+
+                i = chosen_neurons.index(target)
+
+                if timeseries:
+                    if step < startid:
+                        continue
+                    if in_steps:
+                        x_pos = step
+                    else:
+                        x_pos = t[step - startid]
+                        if in_min:
+                            x_pos = x_pos / 60
+                    line_sep = (ymax - 1) / num_neurons
+                    y_pos = 1 + line_sep * i + line_sep * prop_y
+                    pos = [x_pos, y_pos]
+                else:
+                    pos = self.Agent.history["pos"][step]
+                    if self.Agent.Environment.dimensionality == "1D":
+                        line_sep = (ymax - 1) / num_neurons
+                        y_pos = 1 + line_sep * i + line_sep * prop_y
+                        pos = pos + [y_pos]
+                    else:
+                        sub_ax = ax1D[i]
+
+                sub_ax.scatter(
+                    *pos,
+                    color=color,
+                    alpha=alpha,
+                    marker=marker,
+                    s=s,
+                    lw=lw,
+                    zorder=zorder,
+                )
+
     def plot_BTSP_ramp(
         self,
         sub_ax=None,
-        plot_events=True,
+        mark_BTSP=True,
         neuron_idx=0,
         t_start=None,
         t_end=None,
@@ -4157,7 +4271,7 @@ class BTSPLayer(HebbianLayer):
         Args:
         - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
             created. Default is None.
-        - plot_events (bool, optional): Whether to plot BTSP event markers.
+        - mark_BTSP (bool, optional): Whether to plot BTSP event markers.
             Default is True.
         - neuron_idx (int, optional): Index of the neuron to plot. Default is 0.
         - t_start (float, optional): Start time of the plot. Default is None.
@@ -4201,28 +4315,25 @@ class BTSPLayer(HebbianLayer):
         sub_ax.set_ylabel("Prop. of BTSP\nthreshold reached")
         sub_ax.spines[["top", "right"]].set_visible(False)
         if mark_threshold:
-            sub_ax.axhline(1, ls="dashed", lw=lw, color=self.color)
+            sub_ax.axhline(1, ls="dotted", lw=lw, color=self.color)
         plot_util.pad_axis(sub_ax, axis="y", prop_high=1.0)
 
         xlabel = "Time (min)" if in_min else "Time (s)"
         sub_ax.set_xlabel(xlabel)
 
-        if plot_events:
-            BTSP_steps = self.get_BTSP_step_dict(t_start=t_start, t_end=t_end)[
-                neuron_idx
-            ]
-
-            if len(BTSP_steps):
-                y = 1
-                sub_ax.scatter(
-                    t[np.asarray(BTSP_steps) - startid],
-                    np.full(len(BTSP_steps), y),
-                    color=(self.color or "k"),
-                    alpha=0.8,
-                    marker=marker,
-                    s=s,
-                    lw=lw,
-                )
+        if mark_BTSP:
+            self.add_BTSP_markers_to_plots(
+                ax=sub_ax,
+                t_start=t_start,
+                t_end=t_end,
+                chosen_neurons=[neuron_idx],
+                timeseries=True,
+                marker=marker,
+                s=s,
+                lw=lw,
+                color=(self.color or "k"),
+                prop_y=1.0,
+            )
 
         fig = sub_ax.figure
 
@@ -4233,7 +4344,7 @@ class BTSPLayer(HebbianLayer):
     def plot_BTSP_ramp_factors(
         self,
         axes=None,
-        plot_events=True,
+        mark_BTSP=True,
         neuron_idx=0,
         t_start=None,
         t_end=None,
@@ -4248,7 +4359,7 @@ class BTSPLayer(HebbianLayer):
         Args:
         - axes (1 or 2D np.ndarray): Array of subplots to plot on,
             with shape (2, 1) or (2, ). Default is None.
-        - plot_events (bool, optional): Whether to plot BTSP event markers.
+        - mark_BTSP (bool, optional): Whether to plot BTSP event markers.
             Default is True.
         - neuron_idx (int, optional): Index of the neuron to plot. Default is 0.
         - t_start (float, optional): Start time of the plot. Default is None.
@@ -4335,120 +4446,6 @@ class BTSPLayer(HebbianLayer):
         plot_util.save_figure(fig, f"{self.name}_BTSP_ramp_factors", save=autosave)  # type: ignore[attr-defined]
 
         return axes
-
-    def add_BTSP_markers_to_plots(
-        self,
-        ax: np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]] | plt.Axes,
-        t_start: float | None = None,
-        t_end: float | None = None,
-        chosen_neurons: (
-            str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
-        ) = "all",
-        timeseries: bool = False,
-        in_min: bool = True,
-        in_steps: bool = False,
-        color: str | None = None,
-        s: int = 10,
-        marker: str | tuple = "x",
-        prop_y: float = 0.7,
-        lw: float = 1.0,
-        zorder: int = 5,
-    ):
-        """
-        self.add_BTSP_markers_to_plots()
-
-        Adds BTSP markers to timeseries or rate map plots.
-
-        Args:
-        - ax (np.ndarray or plt.Axes): Subplot or array of subplots. Single subplot
-            if plotting timeseries or 1D rate map. Otherwise, an array of subplots.
-        - t_start (float, optional): Start time of the plot. Default is None.
-        - t_end (float, optional): End time. Default is None.
-        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
-            Default is "all".
-        - timeseries (bool, optional): Whether the plot is timeseries (map expected,
-            otherwise). Default is False.
-        - in_min (bool, optional): Whether to plot time in minutes if timeseries is
-            True. Default is True.
-        - in_steps (bool, optional): Whether to plot time in steps if timeseries is
-            True. If True, takes precedence over in_min. Default is False.
-        - color (str, optional): Color of the BTSP markers. Default is None.
-        - s (int, optional): Size of the BTSP markers. Default is 10.
-        - marker (str, optional): Marker style for the BTSP markers. Default is "x".
-        - prop_y (float, optional): Proportional y-offset for the markers if timeseries
-            is True. Default is 0.7.
-        - lw (float, optional): Line width of the markers. Default is 1.
-        - zorder (int, optional): Z-order of the markers. Default is 5.
-        """
-
-        if color is None:
-            color = self.color or "C1"
-
-        chosen_neurons = self.return_list_of_neurons(chosen_neurons=chosen_neurons)  # type: ignore[arg-type]
-        num_neurons = len(chosen_neurons)
-
-        t, startid, _ = self.get_plotting_times(
-            t_start=t_start, t_end=t_end, raise_error=False
-        )
-        if len(t) == 0:
-            return
-
-        ax1D = np.asarray(ax).ravel()
-        if timeseries or self.Agent.Environment.dimensionality == "1D":
-            if len(ax1D) != 1:
-                raise ValueError(
-                    "Only one axis expected for timeseries or 1D rate map."
-                )
-            sub_ax = ax1D[0]
-            ymax = sub_ax.get_ylim()[1]
-
-        min_not_yet = self.num_steps_total - self.BTSP_buffer["num_steps"].max()
-
-        BTSP_step_dict = self.get_BTSP_step_dict(t_end=t_end)
-        for target, steps in BTSP_step_dict.items():
-            for step in steps:
-                if step < startid:
-                    alpha = 0.6  # happened before
-                elif step >= min_not_yet:
-                    alpha = 0.3  # not yet applied
-                else:
-                    alpha = 1.0
-
-                if target not in chosen_neurons:
-                    continue
-
-                i = chosen_neurons.index(target)
-
-                if timeseries:
-                    if step < startid:
-                        continue
-                    if in_steps:
-                        x_pos = step
-                    else:
-                        x_pos = t[step - startid]
-                        if in_min:
-                            x_pos = x_pos / 60
-                    line_sep = (ymax - 1) / num_neurons
-                    y_pos = 1 + line_sep * i + line_sep * prop_y
-                    pos = [x_pos, y_pos]
-                else:
-                    pos = self.Agent.history["pos"][step]
-                    if self.Agent.Environment.dimensionality == "1D":
-                        line_sep = (ymax - 1) / num_neurons
-                        y_pos = 1 + line_sep * i + line_sep * prop_y
-                        pos = pos + [y_pos]
-                    else:
-                        sub_ax = ax1D[i]
-
-                sub_ax.scatter(
-                    *pos,
-                    color=color,
-                    alpha=alpha,
-                    marker=marker,
-                    s=s,
-                    lw=lw,
-                    zorder=zorder,
-                )
 
     def plot_rate_map(
         self,

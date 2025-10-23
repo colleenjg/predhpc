@@ -165,6 +165,52 @@ def get_proportion_edges(data, prop=0.5):
     return prop_val
 
 
+def get_value_index_range(data, value, single_range_only=False):
+    """
+    get_value_index_range(data, value)
+
+    Obtain the start and end indices of a specific value in the data.
+
+    Args:
+    - data (1D np.ndarray): Data.
+    - value (float): Value for which to obtain the index range.
+    - single_range_only (bool, optional): If True, only return the first contiguous
+        range of indices. Default is False.
+
+    Returns:
+    - index_ranges (list): List of index ranges for the specified value, or single
+        range if single_range_only is True. End of each range is exclusive.
+    """
+
+    data = np.asarray(data)
+    indices = np.where(data == value)[0]
+
+    if len(indices) == 0:
+        index_ranges = list()
+
+    else:
+        index_ranges = list()
+        start_idx = 0
+        diffs = np.diff(indices)
+        for i, diff in enumerate(diffs):
+            if diff == 1:
+                continue
+            else:
+                index_ranges.append((indices[start_idx], indices[i] + 1))
+                start_idx = i + 1
+        index_ranges.append((indices[start_idx], indices[-1] + 1))
+
+    if single_range_only:
+        if len(index_ranges) == 1:
+            index_ranges = index_ranges[0]
+        else:
+            raise RuntimeError(
+                f"Expected exactly one range, but found {len(index_ranges)} ranges."
+            )
+
+    return index_ranges
+
+
 def get_duration_str(start_time, log=False):
     """
     get_duration_str(start_time)

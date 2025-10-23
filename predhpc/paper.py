@@ -334,11 +334,11 @@ def run_linear(
     - Pyrs (Pyr, optional): Pyr object with initialized parameters. If None,
         a new Pyr object is created with default parameters.
     - max_num_steps (int): Maximum number of steps to run the environment. Note that
-        if learner is set to finish final trajectory, max_num_steps will be exceeded
+        if learner is set to complete final trajectory, max_num_steps will be exceeded
         to complete any incomplete trajectories. Default is 3800.
     - max_time_min (float, optional): Maximum time in minutes to run the environment.
         If specified, it overrides max_num_steps based on the agent's time step. Note
-        that if learner is set to finish final trajectory, max_time_min will be
+        that if learner is set to complete final trajectory, max_time_min will be
         exceeded to complete any incomplete trajectories. Default is None.
     - BTSP_on (int): Trajectory on which to turn on BTSP. 1 for first trajectory.
         Default is None.
@@ -397,7 +397,7 @@ def plot_linear_summary(learner=None, max_time_min=2.0, **kwargs):
     - learner (Learner): Learner object.
     - max_time_min (float, optional): Maximum time in minutes to run the environment.
         If specified, it overrides max_num_steps based on the agent's time step. Note
-        that if learner is set to finish final trajectory, max_time_min will be
+        that if learner is set to complete final trajectory, max_time_min will be
         exceeded to complete any incomplete trajectories. Default is 2.0.
 
     Keywords args:
@@ -428,7 +428,7 @@ def plot_linear_neural_activity(
     - learner (Learner): Learner object.
     - max_time_min (float, optional): Maximum time in minutes to run the environment.
         If specified, it overrides max_num_steps based on the agent's time step. Note
-        that if learner is set to finish final trajectory, max_time_min will be
+        that if learner is set to complete final trajectory, max_time_min will be
         exceeded to complete any incomplete trajectories. Default is 2.0.
     - inhibition (str): Type of inhibition to apply. Options are "balanced",
         "excessive", or "insufficient". Default is "balanced".
@@ -463,7 +463,7 @@ def plot_linear_place_fields(learner, max_time_min=2.0, **kwargs):
     - learner (Learner): Learner object.
     - max_time_min (float, optional): Maximum time in minutes to run the environment.
         If specified, it overrides max_num_steps based on the agent's time step. Note
-        that if learner is set to finish final trajectory, max_time_min will be
+        that if learner is set to complete final trajectory, max_time_min will be
         exceeded to complete any incomplete trajectories. Default is 2.0.
 
     Keywords args:
@@ -492,7 +492,7 @@ def plot_linear_binned_rates(learner, max_time_min=2.0, **kwargs):
     - learner (Learner): Learner object.
     - max_time_min (float, optional): Maximum time in minutes to run the environment.
         If specified, it overrides max_num_steps based on the agent's time step. Note
-        that if learner is set to finish final trajectory, max_time_min will be
+        that if learner is set to complete final trajectory, max_time_min will be
         exceeded to complete any incomplete trajectories. Default is 2.0.
 
     Keywords args:
@@ -1081,6 +1081,18 @@ def plot_linear_shift_PF_examples(
     if shift_data is None:
         shift_data = run_linear_fct("linear_shifts", overwrite=False)
 
+    Pyrs = get_linear_Pyrs()
+    _, Ag, _, _ = ext_util.extract_objects_from_Pyrs(Pyrs)  # to add plot markers
+
+    one_BTSP_range_idxs = gen_util.get_value_index_range(
+        shift_data["num_BTSP_applied"], 1, single_range_only=True
+    )
+
+    one_BTSP_pos_range = [
+        shift_data["target_shifts"][one_BTSP_range_idxs[0]] + Ag.target_position[0],
+        shift_data["target_shifts"][one_BTSP_range_idxs[1] - 1] + Ag.target_position[0],
+    ]
+
     shift_data = gen_util.get_filtered_np_data_dict(
         shift_data,
         "target_shifts",
@@ -1088,11 +1100,12 @@ def plot_linear_shift_PF_examples(
         skip_keys=["PF_centers", "PC_place_centers"],
     )
 
-    Pyrs = get_linear_Pyrs()
-    _, Ag, _, _ = ext_util.extract_objects_from_Pyrs(Pyrs)  # to add plot markers
-
     axes = paper_plot_fcts.plot_linear_shift_PF_examples(
-        shift_data, Ag=Ag, plot_cmap=plot_cmap, **kwargs
+        shift_data,
+        Ag=Ag,
+        plot_cmap=plot_cmap,
+        mark_pos_range=one_BTSP_pos_range,
+        **kwargs,
     )
 
     return axes
@@ -1288,11 +1301,11 @@ def run_openfield_corridor(
     - Pyrs (Pyr, optional): Pyr object with initialized parameters. If None,
         a new Pyr object is created with default parameters.
     - max_num_steps (int): Maximum number of steps to run the environment. Note
-        that if learner is set to finish final trajectory, max_num_steps will be
+        that if learner is set to complete final trajectory, max_num_steps will be
         exceeded to complete any incomplete trajectories. Default is OPENFIELD_MAX_STEPS.
     - max_time_min (float, optional): Maximum time in minutes to run the environment.
         If specified, it overrides max_num_steps based on the agent's time step. Note
-        that if learner is set to finish final trajectory, max_time_min will be
+        that if learner is set to complete final trajectory, max_time_min will be
         exceeded to complete any incomplete trajectories. Default is None.
     - teleportation_enabled (bool, optional): Whether to enable teleportation. Default
         is False.
@@ -1366,11 +1379,11 @@ def plot_openfield_corridor_components(Pyrs=None, **kwargs):
     return axes
 
 
-def plot_openfield_corridor_PF(Pyrs=None, **kwargs):
+def plot_last_openfield_corridor_PF(Pyrs=None, **kwargs):
     """
-    plot_openfield_corridor_PF()
+    plot_last_openfield_corridor_PF()
 
-    Plots the weights of the Pyr neuron in the openfield corridor.
+    Plots the last place field of the Pyr neuron in the openfield corridor.
 
     Args:
     - Pyrs (Pyr): Pyr object for openfield corridor.
@@ -1393,7 +1406,7 @@ def plot_openfield_corridor_PF(Pyrs=None, **kwargs):
         )
         Pyrs = learner.Pyrs
 
-    sub_ax = paper_plot_fcts.plot_openfield_PF(Pyrs, **kwargs)
+    sub_ax = paper_plot_fcts.plot_last_openfield_PF(Pyrs, **kwargs)
 
     return sub_ax
 
@@ -1523,7 +1536,7 @@ def run_openfield_corridors(
     - seed (bool): Whether to seed the random number generator with the paper seed.
         Default is True.
     - max_num_steps (int): Maximum number of steps to run the environment. Note
-        that if learner is set to finish final trajectory, max_num_steps will be
+        that if learner is set to complete final trajectory, max_num_steps will be
         exceeded to complete any incomplete trajectories. Default is OPENFIELD_MAX_STEPS.
     - num_repeats (int): Number of repeats for the experiment. Default is 10.
 
@@ -1684,7 +1697,10 @@ def plot_openfield_corridor_PFs(corridor_data=None, PF_type="history", **kwargs)
 
 
 def run_openfield_corridor_teleport(
-    seed=True, max_num_steps=OPENFIELD_MAX_STEPS, min_num_teleports=4
+    seed=True,
+    max_num_steps=OPENFIELD_MAX_STEPS,
+    min_num_teleports=4,
+    disable_teleportation_between=True,
 ):
     """
     run_openfield_corridor_teleport()
@@ -1697,10 +1713,14 @@ def run_openfield_corridor_teleport(
         Default is True.
     - max_num_steps (int): Maximum number of steps to run the environment per learning
         call until the target number of teleportation events is met. Note that if
-        learner is set to finish final trajectory, max_num_steps will be exceeded to
+        learner is set to complete final trajectory, max_num_steps will be exceeded to
         complete any incomplete trajectories. Default is OPENFIELD_MAX_STEPS.
     - min_num_teleports (int): Minimum number of teleportation events to occur
         before stopping the experiment. Default is 4.
+    - disable_teleportation_between (int): If True, teleportation is disabled for 90
+        seconds between teleportation events (increases probability that PFs can be
+        calculated for each BTSP event if consecutive teleportation events induce BTSP
+        events). Default is True.
 
     Returns:
     - learner (Learner): The learner object after training.
@@ -1713,11 +1733,14 @@ def run_openfield_corridor_teleport(
 
     print("\nTeleportation enabled.")
 
-    learner.Agent.set_reward_factor(1)
-    learner.Agent.set_no_target_factor(1)
+    learner.Agent.set_reward_factor(0.5)
+    learner.Agent.set_no_target_factor(0.5)
 
     learner.Agent.allow_teleportation(True)
-    updater = run_manager.TeleportRewardUpdater(learner.Agent)
+    updater = run_manager.TeleportRewardUpdater(
+        learner.Agent,
+        disable_teleportation=int(90 / learner.Agent.dt),
+    )
 
     num_teleports = len(learner.Agent.teleportation_df)
 
@@ -1736,6 +1759,8 @@ def run_openfield_corridor_teleport(
                 f"\nContinuing to reach at least {min_num_teleports} "
                 "teleportation events."
             )
+
+    learner.Agent.allow_teleportation(True)
 
     return learner
 
@@ -1819,8 +1844,9 @@ def plot_figure_panel(*args, fig=1, panel="A", save=True, **kwargs):
             "C": (plot_linear_binned_rates, dict()),
         },
         "2S": {
-            "A": (plot_linear_neural_activity, {"inhibition": "insufficient"}),
-            "B": (plot_linear_neural_activity, {"inhibition": "excessive"}),
+            "A": (plot_linear_neural_activity, {"inhibition": "balanced"}),
+            "B": (plot_linear_neural_activity, {"inhibition": "insufficient"}),
+            "C": (plot_linear_neural_activity, {"inhibition": "excessive"}),
         },
         3: {
             "A": (plot_linear_speed_PF_examples, dict()),
@@ -1832,17 +1858,22 @@ def plot_figure_panel(*args, fig=1, panel="A", save=True, **kwargs):
         },
         4: {
             "A": (plot_linear_shift_PF_examples, dict()),
-            "B": (plot_target_shift_PFs, dict()),
+        },
+        "4S": {
+            "A": (plot_target_shift_PFs, dict()),
         },
         5: {
             "A-D": (plot_openfield_corridor_components, dict()),
-            "E": (plot_openfield_corridor_PF, dict()),
+            "E": (plot_last_openfield_corridor_PF, dict()),
             "F": (plot_openfield_corridor_BTSP_trajectory, dict()),
             "G": (plot_openfield_corridor_timeseries, {"BTSP_kernel_lw": 0.02}),
         },
         "5S": {
             "A": (plot_openfield_corridor_BTSP_kernel_timeseries, dict()),
-            "B": (plot_openfield_corridor_PF, {"PF_type": "weights", "fig_side": 2.5}),
+            "B": (
+                plot_last_openfield_corridor_PF,
+                {"PF_type": "weights", "fig_side": 2.5},
+            ),
             "C": (plot_openfield_corridor_timelines, dict()),
             "D": (plot_openfield_corridor_PFs, dict()),
         },
