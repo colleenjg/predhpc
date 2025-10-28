@@ -684,6 +684,8 @@ class OpenField(Environment):
         "init_reward_obj": list(),
         "init_novel_obj": list(),
         "init_teleport_pairs": list(),
+        "vertical_in_from_top": True,
+        "horizontal_in_from_left": True,
         "min_dist": 0.1,  # between objects (walls is half)
         "init_seed": None,
     }
@@ -1583,9 +1585,15 @@ class OpenField(Environment):
         orientation = self.get_teleport_pair_orientation(teleport_pair_num)
 
         if orientation == "vertical":
-            marker = "v" if direction == "in" else "^"
+            if self.vertical_in_from_top:  # type: ignore[attr-defined]
+                marker = "v" if direction == "in" else "^"
+            else:
+                marker = "^" if direction == "in" else "v"
         else:
-            marker = ">" if direction == "in" else "<"
+            if self.horizontal_in_from_left:  # type: ignore[attr-defined]
+                marker = ">" if direction == "in" else "<"
+            else:
+                marker = "<" if direction == "in" else ">"
 
         return marker
 

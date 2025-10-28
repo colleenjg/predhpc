@@ -1,8 +1,11 @@
+from sklearn import metrics
 import numpy as np
 
-from predhpc.util import signal_util
+from predhpc.util import signal_util, ext_util
 
 WIDTH = 0.5  # symmetical width (m) around PC peak to use for pre/post weight ratio
+
+SMOOTH_K = 5  # smoothing factor for PF width computation from firingrate history
 
 
 def get_smoothed_1D_weights(all_weights, PF_centers, PC_widths):
@@ -373,3 +376,133 @@ def compute_BTSP_metrics(Pyrs, t_start=0, bins=21, width=WIDTH, k=1, **kwargs):
     }
 
     return BTSP_metrics
+
+
+def gather_PF_info(learner, k=SMOOTH_K, position_name=None, min_total=60):
+    """
+    gather_PF_info(learner)
+
+    Gathers information about place fields (PFs) from the given learner object in a 1D
+    environment using various metrics ("weights", "smoothed_weights", "history").
+
+    Args:
+    - learner (Learner): The learner object to gather information from.
+    - k (int): The smoothing factor for place field width computation from firingrate
+        history. Default is SMOOTH_K.
+    - position_name (str, optional): Name of the position to gather visit times for.
+        If None, visit times are not gathered. Default is None.
+    - min_total (int, optional): Minimum total amount of time (s) for computing PFs
+        from history. Default is 60.
+
+    Returns:
+    - PF_info (dict): A dictionary containing gathered PF information:
+        - "BTSP_times": Times of applied BTSP events.
+        - "num_BTSP": Number of applied BTSP events.
+        - "BTSP_applied_times": Times of applied BTSP events.
+        - "num_BTSP_applied": Number of applied BTSP events.
+        - "PC_place_centers": Place cell centers.
+        - "PC_weights": Place cell input weights.
+        - "PFs": Place fields computed from history.
+        - "PF_centers": Place field centers.
+
+        if position_name is not None:
+        - "visit_times": Times of position visits.
+        - "num_visits": Number of position visits.
+
+        if 1D environment:
+        - "PC_weight_widths": Last place cell input weight widths.
+        - "PC_smoothed_weights": Smoothed place cell input weights.
+        - "PC_smoothed_weight_widths": Last smoothed place cell input weight widths.
+        - "PF_widths": Last place field widths.
+    """
+
+    _, _, PCs, _ = ext_util.extract_objects_from_Pyrs(learner.Pyrs)
+
+    PF_info = dict()
+
+    # BTSP steps
+    for apply in [False, True]:
+        apply_str = "_applied" if apply else ""
+        BTSP_steps = learner.Pyrs.SomaticCompartment.get_BTSP_steps(
+            applied_only=apply, apply_step=apply
+        )
+        PF_info[f"BTSP{apply_str}_times"] = BTSP_steps * learner.Pyrs.Agent.dt
+        PF_info[f"num_BTSP{apply_str}"] = len(BTSP_steps)
+
+    # visit steps
+    if position_name is not None:
+        visit_steps = learner.Pyrs.Agent.get_position_visits(
+            position_name=position_name
+        )
+        PF_info["visit_times"] = visit_steps * learner.Pyrs.Agent.dt
+        PF_info["num_visits"] = len(visit_steps)
+
+    # from input weights
+    PF_info["PC_place_centers"] = PCs.place_cell_centers
+    PC_weights = learner.get_recorded_weights()["weights"]
+    if learner.Pyrs.n == 1:
+        PC_weights = PC_weights[:, 0]
+    PF_info["PC_weights"] = PC_weights
+
+    # for 1D environments
+    if learner.Pyrs.Agent.Environment.D == 1:
+        next_trajectory = True
+        sorter = np.argsort(PF_info["PC_place_centers"][:, 0])
+        PF_info["PC_place_centers"] = PF_info["PC_place_centers"][sorter, 0]
+        PF_info["PC_weights"] = PF_info["PC_weights"][..., sorter]
+        PF_info["PC_weight_widths"] = compute_PF_width(learner.Pyrs, k=1)
+
+        PF_info["PC_smoothed_weights"], _ = get_smoothed_1D_weights(
+            PF_info["PC_weights"], PF_info["PC_place_centers"], PCs.widths
+        )
+        PF_info["PC_smoothed_weight_widths"] = compute_PF_width(
+            learner.Pyrs, k=1, method="smoothed_weights"
+        )
+    else:
+        next_trajectory = False
+
+    # from history
+    history_PFs = list()
+    PF_shape = None
+    PF_times = ext_util.get_times_for_each_BTSP_event(
+        learner.Pyrs.SomaticCompartment,
+        next_trajectory=next_trajectory,
+        min_total=min_total,
+        use_nans=True,
+    )
+
+    last_idx = None
+    for i, (t_start, t_end) in enumerate(PF_times):
+        if np.isnan(t_start):
+            if PF_shape is None:
+                history_PFs.append(None)
+            else:
+                history_PFs.append(np.full(PF_shape, np.nan))
+        else:
+            last_idx = i
+            PFs, PF_centers = evaluate_PFs(
+                learner.Pyrs, method="history", t_start=t_start, t_end=t_end
+            )
+            if learner.Pyrs.n == 1:
+                PFs = PFs[0]
+            history_PFs.append(PFs)
+            PF_shape = PFs.shape
+
+    if last_idx is None:
+        raise RuntimeError("No valid PFs obtained from history evaluation.")
+
+    for i, PF in enumerate(history_PFs):
+        if PF is None:
+            history_PFs[i] = np.full(PF_shape, np.nan)
+
+    if learner.Pyrs.Agent.Environment.D == 1:
+        t_start, t_end = PF_times[last_idx]
+        PF_info["PF_widths"] = compute_PF_width(
+            learner.Pyrs, k=k, method="history", t_start=t_start, t_end=t_end
+        )
+
+    PF_info["PFs"] = np.asarray(history_PFs)
+    PF_info["PF_centers"] = PF_centers
+    PF_info["PF_times"] = np.asarray(PF_times)
+
+    return PF_info

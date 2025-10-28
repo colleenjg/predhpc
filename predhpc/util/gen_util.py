@@ -33,6 +33,7 @@ def seed_all(seed=None):
     """
 
     if seed is not None:
+        seed = int(seed)
         random.seed(seed)
         np.random.seed(seed)
 

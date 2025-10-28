@@ -771,10 +771,10 @@ def get_times_for_each_BTSP_event(
     - t_buffer (float): Time buffer to add after each BTSP event. Default is 6.
     - next_trajectory (bool): Whether to use the next trajectory's start time.
         Default is False.
-    - min_total (float): Minimum total time required after each BTSP event.
-        Default is 60.
-    - use_nans (bool): Whether to use NaNs for times if insufficient time around BTSP
-        event. Default is False.
+    - min_total (float): Minimum total time required (in sec) between the start and
+        end times for each BTSP event. Default is 60.
+    - use_nans (bool): Whether to use NaNs for BTSP events with insufficient time.
+        Default is False.
 
     Returns:
     - times (list of tuples): Start and end times for each applied BTSP event.

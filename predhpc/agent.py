@@ -4943,7 +4943,9 @@ class OpenFieldAgent(ResetableAgent):
         timeseries: bool = False,
         in_min: bool = True,
         y_prop: float = 0.98,
+        plot_markers: bool = True,
         plot_lines: bool = True,
+        lw: float = 1.0,
         no_legend: bool = False,
     ):
         """
@@ -4961,6 +4963,8 @@ class OpenFieldAgent(ResetableAgent):
             Default is True.
         - y_prop (float, optional): Proportion of the y-axis to plot the markers at,
             if timeseries is True. Default is 0.98.
+        - plot_markers (bool, optional): Whether to plot markers for teleportation
+            events. Default is True.
         - plot_lines (bool, optional): Whether to plot lines for teleportation events,
             if timeseries is True. Default is True.
         - no_legend (bool, optional): Whether to omit a legend. Default is False.
@@ -5013,9 +5017,11 @@ class OpenFieldAgent(ResetableAgent):
                             x=x_pos,
                             color=plot_params["color"],
                             ls="dashed",
+                            lw=lw,
                             zorder=-1,
                             alpha=0.8,
                         )
+                    if plot_markers:
                         sub_ax.scatter(
                             *pos,
                             alpha=0.9,
@@ -5027,7 +5033,8 @@ class OpenFieldAgent(ResetableAgent):
                 else:
                     pos = self.history["pos"][step_num + startid]
 
-                sub_ax.scatter(*pos, alpha=alpha, label=label, **plot_params)
+                if plot_markers:
+                    sub_ax.scatter(*pos, alpha=alpha, label=label, **plot_params)
 
             if not no_legend and len(plotted):
                 sub_ax.legend()
@@ -5134,11 +5141,22 @@ class OpenFieldAgent(ResetableAgent):
         Plot the agent's trajectories.
 
         Args:
+        - t_start (float, optional): Time point to start plotting the trajectory
+            from. Default is None.
         - t_end (float, optional): Time point to plot the trajectory until.
             Default is None.
+        - traj_idxs (list of int, optional): Indices of the trajectories to plot.
+            Default is None.
+        - by_target (bool, optional): Whether to plot trajectories separated by
+            target. If True, 'separate_axes' must also be True, and 'step_bounds' must
+            not be passed. Default is False.
         - target_alpha (float, optional): Alpha value for the target.
             Default is 0.7.
         - plot_target (bool, optional): Whether to plot the target. Default is True.
+        - separate_axes (bool, optional): Whether to plot each trajectory in a
+            separate axis. Default is False.
+        - step_bounds (list, optional): List of time step bounds for each trajectory
+            to plot. Default is None.
         - no_legend (bool, optional): Whether to remove the legend. Default is False.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
         global autosave setting for ratinabox is used. Default is None.
