@@ -2409,7 +2409,7 @@ def plot_openfield_teleportation_summary(learner, num_sec=6):
         title_str = f"Teleport #{i + 1}{BTSP_str}"
         axes[0, i].set_title(title_str, y=1.02)
 
-    # top row: PFs
+    # first row: PFs
     PF_info = metrics.gather_PF_info(learner, position_name="reward")
     PF_axes = list()
     for i in range(num_teleportations):
@@ -2429,7 +2429,6 @@ def plot_openfield_teleportation_summary(learner, num_sec=6):
         obj_s=10,
     )
 
-    # middle row: all trajectories around teleportation
     comps = [
         learner.Pyrs.SomaticCompartment,
         learner.Pyrs.ApicalCompartment,
@@ -2438,6 +2437,7 @@ def plot_openfield_teleportation_summary(learner, num_sec=6):
 
     framerate = 1 / learner.Agent.dt
     for i, time in enumerate(learner.Agent.teleportation_df["time"]):
+        # second row: trajectories around teleportation
         sub_ax = axes[1, i]
         t_start = np.around(max(0, time - num_sec) / 60, 1) * 60
         t_end = t_start + num_sec * 2
@@ -2445,7 +2445,7 @@ def plot_openfield_teleportation_summary(learner, num_sec=6):
             t_start=t_start,
             t_end=t_end,
             ax=sub_ax,
-            s_2D=4,
+            s_2D=3,
             s=10,  # objects
             no_legend=True,
             plot_target=False,
@@ -2455,6 +2455,7 @@ def plot_openfield_teleportation_summary(learner, num_sec=6):
 
         for j, comp in enumerate(comps):
             sub_ax = axes[3 + j, i]
+            # bottom rows: trajectories around teleportation
             plot_single_neuron_rate_timeseries(
                 comp,
                 t_start=t_start,
@@ -2466,6 +2467,7 @@ def plot_openfield_teleportation_summary(learner, num_sec=6):
                 sub_ax=sub_ax,
                 num_ticks=5,
                 in_min=False,
+                lw=LW * 0.8,
             )
             if j != 0:
                 learner.Agent.add_teleportation_markers_to_plots(
@@ -2474,7 +2476,7 @@ def plot_openfield_teleportation_summary(learner, num_sec=6):
                     t_end=t_end,
                     timeseries=True,
                     plot_markers=False,
-                    lw=LW,
+                    lw=LW * 0.8,
                     no_legend=True,
                 )
             if j != len(comps) - 1:
@@ -2488,7 +2490,7 @@ def plot_openfield_teleportation_summary(learner, num_sec=6):
 
         plot_util.match_y_axis_scales(axes[3:].ravel())
 
-    # bottom row: BTSP trajectories
+    # third row: BTSP trajectories
     for i in range(num_teleportations):
         if i in BTSP_teleportation_idxs:
             BTSP_idx = BTSP_teleportation_idxs.index(i) + 1
@@ -2500,7 +2502,7 @@ def plot_openfield_teleportation_summary(learner, num_sec=6):
                 no_teleport=False,
                 clabel_length=15,
                 obj_s=10,  # objects
-                s_2D=5,
+                s_2D=3,
             )
         else:
             axes[2, i].axis("off")
