@@ -499,6 +499,7 @@ def plot_single_neuron_rate_timeseries(
             y=13.6,
             t_start=t_start,
             t_end=t_end,
+            raise_error=False,
         )
 
     if plot_teleportation and len(NeuronLayer.Agent.teleportation_df) > 0:
@@ -2291,7 +2292,13 @@ def plot_openfield_corridor_BTSP_trajectory(
 
 
 def plot_openfield_corridor_timelines(
-    BTSP_times, visit_times, PF_times, in_min=True, factor=1.2
+    BTSP_times,
+    visit_times,
+    PF_times,
+    teleportation_times=None,
+    num_teleportation_pairs=1,
+    in_min=True,
+    factor=1.2,
 ):
     """
     plot_openfield_corridor_timelines(BTSP_times, visit_times, PF_times)
@@ -2304,6 +2311,10 @@ def plot_openfield_corridor_timelines(
     - visit_times (2D np.ndarray): Arrays of object visit times for each repeat.
     - PF_times (3D np.ndarray): Arrays of place field evaluation start and end times
         for each repeat.
+    - teleportation_times (2D np.ndarray, optional): Arrays of teleportation event
+        times for each repeat, if applicable. Default is None.
+    - num_teleportation_pairs (int, optional): Number of teleportation pairs per
+        timeline. Default is None.
     - in_min (bool, optional): Whether to plot time in minutes instead of seconds.
         Default is True.
     - factor (float, optional): Scaling factor for marker sizes and line widths.
@@ -2353,6 +2364,23 @@ def plot_openfield_corridor_timelines(
             zorder=3,
         )
 
+    if teleportation_times is not None:
+        if num_teleportation_pairs != 1:
+            raise NotImplementedError(
+                "Plotting for multiple teleportation port pairs not implemented."
+            )
+        teleport_color = params_util.get_teleportation_colors()[0]
+        for i, times in enumerate(teleportation_times):
+            for time in times[~np.isnan(times)]:
+                sub_ax.plot(
+                    [time * time_factor] * 2,
+                    [i + 0.7, i + 1.3],
+                    color=teleport_color,
+                    lw=0.8 * factor,
+                    ls="dashed",
+                    zorder=4,
+                )
+
     sub_ax.set_xlim(0, None)
     sub_ax.spines["bottom"].set_bounds(0, sub_ax.get_xlim()[1])
     plot_util.pad_axis(sub_ax, axis="x", pad_prop=0.02, prop_high=1.0)
@@ -2370,7 +2398,7 @@ def plot_openfield_corridor_timelines(
     return sub_ax
 
 
-def plot_openfield_teleportation_summary(learner, num_sec=6):
+def plot_openfield_teleportation_summary(learner, num_sec=6, width_per=1.875):
     """
     plot_openfield_teleportation_summary(learner)
 
@@ -2380,6 +2408,7 @@ def plot_openfield_teleportation_summary(learner, num_sec=6):
     - learner (Learner): Learner object containing the experiment data.
     - num_sec (int, optional): Number of seconds to plot around each teleportation
         event. Default is 6.
+    - width_per (float, optional): Width per teleportation subplot. Default is 1.875.
 
     Returns:
     - axes (np.ndarray of plt.Axes): Array of subplots with the plotted summary.
@@ -2387,22 +2416,30 @@ def plot_openfield_teleportation_summary(learner, num_sec=6):
 
     num_teleportations = len(learner.Agent.teleportation_df)
 
+    BTSP_steps = learner.Pyrs.SomaticCompartment.get_BTSP_steps()
+    num_steps_after = num_sec / learner.Agent.dt
+    BTSP_teleportation_idxs = list()
+    PF_idxs = [1]
+    for tel_idx, step in enumerate(learner.Agent.teleportation_df["step_num"]):
+        mask = (BTSP_steps >= step) & (BTSP_steps < step + num_steps_after)
+        if mask.sum():
+            BTSP_teleportation_idxs.append(tel_idx)
+            PF_idxs.append(np.where(mask)[0][0] + 1)
+
+    num_plots = num_teleportations
+    if len(BTSP_teleportation_idxs):
+        if BTSP_teleportation_idxs[-1] == num_teleportations - 1:
+            num_plots += 1
+
     _, axes = plt.subplots(
         6,
-        num_teleportations,
-        figsize=(7.5, 6.5),
+        num_plots,
+        figsize=(num_plots * width_per, 6.5),
         gridspec_kw={"wspace": 0.25, "hspace": 0.08},
         height_ratios=[1, 1, 1, 0.5, 0.5, 0.5],
         squeeze=False,
         sharey="row",
     )
-
-    BTSP_steps = learner.Pyrs.SomaticCompartment.get_BTSP_steps()
-    num_steps_after = num_sec / learner.Agent.dt
-    BTSP_teleportation_idxs = list()
-    for i, step in enumerate(learner.Agent.teleportation_df["step_num"]):
-        if ((BTSP_steps >= step) & (BTSP_steps < step + num_steps_after)).sum():
-            BTSP_teleportation_idxs.append(i)
 
     for i in range(num_teleportations):
         BTSP_str = " (BTSP)" if i in BTSP_teleportation_idxs else " (no BTSP)"
@@ -2411,18 +2448,16 @@ def plot_openfield_teleportation_summary(learner, num_sec=6):
 
     # first row: PFs
     PF_info = metrics.gather_PF_info(learner, position_name="reward")
-    PF_axes = list()
+    PF_axes = [axes[0, 0]]
     for i in range(num_teleportations):
-        if i == 0:
-            PF_axes.append(axes[0, i])
-        elif i - 1 in BTSP_teleportation_idxs:
-            PF_axes.append(axes[0, i])
-        else:
-            axes[0, i].axis("off")
+        if i in BTSP_teleportation_idxs:
+            PF_axes.append(axes[0, i + 1])
+        elif i + 1 < num_plots:
+            axes[0, i + 1].axis("off")
 
     plot_openfield_corridor_PFs(
         learner.Pyrs,
-        PFs=PF_info["PFs"][1:],
+        PFs=PF_info["PFs"][np.asarray(PF_idxs)],
         PF_centers=PF_info["PF_centers"],
         axes=PF_axes,
         no_teleport=False,
@@ -2506,5 +2541,9 @@ def plot_openfield_teleportation_summary(learner, num_sec=6):
             )
         else:
             axes[2, i].axis("off")
+
+    if num_plots > num_teleportations:
+        for sub_ax in axes[1:, -1]:
+            sub_ax.axis("off")
 
     return axes

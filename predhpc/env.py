@@ -917,8 +917,7 @@ class OpenField(Environment):
             for val in self.object_type_num_to_name_dict.values()
             if val.startswith("teleport") and "_in" in val
         ]
-        teleport_vals = np.linspace(0.5, 1, len(teleport_nums))
-        teleport_colors = plt.get_cmap("Oranges")(teleport_vals)  # type: ignore[callable]
+        teleport_colors = params_util.get_teleportation_colors(len(teleport_nums))
 
         object_type_num_to_plot_params_dict = dict()
         for num, name in self.object_type_num_to_name_dict.items():

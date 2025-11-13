@@ -1,5 +1,6 @@
 import copy
 
+from matplotlib import pyplot as plt
 import numpy as np
 from ratinabox import utils as rutils
 
@@ -90,6 +91,28 @@ def check_environment(environment="linear"):
         )
 
     return environment
+
+
+def get_teleportation_colors(num=1):
+    """
+    get_teleportation_colors()
+
+    Get colors for teleportation pairs.
+
+    Args:
+    - num (int): Number of teleportation pairs. Default is 1.
+
+    Returns:
+    - teleport_colors (np.ndarray): Array of RGBA colors for teleportation pairs.
+    """
+
+    if num == 0:
+        raise ValueError("Number of teleportation pairs must be at least 1.")
+
+    teleport_vals = np.linspace(0.5, 1, num)
+    teleport_colors = plt.get_cmap("Oranges")(teleport_vals)
+
+    return teleport_colors
 
 
 def get_target_position(environment="linear", scale=SCALE_LINEAR):
@@ -248,6 +271,7 @@ def get_env_params(scale=None, environment="linear", **kwargs):
             "walls": [locations["wall_coords"]],
             "init_reward_obj": [locations["reward"]],
             "init_teleport_pairs": [locations["teleport_in_out"]],
+            "horizontal_in_from_left": True,
             "scale": scale,
             "dx": scale / 100,
         }

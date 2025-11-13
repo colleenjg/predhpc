@@ -4592,10 +4592,7 @@ class OpenFieldAgent(ResetableAgent):
         elif last:
             step_num = self.teleportation_df["step_num"].tolist()[-1]
             pair_num = self.teleportation_df["teleport_pair_num"].tolist()[-1]
-            if step_num == len(self.history["t"]):
-                seconds = self.history["t"][-1] + self.dt
-            else:
-                seconds = self.history["t"][step_num]
+            seconds = self.history["t"][step_num - 1]
             log_str = (
                 f"Teleported through pair {pair_num} at step {step_num} "
                 f"({seconds:.2f} sec.)"

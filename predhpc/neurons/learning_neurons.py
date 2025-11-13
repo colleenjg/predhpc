@@ -2926,7 +2926,8 @@ class BTSPLayer(HebbianLayer):
         self.history["BTSP_targets"].append(BTSP_targets)
 
         if self.log_BTSP:
-            step_time_str = self.Agent.get_step_and_time(as_str=True)
+            step = self.num_steps_total - 1  # compensate for step update call
+            step_time_str = self.Agent.get_step_and_time(as_str=True, step=step)
             neuron_str = ""
             if self.n > 1:
                 neuron_str = "neuron" if len(BTSP_targets) == 1 else "neurons"
@@ -3128,7 +3129,8 @@ class BTSPLayer(HebbianLayer):
             )  # normalize weights only (no learning update)
 
         if self.log_BTSP and self.BTSP_applied.sum():
-            step_time_str = self.Agent.get_step_and_time(as_str=True)
+            step = self.num_steps_total - 1  # compensate for step update call
+            step_time_str = self.Agent.get_step_and_time(as_str=True, step=step)
             neuron_str = ""
             if self.n > 1:
                 applied_idxs = np.where(self.BTSP_applied)[0]

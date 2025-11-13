@@ -41,6 +41,29 @@ def suppress_warnings():
     )
 
 
+def get_fig_directory():
+    """
+    get_fig_directory()
+
+    Get the figure directory path.
+    """
+
+    direc = ratinabox.figure_directory
+
+    if direc == "undefined":
+        raise OSError(
+            "Figure directory is not defined. Please set the figure directory "
+            "using ratinabox.set_figure_directory()."
+        )
+
+    direc = Path(direc)
+
+    if not direc.is_dir():
+        raise OSError(f"Figure directory does not exist: {direc}.")
+
+    return direc
+
+
 def initialize_paper_parameters(**kwargs):
     """
     initialize_paper_parameters()
@@ -66,7 +89,8 @@ def compile_PF_data(data_dicts):
     - data_dicts (list of dict): List of data dictionaries to compile with the
         following keys: "PC_place_centers", "PC_weights", "PFs", "PF_centers",
         "PF_times", "BTSP_times", "num_BTSP", and optionally
-        "visit_times", "num_visits", "norm_values", "max_norm_values", "seed".
+        "visit_times", "num_visits", "norm_values", "max_norm_values", "seed", and
+        optionally "teleportation_times", "num_teleportations".
     - seeds (list of int, optional): List of seeds corresponding to each data
         dictionary. Default is None.
 
@@ -87,6 +111,12 @@ def compile_PF_data(data_dicts):
         max_num_visits = max(data_dict["num_visits"] for data_dict in data_dicts)
         visit_shape = (len(data_dicts), max_num_visits)
 
+    if "teleportation_times" in data_dicts[0].keys():
+        max_num_teleportations = max(
+            len(data_dict["teleportation_times"]) for data_dict in data_dicts
+        )
+        teleportation_shape = (len(data_dicts), max_num_teleportations)
+
     data_dict = dict()
     for key in data_dicts[0].keys():
         if key in ["PC_place_centers", "PF_centers"]:
@@ -100,9 +130,12 @@ def compile_PF_data(data_dicts):
             "BTSP_applied_times",
             "BTSP_times",
             "visit_times",
+            "teleportation_times",
         ]:
             if key == "visit_times":
                 shape = visit_shape
+            elif key == "teleportation_times":
+                shape = teleportation_shape
             elif key == "BTSP_times":
                 shape = BTSP_shape
             elif key == "BTSP_applied_times":
@@ -178,6 +211,28 @@ def log_num_BTSP_if_above(num_BTSP, above=1):
         event_str = "event" if above == 1 else "events"
         log_str = f"More than {above} BTSP {event_str}: {', '.join(n_strs)}."
         print(log_str)
+
+
+def log_num_teleportations(num_teleportations):
+    """
+    log_num_teleportations(num_teleportations)
+
+    Logs the number of teleportation events recorded.
+
+    Args:
+    - num_teleportations (1D np.ndarray): Number of teleportation events recorded.
+    """
+
+    num_teleports, counts = np.unique(num_teleportations, return_counts=True)
+    order = np.argsort(num_teleports)
+
+    n_strs = list()
+    for i in order:
+        n_str = f"{num_teleports[i]} in {counts[i]}/{len(num_teleportations)}"
+        n_strs.append(n_str)
+
+    log_str = f"Teleportation events: {', '.join(n_strs)}."
+    print(log_str)
 
 
 def get_linear_Pyrs(
@@ -637,7 +692,7 @@ def plot_linear_speed_PFs(
     """
 
     if speed_data is None:
-        speed_data = run_linear_fct("linear_speeds", overwrite=False, seed=seed)
+        speed_data = run_linear_fct("speeds", overwrite=False, seed=seed)
 
     if plot_type == "examples":
         keep_seed = speed_data["seeds"].min()
@@ -934,7 +989,7 @@ def plot_linear_shift_PFs(
     """
 
     if shift_data is None:
-        shift_data = run_linear_fct("linear_shifts", overwrite=False)
+        shift_data = run_linear_fct("shifts", overwrite=False)
 
     Pyrs = get_linear_Pyrs()
     _, Ag, _, _ = ext_util.extract_objects_from_Pyrs(Pyrs)  # to add plot markers
@@ -975,16 +1030,16 @@ def plot_linear_shift_PFs(
     return ax
 
 
-def run_linear_fct(fct_name="linear_speeds", overwrite=False, seed=True, num_jobs=1):
+def run_linear_fct(fct_name="speeds", overwrite=False, seed=True, num_jobs=1):
     """
     run_linear_fct()
 
-    Runs a specified linear function (either 'linear_speeds' or 'linear_shifts'),
+    Runs a specified linear function (either 'speeds' or 'shifts'),
     loading an existing data dictionary if it exists or rerunning the experiment.
 
     Args:
-    - fct_name (str): Name of the function to run. Options are 'linear_speeds' or
-        'linear_shifts'. Default is 'linear_speeds'.
+    - fct_name (str): Name of the function to run. Options are 'speeds' or
+        'shifts'. Default is 'speeds'.
     - overwrite (bool): Whether to overwrite existing data. Default is False.
     - seed (bool or int): Whether to seed the random number generator with the paper
         seed or seed to use. If False, seed run_linear_speeds() or run_linear_shifts()
@@ -999,18 +1054,18 @@ def run_linear_fct(fct_name="linear_speeds", overwrite=False, seed=True, num_job
         seed = PAPER_SEED if isinstance(seed, bool) else seed
         seed_str = f"_{seed}"
 
-    if fct_name == "linear_speeds":
+    if fct_name == "speeds":
         fct = run_linear_speeds
         data_name = "speed_data"
         above = 1
-    elif fct_name == "linear_shifts":
+    elif fct_name == "shifts":
         fct = run_linear_shifts
         data_name = "shift_data"
         above = 2
     else:
         raise ValueError(f"fct_name '{fct_name}' not recognized.")
 
-    save_path = Path(ratinabox.figure_directory, f"{data_name}{seed_str}.npz")
+    save_path = Path(get_fig_directory(), f"{data_name}{seed_str}.npz")
     if overwrite:
         gen_util.delete_np_dict(save_path)
     data_dict = gen_util.load_np_dict(save_path)
@@ -1032,6 +1087,7 @@ def run_linear_fct(fct_name="linear_speeds", overwrite=False, seed=True, num_job
 def get_openfield_Pyrs(
     corridor=False,
     log_BTSP=True,
+    always_log_teleportation=True,
     init_reward_only=False,
     init_teleport_pairs=None,
     horizontal_in_from_left=True,
@@ -1045,6 +1101,8 @@ def get_openfield_Pyrs(
     Args:
     - corridor (bool): Whether to use the corridor environment. Default is False.
     - log_BTSP (bool): Whether to log BTSP events. Default is True.
+    - always_log_teleportation (bool): Whether to always log teleportation events.
+        Default is True.
     - init_reward_only (bool): Whether to initialize the agent with only reward
         inputs. Only implemented for corridor environment. Default is False.
     - init_teleport_pairs (3D np.ndarray, optional): Teleport pairs to initialized
@@ -1067,7 +1125,6 @@ def get_openfield_Pyrs(
         env_params["init_teleport_pairs"] = init_teleport_pairs
     env_params = params_util.get_env_params(environment=environment, **env_params)
 
-    agent_params = None
     if init_reward_only:
         if not corridor:
             raise NotImplementedError(
@@ -1077,6 +1134,11 @@ def get_openfield_Pyrs(
             environment=environment,
             reward_factor=1,
             no_target_factor=0,
+            always_log_teleportation=always_log_teleportation,
+        )
+    else:
+        agent_params = params_util.get_agent_params(
+            environment=environment, always_log_teleportation=always_log_teleportation
         )
 
     Pyr_params = params_util.get_Pyr_params(
@@ -1318,11 +1380,11 @@ def plot_openfield_corridors(
 
     Returns:
     - ax (plt.Axes or np.ndarray of plt.Axes): Array of subplots with openfield
-        experiment elements plotted.
+        corridor experiment elements plotted.
     """
 
     if corridor_data is None:
-        corridor_data = run_openfield_fct("openfield_corridors", overwrite=False)
+        corridor_data = run_openfield_fct("corridors", overwrite=False)
 
     if plot_type == "timelines":
         ax = paper_plot_fcts.plot_openfield_corridor_timelines(
@@ -1428,12 +1490,13 @@ def run_openfield_corridor_teleport(
             no_logs=no_logs,
         )
 
-        if len(learner.Agent.teleportation_df) - num_teleports >= min_num_teleports:
+        num_additional_teleports = len(learner.Agent.teleportation_df) - num_teleports
+        if num_additional_teleports >= min_num_teleports:
             break
         elif not no_logs:
             print(
                 f"\nContinuing to reach at least {min_num_teleports} "
-                "teleportation events."
+                f"teleportation events ({num_additional_teleports} so far)."
             )
 
     learner.Agent.allow_teleportation(True)
@@ -1475,13 +1538,19 @@ def plot_openfield_teleportation(learner=None, plot_type="summary", **kwargs):
     return axes
 
 
-def run_openfield_corridor_teleports(num_repeats=2, seed=True):
+def run_openfield_corridor_teleports(num_repeats=2, min_num_teleports=6, seed=True):
     """
     run_openfield_corridor_teleports()
 
     Runs an openfield corridor experiment with teleportation enabled until a minimum
     number of teleportation events have occurred and collects data on place field widths
     and weights.
+
+    Args:
+    - num_repeats (int): Number of repeats for the experiment. Default is 2.
+    - seed (bool or int): Whether to seed the random number generator with the paper
+        seed or seed to use. If False, randomly selected seeds are used for each repeat.
+        Default is True.
 
     Returns:
     - data_dict (dict): Dictionary containing:
@@ -1494,50 +1563,59 @@ def run_openfield_corridor_teleports(num_repeats=2, seed=True):
         - "num_BTSP": Number of BTSP events that were applied in total.
         - "visit_times": Array of times at which the agent visited the reward location.
         - "num_visits": Number of visits to the reward location.
+        - "teleportation_times": Array of times at which teleportation events occurred.
+        - "num_teleportations": Number of teleportation events that occurred.
+        - "init_teleport_pairs": Array of teleportation pairs coordinates initialized.
+        - "horizontal_in_from_left": Array of teleportation in port directions.
         - "norm_values": Normalization values used.
     """
 
     horizontal_in_from_lefts = [True, True, False, False]
-    teleport_in_xs = [0.6, 0.6, 0.4, 0.4]
-    teleport_out_xs = [0.2, 0.17, 0.3, 0.33]
+    teleport_in_xs = np.asarray([0.6, 0.6, 0.4, 0.4])
+    teleport_out_xs = np.asarray([0.2, 0.17, 0.3, 0.33])
 
     num_runs = num_repeats * len(horizontal_in_from_lefts)
+
+    if seed:
+        seed = PAPER_SEED if isinstance(seed, bool) else seed
+        gen_util.seed_all(seed)
 
     seeds = np.sort(np.random.choice(10000, size=num_runs, replace=False))
 
     if seed:
-        seed = PAPER_SEED if isinstance(seed, bool) else seed
         seeds = seeds[seeds != seed][: num_runs - 1]
         seeds = np.insert(seeds, 0, seed)
 
     data_dicts = list()
     for i in tqdm(range(num_runs)):
+        h_idx = i % len(horizontal_in_from_lefts)
         gen_util.seed_all(int(seeds[i]))
-        j = i % len(horizontal_in_from_lefts)
-        init_teleport_pairs = np.array(
-            [[teleport_in_xs[j], 0.5], [teleport_out_xs[j], 0.1]]
+        init_teleport_pairs = (
+            np.array([[teleport_in_xs[h_idx], 0.5], [teleport_out_xs[h_idx], 0.1]])
+            * params_util.SCALE
         )
         Pyrs = get_openfield_Pyrs(
             corridor=True,
-            log_BTSP=False,
+            log_BTSP=True,
+            always_log_teleportation=True,
+            init_reward_only=True,
             init_teleport_pairs=[init_teleport_pairs],
-            horizontal_in_from_left=horizontal_in_from_lefts[j],
+            horizontal_in_from_left=horizontal_in_from_lefts[h_idx],
             seed=False,
         )
 
         learner = run_openfield_corridor_teleport(
-            Pyrs=Pyrs,
-            seed=False,
-            max_num_steps=OPENFIELD_MAX_STEPS,
-            min_num_teleports=4,
-            disable_teleportation_between=True,
-            no_logs=True,
+            Pyrs=Pyrs, seed=False, no_logs=True, min_num_teleports=min_num_teleports
         )
 
         norm_values = learner.Pyrs.SomaticCompartment.get_normalization_values("PCs")[1]
 
         data_dict = metrics.gather_PF_info(learner, position_name="reward")
         data_dict["norm_values"] = norm_values[..., 0]
+        data_dict["num_teleportations"] = len(learner.Agent.teleportation_df)
+        data_dict["teleportation_times"] = learner.Agent.teleportation_df["time"].values
+        data_dict["init_teleport_pairs"] = np.asarray([init_teleport_pairs])
+        data_dict["horizontal_in_from_left"] = horizontal_in_from_lefts[h_idx]
         data_dict["seed"] = int(seeds[i])
         data_dicts.append(data_dict)
 
@@ -1546,8 +1624,75 @@ def run_openfield_corridor_teleports(num_repeats=2, seed=True):
     return data_dict
 
 
+def plot_openfield_teleportations(
+    teleport_data=None, plot_type="timelines", PF_type="history", **kwargs
+):
+    """
+    plot_openfield_teleportations()
+
+    Plots data for openfield corridor teleportation experiments.
+
+    Args:
+    - teleport_data (dict): Dictionary containing openfield corridor teleportation data
+        (see run_openfield_corridor_teleports()). If not provided, data is loaded or
+        experiment is run from scratch. Default is None.
+    - plot_type (str): Type of plot to produce. Options are "timelines" or "PFs".
+        Default is "timelines".
+    - PF_type (str): PF type to plot. Options are "history" or "weights".
+        Default is "history".
+
+    Keyword args:
+    - **kwargs: Keyword arguments passed to plotting functions.
+
+    Returns:
+    - ax (plt.Axes or np.ndarray of plt.Axes): Array of subplots with openfield
+        teleportation experiment elements plotted.
+
+    """
+
+    if teleport_data is None:
+        teleport_data = run_openfield_fct("teleports", overwrite=False)
+
+    if plot_type == "timelines":
+        ax = paper_plot_fcts.plot_openfield_corridor_timelines(
+            teleport_data["BTSP_times"],
+            teleport_data["visit_times"],
+            teleport_data["PF_times"],
+            teleportation_times=teleport_data["teleportation_times"],
+            num_teleportation_pairs=teleport_data["init_teleport_pairs"].shape[1],
+            **kwargs,
+        )
+    elif plot_type == "PFs":
+        Pyrs = get_openfield_Pyrs(corridor=True)
+
+        if PF_type == "history":
+            PF_key = "PFs"
+            PF_center_key = "PF_centers"
+        elif PF_type == "weights":
+            PF_key = "PC_weights"
+            PF_center_key = "PC_place_centers"
+        else:
+            raise ValueError(f"PF type not recognized: {PF_type}.")
+
+        PFs = list()
+        for data in teleport_data[PF_key]:
+            idx = np.where(np.isfinite(data).any(axis=1))[0][-1]
+            PFs.append(data[idx])
+        PFs = np.asarray(PFs)
+
+        PF_centers = np.asarray(teleport_data[PF_center_key])
+
+        ax = paper_plot_fcts.plot_openfield_corridor_PFs(
+            Pyrs, PFs, PF_centers, PF_type=PF_type, num_BTSP=teleport_data["num_BTSP"]
+        )
+    else:
+        raise ValueError(f"Plot type not recognized: {plot_type}.")
+
+    return ax
+
+
 def run_openfield_fct(
-    fct_name="openfield_corridors", num_repeats=10, overwrite=False, seed=True
+    fct_name="corridors", num_repeats=None, overwrite=False, seed=True
 ):
     """
     run_openfield_fct()
@@ -1556,8 +1701,10 @@ def run_openfield_fct(
     exists or rerunning the experiment.
 
     Args:
-    - fct_name (str): Name of the function to run. Default is 'openfield_corridors'.
-    - num_repeats (int): Number of repeats for the experiment. Default is 10.
+    - fct_name (str): Name of the function to run. Options are 'corridors' or
+        'teleports'. Default is 'corridors'.
+    - num_repeats (int): Number of repeats for the experiment. If None, defaults for
+        each function type are used. Default is None.
     - overwrite (bool): Whether to overwrite existing data. Default is False.
     - seed (bool or int): Whether to seed the random number generator with the paper
         seed or seed to use. If False, seed run_openfield_corridors() for details.
@@ -1572,13 +1719,18 @@ def run_openfield_fct(
         seed = PAPER_SEED if isinstance(seed, bool) else seed
         seed_str = f"_{seed}"
 
-    if fct_name == "openfield_corridors":
+    if fct_name == "corridors":
         fct = run_openfield_corridors
         data_name = "corridor_data"
+        num_repeats = num_repeats or 10
+    elif fct_name == "teleports":
+        fct = run_openfield_corridor_teleports
+        data_name = "teleport_data"
+        num_repeats = num_repeats or 2
     else:
         raise ValueError(f"fct_name '{fct_name}' not recognized.")
 
-    save_path = Path(ratinabox.figure_directory, f"{data_name}{seed_str}.npz")
+    save_path = Path(get_fig_directory(), f"{data_name}{seed_str}.npz")
     if overwrite:
         gen_util.delete_np_dict(save_path)
     data_dict = gen_util.load_np_dict(save_path)
@@ -1591,6 +1743,8 @@ def run_openfield_fct(
         gen_util.get_duration_str(start_time, log=True)
 
     log_num_BTSP_if_above(data_dict["num_BTSP"], above=1)
+    if fct_name == "teleports":
+        log_num_teleportations(data_dict["num_teleportations"])
     if "norm_values" in data_dict.keys():
         log_max_normalization_value(data_dict["norm_values"])
 
