@@ -4395,7 +4395,14 @@ class BTSPLayer(HebbianLayer):
         ]
 
         ax1D = np.asarray(axes).ravel()
-        self.plot_BTSP_ramp(ax1D[0])
+        self.plot_BTSP_ramp(
+            ax1D[0],
+            mark_BTSP=mark_BTSP,
+            neuron_idx=neuron_idx,
+            t_start=t_start,
+            t_end=t_end,
+            in_min=in_min,
+        )
         ax1D[0].set_xlabel("")
 
         ax1D[1].plot(t, firingrate, lw=1.2, color=self.color)

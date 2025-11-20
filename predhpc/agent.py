@@ -1297,6 +1297,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         self,
         position: np.ndarray[tuple[int], np.dtype[np.float64]] | None = None,
         tol_prop_to_speed_dt: float | None = None,
+        debug: bool = False,
     ) -> bool:
         """
         self.check_if_position_reached()
@@ -1309,6 +1310,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         - tol_prop_to_speed_dt (float):
             Tolerance proportion, wrt mean speed * dt. If None,
             self.target_reached_within_tol_prop_to_speed_dt is used. Default is None.
+        - debug (bool, optional): Whether to print debug information. Default is False.
 
         Returns:
         - position_reached (bool): Whether the agent has reached the target position,
@@ -1329,6 +1331,13 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             reached_dist = speed * self.dt * tol_prop_to_speed_dt
             if dist < reached_dist:  # type: ignore[has-type]
                 position_reached = True
+
+            if debug:
+                print(
+                    f"Actual distance: {dist:.4f}, "
+                    f"Reached distance: {reached_dist:.4f}, "
+                    f"Reached: {position_reached}"
+                )
 
         return position_reached
 
@@ -3554,6 +3563,7 @@ class OpenFieldAgent(ResetableAgent):
         "reward_factor": 3,  # factor for setting a reward object as a target for a trajectory
         "no_target_factor": 1,  # factor for not setting any target for a trajectory
         "trajectory_length": 2000,  # int or iterable of ints
+        "teleport_in_tol_factor": 1.0,  # tolerance factor for teleport in port activation, relative to self.target_reached_within_tol_prop_to_speed_dt
         "num_trajectories": 10,  # number of trajectory lengths to sample
         "num_random_walk_steps": 300,  # number of steps to random walk, if target is not in sight
         "wait_between_same_target": 300,  # number of steps to wait before a target can be reached a second time
@@ -3597,6 +3607,7 @@ class OpenFieldAgent(ResetableAgent):
         "reward_factor": 3,  # factor for setting a reward object as a target for a trajectory
         "no_target_factor": 1,  # factor for not setting any target for a trajectory
         "trajectory_length": 2000,  # int or iterable of ints
+        "teleport_in_tol_factor": 1.0,  # tolerance factor for teleport in activation, relative to self.target_reached_within_tol_prop_to_speed_dt
         "num_trajectories": 10,  # number of trajectory lengths to sample
         "num_random_walk_steps": 300,  # number of steps to random walk, if target is not in sight
         "wait_between_same_target": 300,  # number of steps to wait before a target can be reached a second time
@@ -4199,7 +4210,7 @@ class OpenFieldAgent(ResetableAgent):
             teleport_pair_num, direction="in"
         )
 
-        tol_prop_to_speed_dt = self.target_reached_within_tol_prop_to_speed_dt * 2  # type: ignore[attr-defined]
+        tol_prop_to_speed_dt = self.target_reached_within_tol_prop_to_speed_dt * self.teleport_in_tol_factor  # type: ignore[attr-defined]
 
         teleport = False
 

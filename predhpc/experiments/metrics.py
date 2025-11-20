@@ -378,7 +378,7 @@ def compute_BTSP_metrics(Pyrs, t_start=0, bins=21, width=WIDTH, k=1, **kwargs):
     return BTSP_metrics
 
 
-def gather_PF_info(learner, k=SMOOTH_K, position_name=None, min_total=60):
+def gather_PF_info(learner, k=SMOOTH_K, position_name=None, min_total=None):
     """
     gather_PF_info(learner)
 
@@ -392,7 +392,8 @@ def gather_PF_info(learner, k=SMOOTH_K, position_name=None, min_total=60):
     - position_name (str, optional): Name of the position to gather visit times for.
         If None, visit times are not gathered. Default is None.
     - min_total (int, optional): Minimum total amount of time (s) for computing PFs
-        from history. Default is 60.
+        from history. If None, defaults are used based on environment dimensionality:
+        60 sec for 1D and 5 min for 2D. Default is None.
 
     Returns:
     - PF_info (dict): A dictionary containing gathered PF information:
@@ -458,8 +459,10 @@ def gather_PF_info(learner, k=SMOOTH_K, position_name=None, min_total=60):
         PF_info["PC_smoothed_weight_widths"] = compute_PF_width(
             learner.Pyrs, k=1, method="smoothed_weights"
         )
+        min_total = min_total or 60
     else:
         next_trajectory = False
+        min_total = min_total or 60 * 5
 
     # from history
     history_PFs = list()

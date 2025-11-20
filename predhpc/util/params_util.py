@@ -46,6 +46,10 @@ POST_BTSP_NEG_FILTER_WEIGHT = 1.0006
 PRE_BTSP_FILTER_TAU_NEG = PRE_BTSP_FILTER_TAU_POS + PRE_BTSP_NEG_FILTER_DELTA
 POST_BTSP_FILTER_TAU_NEG = POST_BTSP_FILTER_TAU_POS + POST_BTSP_NEG_FILTER_DELTA
 
+# Teleport parameters
+TELEPORT_IN = [0.6, 0.6]  # before scaling
+TELEPORT_OUT = [0.2, 0.1]  # before scaling
+
 # Color parameters
 TARGET_COLOR = "#3C539B"  # blue
 NOVEL_COLOR = "#22772E"  # dark green
@@ -258,7 +262,7 @@ def get_env_params(scale=None, environment="linear", **kwargs):
 
         locations = {
             "reward": [0.25, 0.1],
-            "teleport_in_out": [[0.6, 0.5], [0.2, 0.1]],
+            "teleport_in_out": [TELEPORT_IN, TELEPORT_OUT],
             "wall_coords": [[0, 0.2], [0.6, 0.2]],
         }
         locations = {key: np.asarray(data) * scale for key, data in locations.items()}
@@ -338,6 +342,7 @@ def get_agent_params(dt=DT, scale=None, environment="linear", **kwargs):
         agent_params["thigmotaxis"] = 0.5
         agent_params["always_log_teleportation"] = True
         agent_params["target_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_2D
+        agent_params["teleport_in_tol_factor"] = 1.5
         if environment == "openfield_corridor":
             agent_params["reward_factor"] = 1
             agent_params["no_target_factor"] = 2

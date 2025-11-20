@@ -1160,7 +1160,9 @@ def plot_linear_speed_PF_widths(
     else:
         raise ValueError(f"PF_type '{PF_type}' not recognized.")
 
-    sub_ax.scatter(speed_data["speed_means"], PF_widths, s=20, alpha=0.5, color="k")
+    num_BTSP = np.isfinite(speed_data["BTSP_times"]).sum(axis=1).astype(int)
+    alphas = np.linspace(0.5, 0.8, num_BTSP.max())[num_BTSP - 1]
+    sub_ax.scatter(speed_data["speed_means"], PF_widths, s=20, alpha=alphas, color="k")
 
     # Format axes
     for axis in ["x", "y"]:
@@ -1654,7 +1656,7 @@ def plot_linear_shift_PF_examples(
     if mark_pos_range is not None:
         start, end = mark_pos_range
         print(
-            "Only one BTSP event recorded for shifts to positions between "
+            "No second BTSP event recorded for shifts to positions between "
             f"{start:.1f}m and {end:.1f}m."
         )
         color = params_util.OBJ_COLOR
@@ -1796,7 +1798,7 @@ def plot_target_shift_PFs(
             xmin=0.99,
         )
         print(
-            "Only one BTSP event recorded for shifts between {:.1f}m and {:.1f}m.".format(
+            "No second BTSP event recorded for shifts between {:.1f}m and {:.1f}m.".format(
                 *one_BTSP_shift_range
             )
         )
@@ -1954,7 +1956,13 @@ def plot_openfield_components(Pyrs, titles=False, traj_idx=8):
 
 
 def plot_last_openfield_PF(
-    Pyrs, fig_side=3.0, lw=LW, alpha=0.8, PF_type="history", sub_ax=None
+    Pyrs,
+    fig_side=3.0,
+    lw=LW,
+    alpha=0.8,
+    PF_type="history",
+    sub_ax=None,
+    no_teleport=True,
 ):
     """
     plot_openfield_PF(Pyrs)
@@ -1967,6 +1975,10 @@ def plot_last_openfield_PF(
     - lw (float, optional): Line width. Default is LW.
     - alpha (float, optional): Transparency level. Default is 0.8.
     - PF_type (str, optional): PF evaluation method to plot. Default is "history".
+    - sub_ax (plt.Axes, optional): Subplot on which to plot the data. If None, a new
+        figure and subplot are created. Default is None.
+    - no_teleport (bool, optional): Whether to skip plotting teleportation ports in the
+        plot. Default is True.
 
     Returns:
     - sub_ax (plt.Axes): The subplot with the plotted PFs.
@@ -1982,36 +1994,41 @@ def plot_last_openfield_PF(
     if Pyrs.n != 1:
         raise ValueError("Only single neuron plotting is supported.")
 
-    PF_t_start = None
+    PF_t_start, PF_t_end = None, None
     if PF_type == "history":
         round_dec = 0
-        BTSP_applied = Pyrs.get_BTSP_steps(applied_only=True, apply_step=True)
         vmax = 10
-        if len(BTSP_applied):
-            PF_t_start = BTSP_applied[-1] * Pyrs.Agent.dt
+        PF_times = ext_util.get_times_for_each_BTSP_event(Pyrs, use_nans=False)
+        if len(PF_times):
+            PF_t_start, PF_t_end = PF_times[-1]
     else:
         round_dec = 2
         vmax = None
+
+    skip_object_types = list()
+    if no_teleport:
+        skip_object_types.append("teleport")
 
     plot_fcts.plot_2D_PFs(
         Pyrs,
         PF_type=PF_type,
         PF_t_start=PF_t_start,
+        PF_t_end=PF_t_end,
         alpha=alpha,
         obj_s=30,
+        lw=lw,
+        plot_BTSP_events=True,
         BTSP_s=BTSP_S,
         BTSP_marker=BTSP_ASTERISK,
-        lw=lw,
-        round_dec=round_dec,
-        plot_BTSP_events=True,
-        skip_object_types=["teleport"],
+        skip_object_types=skip_object_types,
         no_legend=True,
+        vmin=0,
         vmax=vmax,
+        round_dec=round_dec,
         ax=sub_ax,
         marker="s",
         cbar_side="right",
         cbar_outline=True,
-        vmin=0,
     )
 
     cax = fig.axes[-1]
@@ -2064,8 +2081,6 @@ def plot_openfield_corridor_PFs(
     - sub_ax (plt.Axes): The subplot with the plotted PFs.
     """
 
-    Pyrs = get_somatic_compartment(Pyrs)
-
     num_PFs = len(PFs)
 
     if axes is None:
@@ -2102,9 +2117,6 @@ def plot_openfield_corridor_PFs(
                 f"shape {axes.shape} and {num_PFs} PFs to plot."
             )
 
-    if Pyrs.n != 1:
-        raise ValueError("Only single neuron plotting is supported.")
-
     cmap = "inferno"
     vmin = 0
     if PF_type == "history":
@@ -2116,25 +2128,39 @@ def plot_openfield_corridor_PFs(
     if no_teleport:
         skip_object_types.append("teleport")
 
-    plot_fcts.plot_2D_PFs(
-        Pyrs,
-        PF_type=PF_type,
-        PFs=PFs,
-        PF_centers=PF_centers,
-        alpha=alpha,
-        obj_s=obj_s,
-        lw=lw,
-        plot_BTSP_events=False,
-        skip_object_types=skip_object_types,
-        no_legend=True,
-        vmin=vmin,
-        vmax=vmax,
-        ax=PF_axes,
-        marker="s",
-        plot_colorbar=False,
-        cbar_side="right",
-        cbar_outline=True,
-    )
+    if isinstance(Pyrs, list):
+        if len(Pyrs) != num_PFs:
+            raise ValueError("Length of Pyrs list must match number of PFs.")
+        PFs = PFs.reshape(PFs.shape[0], 1, -1)
+    else:
+        Pyrs = [Pyrs]
+        PF_axes = [PF_axes]
+        PFs = [PFs]
+
+    for i, use_Pyrs in enumerate(Pyrs):
+        use_Pyrs = get_somatic_compartment(use_Pyrs)
+        print(use_Pyrs.Agent.Environment.init_teleport_pairs)
+        if use_Pyrs.n != 1:
+            raise ValueError("Only single neuron plotting is supported.")
+        plot_fcts.plot_2D_PFs(
+            use_Pyrs,
+            PF_type=PF_type,
+            PFs=PFs[i],
+            PF_centers=PF_centers,
+            alpha=alpha,
+            obj_s=obj_s,
+            lw=lw,
+            plot_BTSP_events=False,
+            skip_object_types=skip_object_types,
+            no_legend=True,
+            vmin=vmin,
+            vmax=vmax,
+            ax=PF_axes[i],
+            marker="s",
+            plot_colorbar=False,
+            cbar_side="right",
+            cbar_outline=True,
+        )
 
     if num_BTSP is not None:
         if len(num_BTSP) != num_PFs:
@@ -2295,10 +2321,12 @@ def plot_openfield_corridor_timelines(
     BTSP_times,
     visit_times,
     PF_times,
+    end_times=None,
     teleportation_times=None,
     num_teleportation_pairs=1,
     in_min=True,
     factor=1.2,
+    fig_width=6,
 ):
     """
     plot_openfield_corridor_timelines(BTSP_times, visit_times, PF_times)
@@ -2313,18 +2341,21 @@ def plot_openfield_corridor_timelines(
         for each repeat.
     - teleportation_times (2D np.ndarray, optional): Arrays of teleportation event
         times for each repeat, if applicable. Default is None.
+    - end_times (1D np.ndarray, optional): End time of the experiment for each repeat.
+        Default is None.
     - num_teleportation_pairs (int, optional): Number of teleportation pairs per
         timeline. Default is None.
     - in_min (bool, optional): Whether to plot time in minutes instead of seconds.
         Default is True.
     - factor (float, optional): Scaling factor for marker sizes and line widths.
         Default is 1.2.
+    - width (float, optional): Width of the figure. Default is 6.
 
     Returns:
     - sub_ax (plt.Axes): Subplot with the plotted timelines.
     """
 
-    _, sub_ax = plt.subplots(figsize=(6, 3.2))
+    _, sub_ax = plt.subplots(figsize=(fig_width, 3.2))
 
     time_factor = 1 / 60 if in_min else 1
     time_unit = "min" if in_min else "s"
@@ -2355,14 +2386,26 @@ def plot_openfield_corridor_timelines(
     for i, repeat_PF_times in enumerate(PF_times):
         idx = np.where(np.isfinite(repeat_PF_times).all(axis=1))[0][-1]
         start, end = repeat_PF_times[idx] * time_factor
-        sub_ax.plot(
-            [start, end],
-            [i + 1] * 2,
+        rect = mpl_patches.Rectangle(
+            (start, i + 0.77),
+            end - start,
+            0.5,
             color=params_util.PYR_SOMATIC_COLOR,
-            lw=6 * factor,
             alpha=0.4,
+            lw=0,
             zorder=3,
         )
+        sub_ax.add_patch(rect)
+
+    if end_times is not None:
+        for i, end_time in enumerate(end_times):
+            sub_ax.plot(
+                [end_time * time_factor] * 2,
+                [i + 0.77, i + 0.77 + 0.5],
+                color="k",
+                lw=1.3 * factor,
+                zorder=4,
+            )
 
     if teleportation_times is not None:
         if num_teleportation_pairs != 1:
@@ -2382,6 +2425,9 @@ def plot_openfield_corridor_timelines(
                 )
 
     sub_ax.set_xlim(0, None)
+    max_xtick = sub_ax.get_xticks()[-1]
+    if sub_ax.get_xlim()[1] < max_xtick:
+        sub_ax.set_xlim(None, max_xtick)
     sub_ax.spines["bottom"].set_bounds(0, sub_ax.get_xlim()[1])
     plot_util.pad_axis(sub_ax, axis="x", pad_prop=0.02, prop_high=1.0)
 

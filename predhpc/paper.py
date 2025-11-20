@@ -25,6 +25,7 @@ SHIFT_EXAMPLES = [1.0, 0, -0.4, -3.0]
 
 NUM_TRAJ_SPEED = 20
 OPENFIELD_MAX_STEPS = 20000
+OPENFIELD_TELEPORT_REPEAT_STEPS = 60000
 EX_TRAJ_IDX = 8
 
 
@@ -78,18 +79,71 @@ def initialize_paper_parameters(**kwargs):
     paper_plot_fcts.initialize_paper_parameters(**kwargs)
 
 
-def compile_PF_data(data_dicts):
+def gather_learner_data(
+    learner,
+    seed=False,
+    k=metrics.SMOOTH_K,
+    position_name=None,
+    teleport=False,
+    **kwargs,
+):
     """
-    compile_PF_data(data_dicts)
+    gather_learner_data(learner)
 
-    Compiles a list of PF data dictionaries into a single data dictionary with
+    Gathers data from a learner object into a dictionary.
+
+    Args:
+    - learner (Learner): Learner object.
+    - seed (bool or int): Whether to record the seed used for the experiment and if
+        so, the seed to record. Default is False.
+    - k (int): Smoothing factor for measuring place field width from firingrate history,
+        used only for 1D environments. Default is metrics.SMOOTH_K.
+    - position_name (str, optional): Name of the position to gather data for.
+        Default is None.
+    - teleport (bool): Whether to gather teleportation data. Default is False.
+
+    Keyword Args:
+    - **kwargs: Additional key-value pairs to include in the data dictionary.
+
+    Returns:
+    - data_dict (dict): Dictionary containing the gathered data.
+    """
+
+    norm_values = learner.Pyrs.SomaticCompartment.get_normalization_values("PCs")[1]
+
+    data_dict = metrics.gather_PF_info(learner, k=k, position_name=position_name)
+    data_dict["norm_values"] = norm_values[..., 0]
+    data_dict["end_time"] = learner.Pyrs.Agent.t
+
+    for key, value in kwargs.items():
+        data_dict[key] = value
+
+    if seed:
+        data_dict["seed"] = int(seed)
+
+    if teleport:
+        if not hasattr(learner.Agent, "teleportation_df"):
+            raise ValueError("Learner does not have teleportation data.")
+        data_dict["num_teleportations"] = len(learner.Agent.teleportation_df)
+        data_dict["teleportation_times"] = learner.Agent.teleportation_df["time"].values
+        data_dict["init_teleport_pairs"] = np.asarray(learner.Env.init_teleport_pairs)
+        data_dict["horizontal_in_from_left"] = learner.Env.horizontal_in_from_left
+
+    return data_dict
+
+
+def aggregate_from_data_dicts(data_dicts):
+    """
+    aggregate_from_data_dicts(data_dicts)
+
+    Aggregates a list of PF data dictionaries into a single data dictionary with
     appropriately padded arrays.
 
     Args:
     - data_dicts (list of dict): List of data dictionaries to compile with the
         following keys: "PC_place_centers", "PC_weights", "PFs", "PF_centers",
         "PF_times", "BTSP_times", "num_BTSP", and optionally
-        "visit_times", "num_visits", "norm_values", "max_norm_values", "seed", and
+        "visit_times", "num_visits", "norm_values", "seed", and
         optionally "teleportation_times", "num_teleportations".
     - seeds (list of int, optional): List of seeds corresponding to each data
         dictionary. Default is None.
@@ -153,10 +207,48 @@ def compile_PF_data(data_dicts):
     if "seed" in data_dict.keys():
         data_dict["seeds"] = data_dict.pop("seed")
 
-    if "max_norm_value" in data_dict.keys():
-        data_dict["max_norm_values"] = data_dict.pop("max_norm_value")
+    if "end_time" in data_dict.keys():
+        data_dict["end_times"] = data_dict.pop("end_time")
+
+    if "target_shift" in data_dict.keys():
+        data_dict["target_shifts"] = data_dict.pop("target_shift")
+
+    if "speed_mean" in data_dict.keys():
+        data_dict["speed_means"] = data_dict.pop("speed_mean")
 
     return data_dict
+
+
+def get_last_PFs_from_data_dict(data_dict, PF_type="history"):
+    """
+    get_last_PFs_from_data_dict(data_dict)
+
+    Args:
+    - data_dict (dict): Data dictionary containing place field information.
+    - PF_type (str): Type of place field to retrieve ("history" or "weights").
+
+    Returns:
+    - PFs (np.ndarray): Last place fields for the specified type.
+    - PF_centers (np.ndarray): Centers of the last place fields.
+    """
+
+    if PF_type == "history":
+        PF_key = "PFs"
+        PF_center_key = "PF_centers"
+    elif PF_type == "weights":
+        PF_key = "PC_weights"
+        PF_center_key = "PC_place_centers"
+    else:
+        raise ValueError(f"PF type not recognized: {PF_type}.")
+
+    PFs = list()
+    for data in data_dict[PF_key]:
+        idx = np.where(np.isfinite(data).any(axis=1))[0][-1]
+        PFs.append(data[idx])
+    PFs = np.asarray(PFs)
+    PF_centers = np.asarray(data_dict[PF_center_key])
+
+    return PFs, PF_centers
 
 
 def log_max_normalization_value(norm_values):
@@ -503,7 +595,8 @@ def run_linear_speed(
         - "num_BTSP": Number of BTSP events.
         - "BTSP_applied_times": Times when BTSP events were applied.
         - "num_BTSP_applied": Number of applied BTSP events.
-        - "max_norm_value": Maximum weight normalization value used.
+        - "end_time": End time of the experiment.
+        - "norm_values": Weight normalization values used.
         if seed:
         - "seed": Seed for the experiment.
     """
@@ -550,16 +643,7 @@ def run_linear_speed(
         seed=False,
     )
 
-    data_dict = metrics.gather_PF_info(learner, k=k)
-
-    norm_values = learner.Pyrs.SomaticCompartment.get_normalization_values("PCs")[1]
-    max_norm_value = norm_values.max() if len(norm_values) > 0 else np.nan
-    data_dict["max_norm_value"] = max_norm_value
-
-    data_dict["speed_mean"] = speed_mean
-
-    if seed:
-        data_dict["seed"] = seed
+    data_dict = gather_learner_data(learner, seed=seed, k=k, speed_mean=speed_mean)
 
     return learner, data_dict
 
@@ -614,8 +698,8 @@ def run_linear_speeds(
             with shape (speeds, events).
         - "num_BTSP_applied" (1D np.ndarray): Number of BTSP events applied for each
             speed.
-        - "max_norm_values" (1D np.ndarray): Maximum weight normalization value used
-            for each speed.
+        - "norm_values" (2D np.ndarray): Weight normalization values used for each speed.
+        - "end_times" (1D np.ndarray): End time of the experiment for each speed.
         - "seeds" (1D np.ndarray): Array of seeds for each speed.
     """
 
@@ -654,8 +738,7 @@ def run_linear_speeds(
             _, speed_dict = run_linear_speed(speed_mean=speed_mean, seed=seed, **kwargs)
             speed_dicts.append(speed_dict)
 
-    speed_data = compile_PF_data(speed_dicts)
-    speed_data["speed_means"] = speed_data.pop("speed_mean")
+    speed_data = aggregate_from_data_dicts(speed_dicts)
 
     return speed_data
 
@@ -775,14 +858,15 @@ def run_linear_shift(
         - "PF_widths": Last place field widths.
         - "num_BTSP_applied": Number of BTSP events that were applied in total for the
             neuron layer.
-        - "max_norm_value": Maximum weight normalization value used.
+        - "norm_values": Weight normalization values used.
+        - "end_time": End time of the experiment.
         if seed:
         - "seed": Seed for the experiment.
     """
 
     if seed:
-        seed_value = PAPER_SEED + i
-        gen_util.seed_all(seed_value)
+        seed = PAPER_SEED + i
+        gen_util.seed_all(seed)
 
     # initial_shift_dict = None
     if learner is None:
@@ -793,7 +877,7 @@ def run_linear_shift(
             max_time_min=max_time_min,
             k=k,
             no_logs=no_logs,
-            seed=seed,
+            seed=False,
         )
 
     num_BTSP_applied = len(
@@ -854,16 +938,7 @@ def run_linear_shift(
     if additional > 0:
         raise RuntimeError(f"Expected no new BTSP events, but {additional} occurred.")
 
-    data_dict = metrics.gather_PF_info(learner, k=k)
-
-    norm_values = learner.Pyrs.SomaticCompartment.get_normalization_values("PCs")[1]
-    max_norm_value = norm_values.max() if len(norm_values) > 0 else np.nan
-    data_dict["max_norm_value"] = max_norm_value
-
-    data_dict["target_shift"] = target_shift
-
-    if seed:
-        data_dict["seed"] = seed_value
+    data_dict = gather_learner_data(learner, seed=seed, k=k, target_shift=target_shift)
 
     return learner, data_dict
 
@@ -914,8 +989,8 @@ def run_linear_shifts(
             with shape (shifts, events).
         - "num_BTSP_applied" (1D np.ndarray): Number of BTSP events applied for each
             shift.
-        - "max_norm_values" (1D np.ndarray): Maximum weight normalization value used
-            for each shift.
+        - "end_times" (1D np.ndarray): End time of the experiment for each shift.
+        - "norm_values" (2D np.ndarray): Weight normalization values used for each speed.
         - "seeds" (1D np.ndarray): Array of seeds for each shift.
     """
 
@@ -956,8 +1031,7 @@ def run_linear_shifts(
             )
             shift_dicts.append(shift_dict)
 
-    shift_dict = compile_PF_data(shift_dicts)
-    shift_dict["target_shifts"] = shift_dict.pop("target_shift")
+    shift_dict = aggregate_from_data_dicts(shift_dicts)
 
     return shift_dict
 
@@ -1078,8 +1152,8 @@ def run_linear_fct(fct_name="speeds", overwrite=False, seed=True, num_jobs=1):
         gen_util.get_duration_str(start_time, log=True)
 
     log_num_BTSP_if_above(data_dict["num_BTSP"], above=above)
-    if "max_norm_values" in data_dict.keys():
-        log_max_normalization_value(data_dict["max_norm_values"])
+    if "norm_values" in data_dict.keys():
+        log_max_normalization_value(data_dict["norm_values"])
 
     return data_dict
 
@@ -1123,6 +1197,12 @@ def get_openfield_Pyrs(
     env_params = {"horizontal_in_from_left": horizontal_in_from_left}
     if init_teleport_pairs is not None:
         env_params["init_teleport_pairs"] = init_teleport_pairs
+    if not corridor:
+        env_params["init_random_walls"] = 3
+        env_params["init_random_reward_obj"] = 40
+        env_params["init_random_novel_obj"] = 0
+        env_params["init_random_teleport_pairs"] = 0
+
     env_params = params_util.get_env_params(environment=environment, **env_params)
 
     if init_reward_only:
@@ -1162,8 +1242,10 @@ def run_openfield_corridor(
     max_num_steps=OPENFIELD_MAX_STEPS,
     max_time_min=None,
     teleportation_enabled=False,
+    min_time_since_last_BTSP_applied=60 * 6,
     no_logs=False,
     seed=True,
+    teleport_kwargs=dict(),
     **kwargs,
 ):
     """
@@ -1183,9 +1265,14 @@ def run_openfield_corridor(
         exceeded to complete any incomplete trajectories. Default is None.
     - teleportation_enabled (bool, optional): Whether to enable teleportation. Default
         is False.
+    - min_time_since_last_BTSP_applied (float): Minimum time in seconds since last
+        BTSP event was applied to end the experiment.
+        Default is 360 seconds (6 minutes).
     - no_logs (bool): Whether to disable logging. Default is False.
     - seed (bool or int): Whether to seed the random number generator with the paper
         seed or seed to use. If False, experiment is not seeded. Default is True.
+    - teleport_kwargs (dict): Keyword arguments to pass to get_openfield_Pyrs() for
+        teleportation initialization. Default is empty dict.
 
     Keyword Args:
     - **kwargs: Additional keyword arguments passed to run_manager.learn_1D_BTSP().
@@ -1200,7 +1287,12 @@ def run_openfield_corridor(
 
     if Pyrs is None:
         Pyrs = get_openfield_Pyrs(
-            corridor=True, init_reward_only=True, seed=False, log_BTSP=not (no_logs)
+            corridor=True,
+            init_reward_only=True,
+            seed=False,
+            log_BTSP=not (no_logs),
+            always_log_teleportation=not (no_logs),
+            **teleport_kwargs,
         )
 
     Pyrs.Agent.set_no_target_factor(2)
@@ -1208,11 +1300,16 @@ def run_openfield_corridor(
     if max_time_min is not None:
         max_num_steps = int(max_time_min * 60 / Pyrs.Agent.dt)
 
+    min_steps_after_BTSP = int(
+        np.ceil(min_time_since_last_BTSP_applied / Pyrs.Agent.dt)
+    )
+
     learner = run_manager.learn_openfield_BTSP(
         Pyrs_or_learner=Pyrs,
-        corridor=True,
         max_num_steps=max_num_steps,
+        corridor=True,
         teleportation_enabled=teleportation_enabled,
+        min_steps_after_BTSP=min_steps_after_BTSP,
         no_logs=no_logs,
         **kwargs,
     )
@@ -1220,7 +1317,9 @@ def run_openfield_corridor(
     return learner
 
 
-def plot_openfield_corridor(Pyrs=None, plot_type="components", **kwargs):
+def plot_openfield_corridor(
+    Pyrs=None, plot_type="components", kernel_time=None, **kwargs
+):
     """
     plot_openfield_corridor()
 
@@ -1229,6 +1328,11 @@ def plot_openfield_corridor(Pyrs=None, plot_type="components", **kwargs):
     Args:
     - Pyrs (Pyr): Pyr object for openfield corridor.
         If None, a new Pyr object is created.
+    - plot_type (str): Type of plot to produce. Options are "components", "last_PF",
+        "BTSP_trajectory", "timeseries", or "BTSP_kernel_timeseries".
+        Default is "components".
+    - kernel_time (float, optional): Time in seconds for BTSP kernel timeseries plot.
+        If None, uses default time range for the plot. Default is None.
 
     Keyword Args:
     - **kwargs: Additional keyword arguments passed to plotting functions.
@@ -1239,9 +1343,7 @@ def plot_openfield_corridor(Pyrs=None, plot_type="components", **kwargs):
     """
 
     if Pyrs is None:
-        learner = run_manager.learn_openfield_BTSP(
-            Pyrs_or_learner=Pyrs,
-            corridor=True,
+        learner = run_openfield_corridor(
             max_num_steps=OPENFIELD_MAX_STEPS,
             teleportation_enabled=False,
         )
@@ -1265,10 +1367,14 @@ def plot_openfield_corridor(Pyrs=None, plot_type="components", **kwargs):
             **kwargs,
         )
     elif plot_type == "BTSP_kernel_timeseries":
+        if kernel_time is None:
+            kernel_time = (18.5, 41.5)  # manually identified for paper example
+        t_start, t_end = kernel_time
+
         ax = paper_plot_fcts.plot_single_neuron_rate_timeseries(
             Pyrs.SomaticCompartment,
-            t_start=18.5,
-            t_end=41.5,
+            t_start=t_start,
+            t_end=t_end,
             in_min=False,
             num_ticks=13,
             BTSP_kernel_lw=2.5,
@@ -1280,9 +1386,79 @@ def plot_openfield_corridor(Pyrs=None, plot_type="components", **kwargs):
     return ax
 
 
-def run_openfield_corridors(
-    seed=True, max_num_steps=OPENFIELD_MAX_STEPS, num_repeats=10
+def get_openfield_corridor_repeat_run_params(
+    i=0, seed=True, max_runs=100, max_num_steps=None, teleport=False
 ):
+    """
+    get_openfield_corridor_repeat_run_params()
+
+    Obtains parameters for the openfield corridor experiments based on the run index.
+
+    Args:
+    - i (int): Run index. Default is 0.
+    - seed (bool or int): Whether to seed the random number generator with the paper
+        seed or seed to use. If False, experiment is not seeded. Default is True.
+    - max_runs (int): Maximum number of runs for generating seeds. Default is 100.
+    - max_num_steps (int, optional): Maximum number of steps to run the environment.
+        If None, uses OPENFIELD_MAX_STEPS or OPENFIELD_TELEPORT_REPEAT_STEPS based on
+        teleport argument. Default is None.
+    - teleport (bool): Whether to retrieve teleportation kwargs.
+
+    Returns:
+    - seed (int): Seed to use for the experiment.
+    - run_kwargs (dict): Dictionary of keyword arguments to use for the run and pass to
+        run_openfield_corridor_teleport() if teleport or
+        run_openfield_corridor() otherwise.
+    """
+
+    if seed:
+        seed = PAPER_SEED if isinstance(seed, bool) else seed
+        randst = np.random.RandomState(seed)
+    else:
+        randst = np.random.RandomState()
+
+    if i > 0:
+        if i >= max_runs:
+            raise ValueError(f"i must be less than max_runs ({max_runs}).")
+        seed = np.sort(randst.choice(10000, size=max_runs, replace=False))[i]
+
+    seed = int(seed)
+
+    run_kwargs = dict()
+    if teleport:
+        run_kwargs["min_num_teleports"] = 6
+        run_kwargs["min_time_since_last_BTSP_applied"] = 10 * 60  # better coverage
+        run_kwargs["max_num_steps"] = max_num_steps or OPENFIELD_TELEPORT_REPEAT_STEPS
+
+        in_x, in_y = params_util.TELEPORT_IN
+        out_x, out_y = params_util.TELEPORT_OUT
+
+        horizontal_in_from_lefts = [True, True, False, False]
+        teleport_in_xs = np.asarray([in_x, in_x, in_x - 0.1, in_x - 0.1])
+        teleport_out_xs = np.asarray([out_x, out_x - 0.03, out_x + 0.1, out_x + 0.13])
+
+        h_idx = i % len(horizontal_in_from_lefts)
+
+        run_kwargs["teleport_kwargs"] = {
+            "horizontal_in_from_left": horizontal_in_from_lefts[h_idx],
+            "init_teleport_pairs": [
+                (
+                    np.array(
+                        [[teleport_in_xs[h_idx], in_y], [teleport_out_xs[h_idx], out_y]]
+                    )
+                    * params_util.SCALE
+                ),
+            ],
+        }
+
+    else:
+        run_kwargs["teleportation_enabled"] = False
+        run_kwargs["max_num_steps"] = max_num_steps or OPENFIELD_MAX_STEPS
+
+    return seed, run_kwargs
+
+
+def run_openfield_corridors(seed=True, num_repeats=10):
     """
     run_openfield_corridors()
 
@@ -1293,9 +1469,6 @@ def run_openfield_corridors(
     - seed (bool or int): Whether to seed the random number generator with the paper
         seed or seed to use. If False, randomly selected seeds are used for each repeat.
         Default is True.
-    - max_num_steps (int): Maximum number of steps to run the environment. Note
-        that if learner is set to complete final trajectory, max_num_steps will be
-        exceeded to complete any incomplete trajectories. Default is OPENFIELD_MAX_STEPS.
     - num_repeats (int): Number of repeats for the experiment. Default is 10.
 
     Returns:
@@ -1322,38 +1495,18 @@ def run_openfield_corridors(
             reward location.
         - "num_visits" (int): Number of visits to the reward location for each run.
         - "norm_values" (1D np.ndarray): Normalization values used for each run.
+        - "end_times" (1D np.ndarray): End time of the experiment for each run.
         - "seeds": Array of random seeds used for each run.
     """
 
-    if seed:
-        seed = PAPER_SEED if isinstance(seed, bool) else seed
-        gen_util.seed_all(seed)
-
-    seeds = np.sort(np.random.choice(10000, size=num_repeats, replace=False))
-
-    if seed:
-        seeds = seeds[seeds != seed][: num_repeats - 1]
-        seeds = np.insert(seeds, 0, seed)
-
     data_dicts = list()
     for i in tqdm(range(num_repeats)):
-        gen_util.seed_all(int(seeds[i]))
-        learner = run_openfield_corridor(
-            max_num_steps=max_num_steps,
-            max_time_min=None,
-            teleportation_enabled=False,
-            seed=False,
-            no_logs=True,
-        )
-
-        norm_values = learner.Pyrs.SomaticCompartment.get_normalization_values("PCs")[1]
-
-        data_dict = metrics.gather_PF_info(learner, position_name="reward")
-        data_dict["norm_values"] = norm_values[..., 0]
-        data_dict["seed"] = int(seeds[i])
+        run_seed, run_kwargs = get_openfield_corridor_repeat_run_params(i, seed=seed)
+        learner = run_openfield_corridor(seed=run_seed, no_logs=True, **run_kwargs)
+        data_dict = gather_learner_data(learner, seed=run_seed, position_name="reward")
         data_dicts.append(data_dict)
 
-    data_dict = compile_PF_data(data_dicts)
+    data_dict = aggregate_from_data_dicts(data_dicts)
 
     return data_dict
 
@@ -1391,28 +1544,12 @@ def plot_openfield_corridors(
             corridor_data["BTSP_times"],
             corridor_data["visit_times"],
             corridor_data["PF_times"],
+            end_times=corridor_data["end_times"],
             **kwargs,
         )
     elif plot_type == "PFs":
         Pyrs = get_openfield_Pyrs(corridor=True)
-
-        if PF_type == "history":
-            PF_key = "PFs"
-            PF_center_key = "PF_centers"
-        elif PF_type == "weights":
-            PF_key = "PC_weights"
-            PF_center_key = "PC_place_centers"
-        else:
-            raise ValueError(f"PF type not recognized: {PF_type}.")
-
-        PFs = list()
-        for data in corridor_data[PF_key]:
-            idx = np.where(np.isfinite(data).any(axis=1))[0][-1]
-            PFs.append(data[idx])
-        PFs = np.asarray(PFs)
-
-        PF_centers = np.asarray(corridor_data[PF_center_key])
-
+        PFs, PF_centers = get_last_PFs_from_data_dict(corridor_data, PF_type=PF_type)
         ax = paper_plot_fcts.plot_openfield_corridor_PFs(
             Pyrs, PFs, PF_centers, PF_type=PF_type, num_BTSP=corridor_data["num_BTSP"]
         )
@@ -1428,7 +1565,9 @@ def run_openfield_corridor_teleport(
     max_num_steps=OPENFIELD_MAX_STEPS,
     min_num_teleports=4,
     disable_teleportation_between=True,
+    min_time_since_last_BTSP_applied=60 * 6,
     no_logs=False,
+    teleport_kwargs=dict(),
 ):
     """
     run_openfield_corridor_teleport()
@@ -1447,11 +1586,15 @@ def run_openfield_corridor_teleport(
         complete any incomplete trajectories. Default is OPENFIELD_MAX_STEPS.
     - min_num_teleports (int): Minimum number of teleportation events to occur
         before stopping the experiment. Default is 4.
-    - disable_teleportation_between (int): If True, teleportation is disabled for 90
-        seconds between teleportation events (increases probability that PFs can be
-        calculated for each BTSP event if consecutive teleportation events induce BTSP
-        events). Default is True.
+    - disable_teleportation_between (int): If True, teleportation is disabled for
+        6 minutes after a BTSP event (increases probability that PFs can be
+        calculated for each BTSP event if teleportation events induce BTSP events).
+        Default is True.
+    - min_time_since_last_BTSP_applied (float): Minimum time in seconds since last
+        BTSP event was applied to end the experiment. Default is 60 * 6.
     - no_logs (bool): Whether to suppress logging. Default is False.
+    - teleport_kwargs (dict): Additional keyword arguments passed to
+        run_openfield_corridor() for teleportation initialization.
 
     Returns:
     - learner (Learner): The learner object after training.
@@ -1461,7 +1604,9 @@ def run_openfield_corridor_teleport(
         seed = PAPER_SEED if isinstance(seed, bool) else seed
         gen_util.seed_all(seed)
 
-    learner = run_openfield_corridor(seed=False, Pyrs=Pyrs, no_logs=no_logs)
+    learner = run_openfield_corridor(
+        seed=False, Pyrs=Pyrs, no_logs=no_logs, teleport_kwargs=teleport_kwargs
+    )
 
     if not no_logs:
         print("\nTeleportation enabled.")
@@ -1472,10 +1617,11 @@ def run_openfield_corridor_teleport(
 
     disable_teleportation = 0
     if disable_teleportation_between:
-        disable_teleportation = int(90 / learner.Agent.dt)
+        disable_teleportation = int(360 / learner.Agent.dt)
 
     updater = run_manager.TeleportRewardUpdater(
         learner.Agent,
+        Pyrs=learner.Pyrs_for_weights,
         disable_teleportation=disable_teleportation,
     )
 
@@ -1486,6 +1632,7 @@ def run_openfield_corridor_teleport(
             Pyrs_or_learner=learner,
             use_Hebbian=False,
             max_num_steps=max_num_steps,
+            corridor=True,
             updater=updater,
             no_logs=no_logs,
         )
@@ -1498,6 +1645,18 @@ def run_openfield_corridor_teleport(
                 f"\nContinuing to reach at least {min_num_teleports} "
                 f"teleportation events ({num_additional_teleports} so far)."
             )
+
+    min_steps_after_BTSP = int(
+        np.ceil(min_time_since_last_BTSP_applied / learner.Agent.dt)
+    )
+    if min_steps_after_BTSP:
+        run_manager.continue_learn_to_min_steps_after_BTSP_applied(
+            learner,
+            min_steps=min_steps_after_BTSP,
+            updater=updater,
+            no_logs=no_logs,
+            max_steps=min_steps_after_BTSP * 10,
+        )
 
     learner.Agent.allow_teleportation(True)
 
@@ -1538,7 +1697,7 @@ def plot_openfield_teleportation(learner=None, plot_type="summary", **kwargs):
     return axes
 
 
-def run_openfield_corridor_teleports(num_repeats=2, min_num_teleports=6, seed=True):
+def run_openfield_corridor_teleports(num_repeats=2, seed=True):
     """
     run_openfield_corridor_teleports()
 
@@ -1567,59 +1726,26 @@ def run_openfield_corridor_teleports(num_repeats=2, min_num_teleports=6, seed=Tr
         - "num_teleportations": Number of teleportation events that occurred.
         - "init_teleport_pairs": Array of teleportation pairs coordinates initialized.
         - "horizontal_in_from_left": Array of teleportation in port directions.
-        - "norm_values": Normalization values used.
+        - "norm_values": Normalization values used for each run.
+        - "end_times": End time of the experiment for each run.
+        - "seeds": Array of random seeds used for each run.
     """
 
-    horizontal_in_from_lefts = [True, True, False, False]
-    teleport_in_xs = np.asarray([0.6, 0.6, 0.4, 0.4])
-    teleport_out_xs = np.asarray([0.2, 0.17, 0.3, 0.33])
-
-    num_runs = num_repeats * len(horizontal_in_from_lefts)
-
-    if seed:
-        seed = PAPER_SEED if isinstance(seed, bool) else seed
-        gen_util.seed_all(seed)
-
-    seeds = np.sort(np.random.choice(10000, size=num_runs, replace=False))
-
-    if seed:
-        seeds = seeds[seeds != seed][: num_runs - 1]
-        seeds = np.insert(seeds, 0, seed)
-
     data_dicts = list()
-    for i in tqdm(range(num_runs)):
-        h_idx = i % len(horizontal_in_from_lefts)
-        gen_util.seed_all(int(seeds[i]))
-        init_teleport_pairs = (
-            np.array([[teleport_in_xs[h_idx], 0.5], [teleport_out_xs[h_idx], 0.1]])
-            * params_util.SCALE
+    for i in tqdm(range(num_repeats * 4)):  # 4 teleportation parameter combinations
+        run_seed, run_kwargs = get_openfield_corridor_repeat_run_params(
+            i, seed=seed, teleport=True
         )
-        Pyrs = get_openfield_Pyrs(
-            corridor=True,
-            log_BTSP=True,
-            always_log_teleportation=True,
-            init_reward_only=True,
-            init_teleport_pairs=[init_teleport_pairs],
-            horizontal_in_from_left=horizontal_in_from_lefts[h_idx],
-            seed=False,
-        )
-
         learner = run_openfield_corridor_teleport(
-            Pyrs=Pyrs, seed=False, no_logs=True, min_num_teleports=min_num_teleports
+            seed=run_seed, no_logs=True, **run_kwargs
         )
 
-        norm_values = learner.Pyrs.SomaticCompartment.get_normalization_values("PCs")[1]
-
-        data_dict = metrics.gather_PF_info(learner, position_name="reward")
-        data_dict["norm_values"] = norm_values[..., 0]
-        data_dict["num_teleportations"] = len(learner.Agent.teleportation_df)
-        data_dict["teleportation_times"] = learner.Agent.teleportation_df["time"].values
-        data_dict["init_teleport_pairs"] = np.asarray([init_teleport_pairs])
-        data_dict["horizontal_in_from_left"] = horizontal_in_from_lefts[h_idx]
-        data_dict["seed"] = int(seeds[i])
+        data_dict = gather_learner_data(
+            learner, seed=run_seed, position_name="reward", teleport=True
+        )
         data_dicts.append(data_dict)
 
-    data_dict = compile_PF_data(data_dicts)
+    data_dict = aggregate_from_data_dicts(data_dicts)
 
     return data_dict
 
@@ -1658,32 +1784,32 @@ def plot_openfield_teleportations(
             teleport_data["BTSP_times"],
             teleport_data["visit_times"],
             teleport_data["PF_times"],
+            end_times=teleport_data["end_times"],
             teleportation_times=teleport_data["teleportation_times"],
             num_teleportation_pairs=teleport_data["init_teleport_pairs"].shape[1],
             **kwargs,
         )
     elif plot_type == "PFs":
-        Pyrs = get_openfield_Pyrs(corridor=True)
-
-        if PF_type == "history":
-            PF_key = "PFs"
-            PF_center_key = "PF_centers"
-        elif PF_type == "weights":
-            PF_key = "PC_weights"
-            PF_center_key = "PC_place_centers"
-        else:
-            raise ValueError(f"PF type not recognized: {PF_type}.")
-
-        PFs = list()
-        for data in teleport_data[PF_key]:
-            idx = np.where(np.isfinite(data).any(axis=1))[0][-1]
-            PFs.append(data[idx])
-        PFs = np.asarray(PFs)
-
-        PF_centers = np.asarray(teleport_data[PF_center_key])
-
+        Pyrs = list()
+        for i, init_teleport_pairs in enumerate(teleport_data["init_teleport_pairs"]):
+            Pyrs.append(
+                get_openfield_Pyrs(
+                    corridor=True,
+                    init_teleport_pairs=init_teleport_pairs,
+                    horizontal_in_from_left=teleport_data["horizontal_in_from_left"][i],
+                )
+            )
+        PFs, PF_centers = get_last_PFs_from_data_dict(teleport_data, PF_type=PF_type)
+        num_cols = int(np.ceil(len(PFs) / 2))
         ax = paper_plot_fcts.plot_openfield_corridor_PFs(
-            Pyrs, PFs, PF_centers, PF_type=PF_type, num_BTSP=teleport_data["num_BTSP"]
+            Pyrs,
+            PFs,
+            PF_centers,
+            PF_type=PF_type,
+            num_BTSP=teleport_data["num_BTSP"],
+            num_cols=num_cols,
+            obj_s=1.5,
+            no_teleport=False,
         )
     else:
         raise ValueError(f"Plot type not recognized: {plot_type}.")
@@ -1846,6 +1972,14 @@ def plot_figure_panel(*args, fig=1, panel="A", save=True, **kwargs):
         },
         6: {
             "A": {"fct": plot_openfield_teleportation, "plot_type": "summary"},
+        },
+        "6S": {
+            "A": {
+                "fct": plot_openfield_teleportations,
+                "plot_type": "timelines",
+                "fig_width": 8,
+            },
+            "B": {"fct": plot_openfield_teleportations, "plot_type": "PFs"},
         },
     }
 

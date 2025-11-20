@@ -147,6 +147,7 @@ class TeleportRewardUpdater(VNUpdater):
     def __init__(
         self,
         Agent,
+        Pyrs=None,
         reenable_after=1,
         targets=["teleport_0_in", "reward"],
         disable_teleportation=0,
@@ -158,17 +159,19 @@ class TeleportRewardUpdater(VNUpdater):
         port and a reward location after a specified number of teleports.
 
         Can also disable teleportation for a set number of update steps after a
-        teleportation event.
+        BTSP event.
 
         Args:
         - Agent (Agent): The agent whose target will be updated.
+        - Pyrs (learning_neurons.BTSPLayer): The layer containing pyramidal neurons,
+            used to track BTSP events.
         - reenable_after (int): Number of teleportation events after which to re-enable
             reward target or no target. Default is 1.
         - targets (list): List of two target names. The first should be a teleportation
             in port, and the second should be the reward location. Default is
             ["teleport_0_in", "reward"].
         - disable_teleportation (int): Number of update steps during which to disable
-            teleportation after a teleportation event. Default is 0.
+            teleportation after a BTSP event. Default is 0.
         """
 
         if len(targets) != 2:
@@ -199,7 +202,14 @@ class TeleportRewardUpdater(VNUpdater):
         self._reenabled = False
 
         self.disable_teleportation = disable_teleportation
-        self.num_teleportations = 0
+        if self.disable_teleportation > 0:
+            if Pyrs is None:
+                raise ValueError(
+                    "If 'disable_teleportation' is positive, 'Pyrs' must be provided."
+                )
+            self.Pyrs = Pyrs
+            self.num_BTSP_events = len(self.Pyrs.get_BTSP_steps(applied_only=True))
+
         self._teleportation_disabled_steps = 0
 
     def get_update_kwargs(self, **kwargs):
@@ -229,15 +239,19 @@ class TeleportRewardUpdater(VNUpdater):
                 self._reenabled = True
 
         if self.disable_teleportation > 0:
-            if len(self.Agent.teleportation_df) > self.num_teleportations:
-                self.num_teleportations = len(self.Agent.teleportation_df)
-                self._teleportation_disabled_steps = self.disable_teleportation
-                self.Agent.allow_teleportation(False)
-
             if self._teleportation_disabled_steps > 0:
                 self._teleportation_disabled_steps -= 1
                 if self._teleportation_disabled_steps == 0:
                     self.Agent.allow_teleportation(True)
+            else:
+                num_BTSP_events = len(self.Pyrs.history["BTSP_events"])
+                if num_BTSP_events > self.num_BTSP_events:
+                    if self.Agent.teleportation_allowed:
+                        self.Agent.allow_teleportation(False)
+                    BTSP_applied = self.Pyrs.get_BTSP_steps(apply_step=True)[-1]
+                    if np.isfinite(BTSP_applied):
+                        self._teleportation_disabled_steps = self.disable_teleportation
+                        self.num_BTSP_events = num_BTSP_events
 
         if self.Agent.target_position is None:
             pass
@@ -940,6 +954,72 @@ def complete_learn_trajectory(learner, updater=dict(), no_logs=False):
             break_next = True
 
 
+def continue_learn_to_min_steps_after_BTSP_applied(
+    learner,
+    min_steps=2000,
+    updater=dict(),
+    no_logs=False,
+    max_steps=20000,
+    raise_error=True,
+):
+    """
+    continue_to_min_steps_after_BTSP_applied(learner)
+
+    Continue learning until a minimum number of steps have passed since the last
+    BTSP event was applied.
+
+    Args:
+    - learner (Learner): Learner object.
+    - updater (object or dict, optional): Object or dictionary for updating
+        agent position. Default is dict().
+    - no_logs (bool, optional): Whether to disable logging. Default is False.
+    - max_steps (int, optional): Maximum number of steps to continue learning.
+        Default is 20000.
+    - raise_error (bool, optional): Whether to raise an error if max_steps are reached.
+        Default is True.
+    """
+
+    def get_check_in(learner):
+        BTSP_steps, applied = learner.Pyrs_for_weights.get_BTSP_steps(applied_also=True)
+        if len(BTSP_steps):
+            if np.isfinite(applied[-1]):
+                check_in = min_steps - (len(learner.Agent.history["t"]) - applied[-1])
+            else:
+                check_in = min_steps
+        else:
+            check_in = 0
+
+        check_in = max(0, check_in)
+
+        return check_in
+
+    check_in = get_check_in(learner)
+
+    if check_in:
+        if not no_logs:
+            print(
+                f"Continuing learning for up to {max_steps} steps until at least "
+                f"{min_steps} steps after last BTSP event."
+            )
+
+        for _ in tqdm(range(max_steps), disable=no_logs):
+            if check_in <= 0:
+                check_in = get_check_in(learner)
+                if check_in <= 0:
+                    break
+
+            else:
+                check_in -= 1
+
+            learner.update(updater=updater, no_logs=no_logs)
+
+        if check_in > 0 and raise_error:
+            raise RuntimeError(
+                f"Maximum of {max_steps} steps reached and {min_steps} steps "
+                "since last BTSP event was applied was not reached."
+            )
+
+
 def run_learner(
     learner,
     updater=dict(),
@@ -1001,7 +1081,7 @@ def learn(
     weight_recording_freq=100,
     use_Hebbian=False,
     BTSP_on=None,
-    num_end_without_BTSP=0,
+    num_end_with_BTSP_disabled=0,
     reverse_linear=False,
     updater=dict(),
     no_logs=False,
@@ -1031,7 +1111,7 @@ def learn(
     - use_Hebbian (bool, optional): Whether to use Hebbian learning. Default is False.
     - BTSP_on (int, optional): Trajectory number at which BTSP is enabled or
         triggered. 1 for first trajectory. Default is None.
-    - num_end_without_BTSP (int, optional): Number of final steps to run without BTSP
+    - num_end_with_BTSP_disabled (int, optional): Number of final steps to run without BTSP
         learning. Default is 0.
     - reverse_linear (bool, optional): If using a linear track, whether to reverse
         Agent diretion at each end. Default is False.
@@ -1044,8 +1124,8 @@ def learn(
     """
 
     stop_BTSP = None
-    if num_end_without_BTSP:
-        stop_BTSP = max(0, max_num_steps - num_end_without_BTSP)
+    if num_end_with_BTSP_disabled:
+        stop_BTSP = max(0, max_num_steps - num_end_with_BTSP_disabled)
 
     if isinstance(Pyrs_or_learner, Learner):
         learner = Pyrs_or_learner
@@ -1087,7 +1167,8 @@ def learn_openfield_BTSP(
     record_weights_at_BTSP: bool = True,
     weight_recording_freq: int = 100,
     use_Hebbian: bool = False,
-    num_end_without_BTSP: int = 0,
+    num_end_with_BTSP_disabled: int = 0,
+    min_steps_after_BTSP: int = 0,
     corridor: bool = False,
     updater: dict[str, Any] | None = None,
     teleportation_enabled: bool | None = None,
@@ -1115,9 +1196,10 @@ def learn_openfield_BTSP(
     - weight_recording_freq (int, optional): Frequency at which to record weights if
         Hebbian learning is active. Default is 100.
     - use_Hebbian (bool, optional): Whether to use Hebbian learning. Default is False.
-    - num_end_without_BTSP (int, optional): Number of final steps to run without BTSP
+    - num_end_with_BTSP_disabled (int, optional): Number of final steps to run without BTSP
         learning. Default is 0.
-        is True.
+    - min_steps_after_BTSP (int, optional): Minimum number of steps to run after the
+        last BTSP event is applied. Default is 0.
     - corridor (bool, optional): Whether to use the openfield corridor environment.
         Default is False.
     - updater (object or dict, optional): Object or dictionary for updating
@@ -1174,10 +1256,19 @@ def learn_openfield_BTSP(
         record_weights_at_BTSP=record_weights_at_BTSP,
         weight_recording_freq=weight_recording_freq,
         use_Hebbian=use_Hebbian,
-        num_end_without_BTSP=num_end_without_BTSP,
+        num_end_with_BTSP_disabled=num_end_with_BTSP_disabled,
         updater=updater,
         no_logs=no_logs,
     )
+
+    if min_steps_after_BTSP > 0:
+        continue_learn_to_min_steps_after_BTSP_applied(
+            learner,
+            min_steps=min_steps_after_BTSP,
+            updater=updater,
+            no_logs=no_logs,
+            max_steps=min_steps_after_BTSP * 10,
+        )
 
     return learner
 
