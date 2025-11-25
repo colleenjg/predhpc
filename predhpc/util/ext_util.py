@@ -759,7 +759,7 @@ def estimate_1D_place_cell_density(PCs):
 
 
 def get_times_for_each_BTSP_event(
-    NeuronLayer, t_buffer=6, next_trajectory=False, min_total=60, use_nans=False
+    NeuronLayer, i=0, t_buffer=6, next_trajectory=False, min_total=60, use_nans=False
 ):
     """
     get_times_for_each_BTSP_event(NeuronLayer)
@@ -768,6 +768,7 @@ def get_times_for_each_BTSP_event(
 
     Args:
     - NeuronLayer: The neuron layer object.
+    - i (int): Neuron index. Default is 0.
     - t_buffer (float): Time buffer to add after each BTSP event. Default is 6.
     - next_trajectory (bool): Whether to use the next trajectory's start time.
         Default is False.
@@ -780,12 +781,9 @@ def get_times_for_each_BTSP_event(
     - times (list of tuples): Start and end times for each applied BTSP event.
     """
 
-    if NeuronLayer.n != 1:
-        raise NotImplementedError(
-            "Choosing times for each BTSP event only implemented for layers with 1 neuron."
-        )
-
-    BTSP_applied = NeuronLayer.get_BTSP_steps(applied_only=True, apply_step=True)
+    BTSP_applied = NeuronLayer.get_BTSP_steps(
+        applied_only=True, apply_step=True, chosen_neurons=[i]
+    )
 
     times = list()
     t_start = 0

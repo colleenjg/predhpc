@@ -644,7 +644,7 @@ class OpenField(Environment):
         "init_reward_objs": list(),
         "init_novel_objs": list(),
         "init_teleport_pairs": list(),
-        "min_dist": 0.1,  # between objects (walls is half)
+        "min_dist": 0.1,  # between objects (from walls is half)
         "init_seed": None,
     }
 
@@ -686,7 +686,7 @@ class OpenField(Environment):
         "init_teleport_pairs": list(),
         "vertical_in_from_top": True,
         "horizontal_in_from_left": True,
-        "min_dist": 0.1,  # between objects (walls is half)
+        "min_dist": 0.1,  # between objects (from walls is half)
         "init_seed": None,
     }
 
@@ -917,7 +917,10 @@ class OpenField(Environment):
             for val in self.object_type_num_to_name_dict.values()
             if val.startswith("teleport") and "_in" in val
         ]
-        teleport_colors = params_util.get_teleportation_colors(len(teleport_nums))
+        if len(teleport_nums):
+            teleport_colors = params_util.get_teleportation_colors(len(teleport_nums))
+        else:
+            teleport_colors = list()
 
         object_type_num_to_plot_params_dict = dict()
         for num, name in self.object_type_num_to_name_dict.items():
@@ -993,6 +996,45 @@ class OpenField(Environment):
             )
 
         return area
+
+    def check_if_parallel_walls_too_close(
+        self,
+        new_wall_coords: (
+            np.ndarray[tuple[int, int], np.dtype[np.float64]] | list[list[float]]
+        ),
+        min_dist=None,
+    ) -> bool:
+        """
+        self.check_if_parallel_walls_too_close(new_wall_coords)
+
+        Checks whether a new wall is too close to existing walls that are parallel
+        to it.
+
+        Args:
+        - new_wall_coords (list or 2D np.ndarray): Coordinates of new wall
+            [[x1, y1], [x2, y2]].
+        - min_dist (float, optional): Minimum distance between walls. Default is None.
+
+        Returns:
+        - parallel_walls_too_close (bool): True if the new wall is too close
+            to an existing wall that is parallel to it. False otherwise.
+        """
+
+        if len(self.walls) == 0:
+            return False
+
+        if min_dist is None:
+            min_dist = float(self.min_dist)  # type: ignore[attr-defined]
+
+        new_wall = np.asarray(new_wall_coords)
+
+        min_wall_dist = self.distance_to_closest_parallel_wall(new_wall)
+
+        parallel_walls_too_close = False
+        if min_wall_dist is not None and min_wall_dist < min_dist:
+            parallel_walls_too_close = True
+
+        return parallel_walls_too_close
 
     def check_if_walls_ends_too_close(
         self,
@@ -1277,6 +1319,46 @@ class OpenField(Environment):
 
         return coords
 
+    def distance_to_closest_parallel_wall(self, wall_coords, angle_tol=10):
+        """
+        self.distance_to_closest_parallel_wall(wall_coords)
+
+        Obtain the distance from a set of wall coordinates to the closest parallel wall.
+
+        Args:
+        - wall_coords (2D np.ndarray): Wall coordinates [[x1, y1], [x2, y2]].
+        - angle_tol (float, optional): Angle tolerance (degrees) for considering
+            walls to be parallel. Default is 10.
+
+        Returns:
+        - min_dist (float): Minimum distance to closest parallel wall.
+        """
+
+        min_dist = None
+        for wall in self.walls:
+            angle = trig_util.get_angle_between_vectors(
+                np.diff(wall_coords, axis=1)[0], np.diff(wall, axis=1)[0]
+            )
+            if np.absolute(angle) >= angle_tol:
+                continue
+
+            dists1 = trig_util.shortest_distances_from_points_to_lines(
+                wall, wall_coords
+            )
+            dists2 = trig_util.shortest_distances_from_points_to_lines(
+                wall_coords, wall
+            )
+
+            dist = min(np.min(dists1), np.min(dists2))
+            if min_dist is None or dist < min_dist:
+                min_dist = dist
+                if min_dist < 0.1:
+                    import pdb
+
+                    pdb.set_trace()
+
+        return min_dist
+
     def sample_wall_end(
         self,
         start_coords: np.ndarray[tuple[int], np.dtype[np.float64]],
@@ -1290,8 +1372,8 @@ class OpenField(Environment):
 
         Args:
         - start_coords (1D np.ndarray): Start of wall.
-        - min_dist (float, optional): Minimum distance to closest object.
-            Default is None.
+        - min_dist (float, optional): Minimum distance to closest object. Double is
+            applied between parallel walls. Default is None.
         - raise_error (bool, optional): Whether to raise an error if could not sample
             valid end coordinates. Default is False.
 
@@ -1332,9 +1414,10 @@ class OpenField(Environment):
 
             # check that end_coords are far enough from objects, if there are any
             if end_coords is not None and len(self.objects["objects"]) != 0:
+                wall_coords = np.asarray([start_coords, end_coords])
                 closest_dist = np.min(
                     trig_util.shortest_distances_from_points_to_lines(
-                        self.objects["objects"], [start_coords, end_coords]
+                        self.objects["objects"], wall_coords
                     )
                 )
 
@@ -1549,7 +1632,12 @@ class OpenField(Environment):
                 start_coords = self.sample_coords()
                 end_coords = self.sample_wall_end(start_coords)
                 if end_coords is not None:
-                    # check that wall ends are not too close to another
+                    if self.check_if_parallel_walls_too_close(
+                        np.asarray([start_coords, end_coords])
+                    ):
+                        end_coords = None
+
+                if end_coords is not None:
                     if self.check_if_walls_ends_too_close(
                         np.asarray([start_coords, end_coords])
                     ):

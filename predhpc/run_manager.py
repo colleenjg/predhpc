@@ -655,10 +655,13 @@ class Learner:
             if self.Pyrs_for_weights.n > 1 and len(steps_BTSP_triggered):
                 n = len(np.unique(np.concatenate(self.BTSP_neurons)))
                 neuron_str = f" in {n} neuron" if n == 1 else f" in {n} neurons"
+            to_str = ""
+            if self.stop_BTSP is not None:
+                to_str = f" to {stop_BTSP + self.agent_start_step}"
             print(
                 f"{len(steps_BTSP_triggered)} BTSP {event_str} triggered{neuron_str} "
-                f"(allowed from steps {self.start_BTSP + self.agent_start_step} to "
-                f"{stop_BTSP + self.agent_start_step}){BTSP_stat_str}."
+                f"(allowed from step {self.start_BTSP + self.agent_start_step}{to_str})"
+                f"{BTSP_stat_str}."
             )
         else:
             print("BTSP not allowed.")
@@ -959,7 +962,7 @@ def continue_learn_to_min_steps_after_BTSP_applied(
     min_steps=2000,
     updater=dict(),
     no_logs=False,
-    max_steps=20000,
+    max_num_steps=20000,
     raise_error=True,
 ):
     """
@@ -973,17 +976,17 @@ def continue_learn_to_min_steps_after_BTSP_applied(
     - updater (object or dict, optional): Object or dictionary for updating
         agent position. Default is dict().
     - no_logs (bool, optional): Whether to disable logging. Default is False.
-    - max_steps (int, optional): Maximum number of steps to continue learning.
+    - max_num_steps (int, optional): Maximum number of steps to continue learning.
         Default is 20000.
-    - raise_error (bool, optional): Whether to raise an error if max_steps are reached.
-        Default is True.
+    - raise_error (bool, optional): Whether to raise an error if max_num_steps are
+        reached. Default is True.
     """
 
     def get_check_in(learner):
         BTSP_steps, applied = learner.Pyrs_for_weights.get_BTSP_steps(applied_also=True)
         if len(BTSP_steps):
-            if np.isfinite(applied[-1]):
-                check_in = min_steps - (len(learner.Agent.history["t"]) - applied[-1])
+            if np.isfinite(applied).all():
+                check_in = min_steps - (len(learner.Agent.history["t"]) - applied.max())
             else:
                 check_in = min_steps
         else:
@@ -998,11 +1001,11 @@ def continue_learn_to_min_steps_after_BTSP_applied(
     if check_in:
         if not no_logs:
             print(
-                f"Continuing learning for up to {max_steps} steps until at least "
+                f"Continuing learning for up to {max_num_steps} steps until at least "
                 f"{min_steps} steps after last BTSP event."
             )
 
-        for _ in tqdm(range(max_steps), disable=no_logs):
+        for _ in tqdm(range(max_num_steps), disable=no_logs):
             if check_in <= 0:
                 check_in = get_check_in(learner)
                 if check_in <= 0:
@@ -1015,7 +1018,7 @@ def continue_learn_to_min_steps_after_BTSP_applied(
 
         if check_in > 0 and raise_error:
             raise RuntimeError(
-                f"Maximum of {max_steps} steps reached and {min_steps} steps "
+                f"Maximum of {max_num_steps} steps reached and {min_steps} steps "
                 "since last BTSP event was applied was not reached."
             )
 
@@ -1267,7 +1270,7 @@ def learn_openfield_BTSP(
             min_steps=min_steps_after_BTSP,
             updater=updater,
             no_logs=no_logs,
-            max_steps=min_steps_after_BTSP * 10,
+            max_num_steps=min_steps_after_BTSP * 10,
         )
 
     return learner

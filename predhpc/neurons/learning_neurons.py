@@ -1303,6 +1303,7 @@ class HebbianLayer(LearnLayer):
             str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
         ) = "all",
         bias_norms: bool = False,
+        skip_initial: bool = False,
     ):
         """
         self.get_normalization_values()
@@ -1317,6 +1318,8 @@ class HebbianLayer(LearnLayer):
             Default is "all".
         - bias_norms (bool, optional): Whether to plot the bias normalization values.
             Default is False.
+        - skip_initial (bool, optional): Whether to skip the initial normalization
+            value. Default is False.
 
         Returns:
         - steps (1D np.ndarray): Steps of the normalization values.
@@ -1345,8 +1348,13 @@ class HebbianLayer(LearnLayer):
             t_start=t_start, t_end=t_end, raise_error=False
         )
 
-        steps = [0]
-        norm_values = [norm_dict[init_str]]
+        if skip_initial:
+            steps = list()
+            norm_values = list()
+        else:
+            steps = [0]
+            norm_values = [norm_dict[init_str]]
+
         if norm_str in norm_dict.keys():
             steps = np.asarray(steps + norm_dict[steps_str])
             norm_values = np.asarray(norm_values + norm_dict[norm_str])
@@ -1609,6 +1617,7 @@ class HebbianLayer(LearnLayer):
         t_end: float | None = None,
         chosen_neurons: int | str = "all",
         bias_norms: bool = False,
+        skip_initial: bool = False,
         in_min: bool = True,
         lw: float = 1,
         autosave: bool | None = None,
@@ -1627,6 +1636,8 @@ class HebbianLayer(LearnLayer):
             Default is "all".
         - bias_norms (bool, optional): Whether to plot the bias normalization values.
             Default is False.
+        - skip_initial (bool, optional): Whether to skip the initial normalization
+            value at time 0. Default is False.
         - in_min (bool, optional): Whether to plot the time in minutes. Default is True.
         - lw (float, optional): Line width of the plot. Default is 1.
         - autosave (bool, optional): Whether to save the figure. Default is None.
@@ -1669,7 +1680,9 @@ class HebbianLayer(LearnLayer):
             color = self.inputs[input_layer]["layer"].color
 
             for i, data in enumerate(norm_values.T):
-                keep_idx = np.concatenate([[0], np.where(np.diff(data) > 0)[0] + 1])
+                keep_idx = np.where(np.diff(data) > 0)[0] + 1
+                if not skip_initial:
+                    keep_idx = np.concatenate([[0], keep_idx])
                 if lw > 0 and len(keep_idx) > 1:
                     sub_ax.plot(
                         t[keep_idx],
@@ -3676,7 +3689,6 @@ class BTSPLayer(HebbianLayer):
         fig.suptitle("BTSP statistics", y=1.05)
 
         self.plot_BTSP_responses(split=False, fill=False, ax=axes[0, 0], **kwargs)
-        self.Agent.Environment.plot_environment(sub_ax=axes[0, 1], alpha=0.6)
         self.plot_BTSP_locations(sub_ax=axes[0, 1], **kwargs)
 
         self.plot_BTSP_frequency(sub_ax=axes[1, 0], **kwargs)
@@ -4066,7 +4078,11 @@ class BTSPLayer(HebbianLayer):
         ) = "all",
         sub_ax: plt.Axes | None = None,
         color: str | None = None,
+        s: int = 10,
+        marker: str | tuple = "x",
+        obj_s: int = 10,
         autosave: bool | None = None,
+        **kwargs,
     ):
         """
         self.plot_BTSP_locations()
@@ -4081,7 +4097,13 @@ class BTSPLayer(HebbianLayer):
         - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
             created with environment plotted. Default is None.
         - color (str, optional): Color of the BTSP markers. Default is None.
+        - s (int, optional): Size of the BTSP markers. Default is 10.
+        - marker (str, optional): Marker style for the BTSP markers. Default is "x".
+        - obj_s (int, optional): Size of the environment objects. Default is 10.
         - autosave (bool, optional): Whether to autosave the figure. Default is None.
+
+        Keyword args:
+        - kwargs: Additional keyword arguments passed to the environment plot function.
 
         Returns:
         - sub_ax (plt.Axes): Subplot with BTSP locations plotted.
@@ -4099,8 +4121,9 @@ class BTSPLayer(HebbianLayer):
 
         min_not_yet = self.num_steps_total - self.BTSP_buffer["num_steps"].max()
 
-        if sub_ax is None:
-            sub_ax = self.Agent.Environment.plot_environment(alpha=0.6)
+        sub_ax = self.Agent.Environment.plot_environment(
+            alpha=0.6, s=obj_s, sub_ax=sub_ax, **kwargs
+        )
 
         if self.Agent.Environment.dimensionality == "1D":
             ymax = sub_ax.get_ylim()[1]
@@ -4129,8 +4152,8 @@ class BTSPLayer(HebbianLayer):
                     *pos,
                     color=color,
                     alpha=alpha,
-                    marker=mpl_markers.MarkerStyle("x"),
-                    s=10,
+                    marker=marker,
+                    s=s,
                 )
 
         plot_util.save_figure(sub_ax.figure, f"{self.name}_BTSP_locations", save=autosave)  # type: ignore[attr-defined]
@@ -4615,9 +4638,10 @@ class BTSPLayer(HebbianLayer):
         t_start: float | None = None,
         t_end: float | None = None,
         chosen_neurons: int | str = "all",
-        mark_BTSP: bool = True,
         bias_norms: bool = False,
+        skip_initial: bool = False,
         in_min: bool = True,
+        mark_BTSP: bool = True,
         lw: float = 1,
         autosave: bool | None = None,
         sub_ax: plt.Axes | None = None,
@@ -4633,10 +4657,12 @@ class BTSPLayer(HebbianLayer):
         - t_end (float, optional): End time of the plot. Default is None.
         - chosen_neurons (int, str, list or 1D np.ndarray, optional): Neurons to plot.
             Default is "all".
-        - mark_BTSP (bool, optional): Whether to mark the BTSP. Default is True.
         - bias_norms (bool, optional): Whether to plot the bias normalization values.
             Default is False.
+        - skip_initial (bool, optional): Whether to skip the initial normalization
+            values. Default is False.
         - in_min (bool, optional): Whether to plot the time in minutes. Default is True.
+        - mark_BTSP (bool, optional): Whether to mark the BTSP. Default is True.
         - lw (float, optional): Line width of the plot. Default is 1.
         - autosave (bool, optional): Whether to save the figure. Default is None.
         - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
@@ -4653,6 +4679,7 @@ class BTSPLayer(HebbianLayer):
             chosen_neurons=chosen_neurons,
             bias_norms=bias_norms,
             in_min=in_min,
+            skip_initial=skip_initial,
             lw=lw,
             autosave=False,
             sub_ax=sub_ax,

@@ -348,11 +348,14 @@ def get_agent_params(dt=DT, scale=None, environment="linear", **kwargs):
             agent_params["no_target_factor"] = 2
             agent_params["num_random_walk_steps"] = 300
             agent_params["wait_between_same_target"] = 1000
+            agent_params["trajectory_length"] = 2000
         else:
             agent_params["reward_factor"] = 1
             agent_params["no_target_factor"] = 2
             agent_params["num_random_walk_steps"] = 300
             agent_params["wait_between_same_target"] = 300
+            agent_params["trajectory_length"] = None
+            agent_params["num_trajectories"] = None
 
     for key, value in kwargs.items():
         agent_params[key] = value

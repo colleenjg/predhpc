@@ -848,6 +848,8 @@ def get_plotting_times(
     """
 
     times = np.asarray(times)
+    if len(times) == 0:
+        raise ValueError("Times array is empty.")
 
     # times to plot
     start_time = t_start if t_start is not None else times[0]

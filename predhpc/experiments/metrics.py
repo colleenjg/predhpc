@@ -150,7 +150,10 @@ def evaluate_PFs(
                 )
         bin_size = dist / 2
         PFs, PF_centers = Pyrs.get_history_ratemap(
-            t_start=t_start, t_end=t_end, bin_size=bin_size
+            t_start=t_start,
+            t_end=t_end,
+            bin_size=bin_size,
+            chosen_neurons=chosen_neurons,
         )
 
     else:

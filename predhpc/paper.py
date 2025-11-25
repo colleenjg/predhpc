@@ -1160,6 +1160,7 @@ def run_linear_fct(fct_name="speeds", overwrite=False, seed=True, num_jobs=1):
 
 def get_openfield_Pyrs(
     corridor=False,
+    n=None,
     log_BTSP=True,
     always_log_teleportation=True,
     init_reward_only=False,
@@ -1174,6 +1175,8 @@ def get_openfield_Pyrs(
 
     Args:
     - corridor (bool): Whether to use the corridor environment. Default is False.
+    - n (int, optional): Number of reward objects to initialize in the openfield environment.
+        If None, defaults are used. Default is None.
     - log_BTSP (bool): Whether to log BTSP events. Default is True.
     - always_log_teleportation (bool): Whether to always log teleportation events.
         Default is True.
@@ -1193,15 +1196,20 @@ def get_openfield_Pyrs(
         gen_util.seed_all(seed)
 
     environment = "openfield_corridor" if corridor else "openfield"
+    if n is None:
+        n = 1 if corridor else 40
 
-    env_params = {"horizontal_in_from_left": horizontal_in_from_left}
+    env_params = {
+        "init_random_reward_obj": n,
+        "horizontal_in_from_left": horizontal_in_from_left,
+    }
     if init_teleport_pairs is not None:
         env_params["init_teleport_pairs"] = init_teleport_pairs
     if not corridor:
-        env_params["init_random_walls"] = 3
-        env_params["init_random_reward_obj"] = 40
+        env_params["init_random_walls"] = 4
         env_params["init_random_novel_obj"] = 0
         env_params["init_random_teleport_pairs"] = 0
+        env_params["min_dist"] = 0.15
 
     env_params = params_util.get_env_params(environment=environment, **env_params)
 
@@ -1222,6 +1230,7 @@ def get_openfield_Pyrs(
         )
 
     Pyr_params = params_util.get_Pyr_params(
+        n=n,
         environment=environment,
         log_BTSP=log_BTSP,
     )
@@ -1655,7 +1664,7 @@ def run_openfield_corridor_teleport(
             min_steps=min_steps_after_BTSP,
             updater=updater,
             no_logs=no_logs,
-            max_steps=min_steps_after_BTSP * 10,
+            max_num_steps=min_steps_after_BTSP * 10,
         )
 
     learner.Agent.allow_teleportation(True)
@@ -1807,8 +1816,9 @@ def plot_openfield_teleportations(
             PF_centers,
             PF_type=PF_type,
             num_BTSP=teleport_data["num_BTSP"],
+            num_teleportations=teleport_data["num_teleportations"],
             num_cols=num_cols,
-            obj_s=1.5,
+            obj_s=6,
             no_teleport=False,
         )
     else:

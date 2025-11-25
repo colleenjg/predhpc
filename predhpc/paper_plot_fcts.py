@@ -1957,12 +1957,16 @@ def plot_openfield_components(Pyrs, titles=False, traj_idx=8):
 
 def plot_last_openfield_PF(
     Pyrs,
+    i=0,
     fig_side=3.0,
     lw=LW,
     alpha=0.8,
+    obj_s=30,
     PF_type="history",
     sub_ax=None,
     no_teleport=True,
+    plot_colorbar=True,
+    **kwargs,
 ):
     """
     plot_openfield_PF(Pyrs)
@@ -1971,14 +1975,20 @@ def plot_last_openfield_PF(
 
     Args:
     - Pyrs (Pyr): Pyr object for openfield.
+    - i (int, optional): Index of the Pyr neuron to plot. Default is 0.
     - fig_side (float, optional): Size of the figure. Default is 3.0.
     - lw (float, optional): Line width. Default is LW.
     - alpha (float, optional): Transparency level. Default is 0.8.
+    - obj_s (float, optional): Size of the object markers. Default is 30.
     - PF_type (str, optional): PF evaluation method to plot. Default is "history".
     - sub_ax (plt.Axes, optional): Subplot on which to plot the data. If None, a new
         figure and subplot are created. Default is None.
     - no_teleport (bool, optional): Whether to skip plotting teleportation ports in the
         plot. Default is True.
+    - plot_colorbar (bool, optional): Whether to plot the colorbar. Default is True.
+
+    Keyword args:
+    - **kwargs: Additional keyword arguments for the plot_2D_PFs function.
 
     Returns:
     - sub_ax (plt.Axes): The subplot with the plotted PFs.
@@ -1991,14 +2001,11 @@ def plot_last_openfield_PF(
 
     Pyrs = get_somatic_compartment(Pyrs)
 
-    if Pyrs.n != 1:
-        raise ValueError("Only single neuron plotting is supported.")
-
     PF_t_start, PF_t_end = None, None
     if PF_type == "history":
         round_dec = 0
         vmax = 10
-        PF_times = ext_util.get_times_for_each_BTSP_event(Pyrs, use_nans=False)
+        PF_times = ext_util.get_times_for_each_BTSP_event(Pyrs, i=i, use_nans=False)
         if len(PF_times):
             PF_t_start, PF_t_end = PF_times[-1]
     else:
@@ -2014,8 +2021,9 @@ def plot_last_openfield_PF(
         PF_type=PF_type,
         PF_t_start=PF_t_start,
         PF_t_end=PF_t_end,
+        chosen_neurons=[i],
         alpha=alpha,
-        obj_s=30,
+        obj_s=obj_s,
         lw=lw,
         plot_BTSP_events=True,
         BTSP_s=BTSP_S,
@@ -2027,13 +2035,16 @@ def plot_last_openfield_PF(
         round_dec=round_dec,
         ax=sub_ax,
         marker="s",
+        plot_colorbar=plot_colorbar,
         cbar_side="right",
         cbar_outline=True,
+        **kwargs,
     )
 
-    cax = fig.axes[-1]
-    clabel = get_PF_label(PF_type, title=False)
-    cax.set_ylabel(clabel)
+    if plot_colorbar:
+        cax = fig.axes[-1]
+        clabel = get_PF_label(PF_type, title=False)
+        cax.set_ylabel(clabel)
 
     return sub_ax
 
@@ -2044,6 +2055,7 @@ def plot_openfield_corridor_PFs(
     PF_centers,
     PF_type="history",
     num_BTSP=None,
+    num_teleportations=None,
     fig_side=1.5,
     obj_s=1,
     num_cols=5,
@@ -2065,6 +2077,8 @@ def plot_openfield_corridor_PFs(
     - PF_type (str, optional): PF evaluation method to plot. Default is "history".
     - num_BTSP (int, optional): Number of BTSP events per plot, to use in plot titles.
         Default is None.
+    - num_teleportations (int, optional): Number of teleportation events per plot, to
+        use in plot titles. Default is None.
     - fig_side (float, optional): Size of the figure. Default is 1.5.
     - obj_s (float, optional): Size of the object markers. Default is 1.
     - num_cols (int, optional): Number of columns in the subplot grid. Default is 5.
@@ -2083,16 +2097,24 @@ def plot_openfield_corridor_PFs(
 
     num_PFs = len(PFs)
 
+    if num_BTSP is not None and len(num_BTSP) != num_PFs:
+        raise ValueError("num_BTSP and PFs must have the same length.")
+    if num_teleportations is not None and len(num_teleportations) != num_PFs:
+        raise ValueError("num_teleportations and PFs must have the same length.")
+
     if axes is None:
         num_cols = min(num_cols, num_PFs)
         num_rows = int(np.ceil(num_PFs / num_cols))
         width_ratios = [1] * num_cols + [0.1]
+        hspace = (
+            0.28 if num_BTSP is not None and num_teleportations is not None else 0.2
+        )
 
         _, axes = plt.subplots(
             num_rows,
             num_cols + 1,
             figsize=(fig_side * num_cols * 1.04, fig_side * num_rows),
-            gridspec_kw={"width_ratios": width_ratios},
+            gridspec_kw={"width_ratios": width_ratios, "hspace": hspace},
             squeeze=False,
         )
 
@@ -2139,7 +2161,6 @@ def plot_openfield_corridor_PFs(
 
     for i, use_Pyrs in enumerate(Pyrs):
         use_Pyrs = get_somatic_compartment(use_Pyrs)
-        print(use_Pyrs.Agent.Environment.init_teleport_pairs)
         if use_Pyrs.n != 1:
             raise ValueError("Only single neuron plotting is supported.")
         plot_fcts.plot_2D_PFs(
@@ -2162,12 +2183,21 @@ def plot_openfield_corridor_PFs(
             cbar_outline=True,
         )
 
-    if num_BTSP is not None:
-        if len(num_BTSP) != num_PFs:
-            raise ValueError("num_BTSP and PFs must have the same length.")
-        for i, sub_ax in enumerate(axes[:, :-1].ravel()):
-            title_str = "event" if num_BTSP[i] == 1 else "events"
-            sub_ax.set_title(f"{i + 1} ({num_BTSP[i]} BTSP {title_str})", fontsize=10)
+    for i, sub_ax in enumerate(axes[:, :-1].ravel()):
+        title = f"#{i + 1}"
+        add_strs = list()
+        if num_BTSP is not None:
+            event_str = "event" if num_BTSP[i] == 1 else "events"
+            add_strs.append(f"{num_BTSP[i]} BTSP {event_str}")
+        if num_teleportations is not None:
+            event_str = (
+                "teleportation" if num_teleportations[i] == 1 else "teleportations"
+            )
+            add_strs.append(f"{num_teleportations[i]} {event_str}")
+        if len(add_strs):
+            add_str = ", \n".join(add_strs)
+            title = f"#{i + 1} ({add_str})"
+        sub_ax.set_title(title, fontsize=10)
 
     for i, cax in enumerate(caxes):
         norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)

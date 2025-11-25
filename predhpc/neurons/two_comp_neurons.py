@@ -434,6 +434,43 @@ class TwoCompLayer(object):
 
         return min_firingrate, max_firingrate
 
+    def get_main_apical_input_layer(
+        self, src_name: str = "Obj", return_dict: bool = False
+    ):
+        """
+        self.get_main_apical_input_layer()
+
+        Get the main input layer to the apical compartment.
+
+        Args:
+        - src_name (str, optional): Name of the input layer
+            (must be a place cell-derived layer). Default is "Obj".
+        - return_dict (bool, optional): Whether to return the full input dict instead
+            of only the layer. Default is False.
+
+        Returns:
+        if return_dict:
+        - input_dict (dict): Full input dictionary for the main apical input layer.
+        else:
+        - main_apical_input_layer (riab_neurons.PlaceCells): Main apical input layer.
+        """
+
+        if src_name not in self.ApicalCompartment.inputs.keys():
+            raise ValueError(f"No '{src_name}' input to apical compartment.")
+
+        main_apical_input_dict = self.ApicalCompartment.inputs[src_name]
+
+        if not isinstance(main_apical_input_dict["layer"], riab_neurons.PlaceCells):
+            raise ValueError(f"Input layer '{src_name}' is not a PlaceCells layer.")
+
+        if return_dict:
+            return main_apical_input_dict
+
+        else:
+            main_apical_input_layer = main_apical_input_dict["layer"]
+
+            return main_apical_input_layer
+
     def get_index_of_main_apical_input(
         self, neuron_idx: int = 0, src_name: str = "Obj"
     ):
@@ -451,13 +488,9 @@ class TwoCompLayer(object):
         - input_idx (int): Index of main apical input.
         """
 
-        if src_name not in self.ApicalCompartment.inputs.keys():
-            raise ValueError(f"No '{src_name}' input to apical compartment.")
-
-        input_dict = self.ApicalCompartment.inputs[src_name]
-
-        if not isinstance(input_dict["layer"], riab_neurons.PlaceCells):
-            raise ValueError(f"Input layer '{src_name}' is not a PlaceCells layer.")
+        main_apical_input_dict = self.get_main_apical_input_layer(
+            src_name=src_name, return_dict=True
+        )
 
         if neuron_idx > self.n:
             raise ValueError(
@@ -465,7 +498,7 @@ class TwoCompLayer(object):
                 "in the layer."
             )
 
-        input_idx = np.argmax(input_dict["w"][:, neuron_idx])
+        input_idx = np.argmax(main_apical_input_dict["w"][:, neuron_idx])
 
         return input_idx
 
@@ -488,13 +521,13 @@ class TwoCompLayer(object):
             location.
         """
 
+        main_apical_input_layer = self.get_main_apical_input_layer(src_name=src_name)
+
         input_idx = self.get_index_of_main_apical_input(
             neuron_idx=neuron_idx, src_name=src_name
         )
 
-        input_layer = self.ApicalCompartment.inputs[src_name]["layer"]
-
-        place_cell_center = input_layer.place_cell_centers[input_idx]
+        place_cell_center = main_apical_input_layer.place_cell_centers[input_idx]
 
         return place_cell_center
 
