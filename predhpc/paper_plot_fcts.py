@@ -83,7 +83,7 @@ def get_somatic_compartment(Pyrs):
     - Pyrs (SomaticCompartment): Somatic compartment of the Pyr object.
     """
 
-    if hasattr(Pyrs, "SomaticCompartment"):
+    if gen_util.attribute_type_checker(Pyrs, "TwoCompLayer"):
         Pyrs = Pyrs.SomaticCompartment
     return Pyrs
 
@@ -108,6 +108,41 @@ def get_PF_label(PF_type="history", title=False):
         label = plot_fcts.get_PF_label(PF_type, title=title)
 
     return label
+
+
+def get_learner_remap_step(learner, idx=0, num_total=None):
+    """
+    get_learner_remap_step(learner)
+
+    Retrieves a specific remap step from the learner object.
+
+    Args:
+    - learner (Learner): Learner object containing remap steps.
+    - idx (int, optional): Index of the remap step to retrieve. Default is 0.
+    - num_total (int, optional): Expected total number of remap steps recorded by the
+        learner. Default is None.
+
+    Returns:
+    - remap_step: The remap step at the specified index.
+    """
+
+    remap_steps = getattr(learner, "remap_steps", list())
+
+    if num_total is not None and len(remap_steps) != num_total:
+        raise RuntimeError(
+            f"Expected the learner to have exactly {num_total} remap step(s), "
+            f"but found {len(remap_steps)}."
+        )
+
+    if idx >= len(remap_steps):
+        raise ValueError(
+            "idx must be less than number of remap steps recorded "
+            f"({len(remap_steps)}), but got idx={idx}."
+        )
+
+    remap_step = remap_steps[idx]
+
+    return remap_step
 
 
 def format_1D_PF_xaxis(
@@ -387,7 +422,7 @@ def plot_single_neuron_rate_timeseries(
     num_ticks=11,
     lw=LW,
     mark_traj_idxs=None,
-    mark_BTSP_kernel=True,
+    plot_BTSP_kernel=True,
     BTSP_s=BTSP_S,
     BTSP_kernel_s=60,
     BTSP_kernel_lw=1,
@@ -414,7 +449,7 @@ def plot_single_neuron_rate_timeseries(
     - lw (float, optional): Line width for the plot. Default is LW.
     - mark_traj_idxs (list, optional): List of trajectory indices to mark on the plot.
         Default is None.
-    - mark_BTSP_kernel (bool, optional): Whether to mark the BTSP kernel on the plot.
+    - plot_BTSP_kernel (bool, optional): Whether to mark the BTSP kernel on the plot.
         Default is True.
     - BTSP_s (int, optional): Size of the BTSP markers. Default is BTSP_S.
     - BTSP_kernel_s (int, optional): Size of the BTSP kernel markers. Default is 60.
@@ -437,14 +472,14 @@ def plot_single_neuron_rate_timeseries(
     NeuronLayer.plot_rate_timeseries(
         sub_ax=sub_ax,
         norm_by="none",
-        mark_BTSP=False,
+        plot_BTSP_events=False,
         t_start=t_start,
         t_end=t_end,
         lw=lw,
         chosen_neurons=[chosen_neuron],
     )
 
-    if mark_BTSP_kernel:
+    if plot_BTSP_kernel:
         ylow = -1.0
     elif mark_traj_idxs:
         ylow = -0.3
@@ -476,7 +511,7 @@ def plot_single_neuron_rate_timeseries(
         )
         sub_ax.plot(t[[0, -1]] / 60, [ymin / 2] * 2, color="k", lw=2, alpha=0.8)
 
-    if hasattr(NeuronLayer, "BTSP_learn"):
+    if gen_util.attribute_type_checker(NeuronLayer, "BTSPLayer"):
         sub_ax.set_ylim(None, max(sub_ax.get_ylim()[1], ymax * 1.3))
         NeuronLayer.add_BTSP_markers_to_plots(
             ax=sub_ax,
@@ -516,7 +551,7 @@ def plot_single_neuron_rate_timeseries(
             no_legend=True,
         )
 
-    if mark_BTSP_kernel:
+    if plot_BTSP_kernel:
         num_lines = None
         num_BTSP = len(NeuronLayer.get_BTSP_steps())
         for BTSP_idx in range(num_BTSP):
@@ -633,6 +668,47 @@ def plot_BTSP_kernel(Pyrs, xlims=None):
     return sub_ax
 
 
+def plot_normalization_values(Pyrs, sub_ax=None, skip_initial=False, fig_width=6):
+    """
+    plot_normalization_values(Pyrs)
+
+    Plots the normalization values for the given Pyrs object.
+
+    Args:
+    - Pyrs (Pyr): Pyr object containing the agent and place cells.
+    - sub_ax (plt.Axes, optional): The subplot to plot on. If None, a new figure
+        and subplot are created. Default is None.
+    - skip_initial (bool, optional): Whether to skip initial normalization values.
+        Default is False.
+    - fig_width (float, optional): Width of the figure if sub_ax is None. Default is 6.
+    """
+
+    if sub_ax is None:
+        _, sub_ax = plt.subplots(figsize=(fig_width, 2))
+
+    Pyrs = get_somatic_compartment(Pyrs)
+
+    if Pyrs.n == 1:
+        by_neuron = False
+        plot_BTSP_events = True
+    else:
+        by_neuron = True
+        plot_BTSP_events = False
+
+    Pyrs.plot_normalization_values(
+        "PCs",
+        skip_initial=skip_initial,
+        by_neuron=by_neuron,
+        plot_BTSP_events=plot_BTSP_events,
+        sub_ax=sub_ax,
+    )
+    sub_ax.set_xlabel("Pyramidal neuron index")
+    sub_ax.set_ylabel("Norm. value")
+    sub_ax.set_title("")
+
+    return sub_ax
+
+
 def plot_BTSP_ramp(Pyrs, sub_ax=None):
     """
     plot_BTSP_ramp(Pyrs)
@@ -662,7 +738,7 @@ def plot_BTSP_ramp(Pyrs, sub_ax=None):
         sub_ax=sub_ax,
         lw=LW,
         mark_threshold=False,
-        mark_BTSP=True,
+        plot_BTSP_events=True,
         s=BTSP_S,
         marker=BTSP_ASTERISK,
     )
@@ -681,6 +757,60 @@ def plot_BTSP_ramp(Pyrs, sub_ax=None):
     sub_ax.set_xlabel("")
     sub_ax.spines["bottom"].set_visible(False)
     sub_ax.tick_params(axis="x", bottom=False)
+
+    return sub_ax
+
+
+def plot_BTSP_responses(Pyrs, sub_ax=None, **kwargs):
+    """
+    plot_BTSP_responses(Pyrs)
+
+    Plots the BTSP responses for the given Pyrs object.
+
+    Args:
+    - Pyrs (Pyr): Pyr object containing the agent and place cells.
+    - sub_ax (plt.Axes, optional): The subplot to plot on. If None, a new figure
+        and subplot are created. Default is None.
+
+    Keyword args:
+    - **kwargs: Additional keyword arguments passed to Pyrs.plot_BTSP_responses().
+
+    Returns:
+    - sub_ax (plt.Axes): The subplot with the plotted BTSP responses.
+    """
+
+    if sub_ax is None:
+        _, sub_ax = plt.subplots(figsize=(3, 2))
+
+    Pyrs = get_somatic_compartment(Pyrs)
+
+    Pyrs.plot_BTSP_responses(split=False, fill=False, post=1, ax=sub_ax, **kwargs)
+    sub_ax.set_title("")
+    sub_ax.set_ylabel("Neural activity")
+
+    return sub_ax
+
+
+def plot_BTSP_counts_vs_target_visits(Pyrs, hline=None, xmin=None, max_spread=0.1):
+    """
+    plot_BTSP_counts_vs_target_visits(Pyrs)
+
+    Plots the number of BTSP events versus the number of object visits.
+
+    Args:
+    - Pyrs (Pyr): Pyr object.
+
+    Returns:
+    - sub_ax (plt.Axes): Subplot with the plotted BTSP counts versus target visits.
+    """
+
+    _, sub_ax = plt.subplots(figsize=(2.5, 1.8))
+    Pyrs.plot_BTSP_counts_vs_target_visits(
+        sub_ax=sub_ax, alpha=0.8, max_spread=max_spread, hline=hline, xmin=xmin
+    )
+    sub_ax.set_title("")
+    sub_ax.set_xlabel("Object visits")
+    sub_ax.set_ylabel("BTSP events")
 
     return sub_ax
 
@@ -776,7 +906,7 @@ def plot_linear_summary(learner):
         "figsize": (5.8, 8.3),
         "lw": LW,
         "s": 1.2,
-        "base_s": 25,
+        "base_obj_s": 25,
     }
 
     Pyr_kwargs = {
@@ -852,7 +982,9 @@ def plot_linear_place_fields(learner):
 
     _, Ag, PCs, _ = ext_util.extract_objects_from_Pyrs(learner.Pyrs)
 
-    _, ax1D = plt.subplots(2, 1, figsize=(3, 3), sharex=True)
+    _, ax1D = plt.subplots(
+        2, 1, figsize=(3, 3.1), sharex=True, gridspec_kw={"hspace": 0.28}
+    )
 
     for i, PF_type in enumerate(["weights", "history"]):
         if "weights" in PF_type:
@@ -867,8 +999,13 @@ def plot_linear_place_fields(learner):
                 raise ValueError(f"PF_type '{PF_type}' not recognized.")
         else:
             t_start, t_end = ext_util.get_times_for_each_BTSP_event(
-                learner.Pyrs.SomaticCompartment, next_trajectory=True
+                learner.Pyrs.SomaticCompartment, next_trajectory=True, use_nans=True
             )[-1]
+            if np.isnan(t_start) or np.isnan(t_end):
+                raise RuntimeError(
+                    "The last BTSP event did not have valid start and end times for "
+                    "place field evaluation."
+                )
             data, PF_centers = metrics.evaluate_PFs(
                 learner.Pyrs, method="history", t_start=t_start, t_end=t_end
             )
@@ -891,6 +1028,7 @@ def plot_linear_place_fields(learner):
                 ax=ax1D[i],
                 s=BTSP_S,
                 marker=BTSP_ASTERISK,
+                lw=1.5,
                 prop_y=0.95,
             )
 
@@ -940,7 +1078,7 @@ def plot_linear_binned_rates(learner, num_bins=150):
     }
 
     learner.Pyrs.plot_binned_rates(axes=ax1D.reshape(-1, 1), **kwargs)
-    env_scale = learner.Pyrs.Agent.Environment.scale
+    env_scale = learner.Pyrs.Environment.scale
     for sub_ax in ax1D:
         add_1D_position_markers(
             sub_ax,
@@ -969,7 +1107,7 @@ def plot_linear_binned_rates(learner, num_bins=150):
     return ax1D
 
 
-def retrieve_PF_data(data_dict, PF_type="history"):
+def retrieve_PF_data(data_dict, PF_type="history", width=True):
     """
     retrieve_PF_data(data_dict)
 
@@ -978,10 +1116,12 @@ def retrieve_PF_data(data_dict, PF_type="history"):
     Args:
     - data_dict (dict): Dictionary containing place field data.
     - PF_type (str, optional): PF evaluation method to retrieve. Default is "history".
+    - width (bool, optional): Whether to retrieve place field widths. Default is True.
 
     Returns:
     - PFs (2D np.ndarray): Place fields.
     - PF_centers (1D np.ndarray): Centers of the place fields.
+    if width:
     - PF_widths (1D np.ndarray): Widths of the last recorded place fields.
     """
 
@@ -1002,13 +1142,19 @@ def retrieve_PF_data(data_dict, PF_type="history"):
 
     for key in [data_key, center_key, width_key]:
         if key not in data_dict:
+            if key == width_key and not width:
+                continue
             raise ValueError(f"Key '{key}' not found in data_dict.")
 
     PFs = data_dict[data_key]
     PF_centers = data_dict[center_key]
-    PF_widths = data_dict[width_key]
 
-    return PFs, PF_centers, PF_widths
+    if width:
+        PF_widths = data_dict[width_key]
+        return PFs, PF_centers, PF_widths
+
+    else:
+        return PFs, PF_centers
 
 
 def plot_linear_speed_PF_examples(
@@ -1861,7 +2007,7 @@ def plot_target_shift_PFs(
     return ax1D
 
 
-def plot_openfield_components(Pyrs, titles=False, traj_idx=8):
+def plot_openfield_components(Pyrs, titles=False, traj_idx=8, PC_to_plot=206):
     """
     plot_openfield_components(Pyrs)
 
@@ -1871,6 +2017,7 @@ def plot_openfield_components(Pyrs, titles=False, traj_idx=8):
     - Pyrs (Pyr): Pyr object containing the environment, agent, object and place cells.
     - titles (bool, optional): Whether to add titles to each subplot. Default is False.
     - traj_idx (int, optional): Index of the trajectory to plot. Default is 8.
+    - PC_to_plot (int, optional): Index of the place cell to plot. Default is 206.
 
     Returns:
     - axes (np.ndarray of plt.Axes): Array of subplots with openfield components plotted.
@@ -1885,7 +2032,7 @@ def plot_openfield_components(Pyrs, titles=False, traj_idx=8):
 
     env_kwargs = {"skip_object_types": ["teleport"], "no_legend": True}
     y = 1.02
-    chosen_PCs = [206]
+    chosen_PCs = [PC_to_plot]
 
     env_sub_ax, traj_sub_ax = axes[0]
     Obj_sub_ax, PC_sub_ax = axes[1]
@@ -1932,12 +2079,7 @@ def plot_openfield_components(Pyrs, titles=False, traj_idx=8):
         sub_ax=PC_sub_ax, plot_objects=True, s=3, alpha=0.8, marker=".", **env_kwargs
     )
 
-    cbar_axlist = [Obj_sub_ax, PC_sub_ax]
-    vmin = min([sub_ax.get_images()[-1].get_clim()[0] for sub_ax in cbar_axlist])
-    vmax = max([sub_ax.get_images()[-1].get_clim()[1] for sub_ax in cbar_axlist])
-    for sub_ax in cbar_axlist:
-        im = sub_ax.get_images()[-1]
-        im.set_clim(vmin, vmax)
+    vmin, vmax = plot_util.match_clims([Obj_sub_ax, PC_sub_ax])
 
     cbar_axis = axes.ravel()[-1]
     plot_util.add_colorbars(
@@ -1962,10 +2104,13 @@ def plot_last_openfield_PF(
     lw=LW,
     alpha=0.8,
     obj_s=30,
+    BTSP_s=BTSP_S,
     PF_type="history",
+    t_end=None,
     sub_ax=None,
     no_teleport=True,
     plot_colorbar=True,
+    plot_BTSP_events=True,
     **kwargs,
 ):
     """
@@ -1980,12 +2125,17 @@ def plot_last_openfield_PF(
     - lw (float, optional): Line width. Default is LW.
     - alpha (float, optional): Transparency level. Default is 0.8.
     - obj_s (float, optional): Size of the object markers. Default is 30.
+    - BTSP_s (float, optional): Size of the BTSP event markers. Default is BTSP_S.
     - PF_type (str, optional): PF evaluation method to plot. Default is "history".
+    - t_end (float, optional): End time for identifying last PF. Only applies if
+        PF_type is "history". Default is None.
     - sub_ax (plt.Axes, optional): Subplot on which to plot the data. If None, a new
         figure and subplot are created. Default is None.
     - no_teleport (bool, optional): Whether to skip plotting teleportation ports in the
         plot. Default is True.
     - plot_colorbar (bool, optional): Whether to plot the colorbar. Default is True.
+    - plot_BTSP_events (bool, optional): Whether to plot BTSP event markers. Default is
+        True.
 
     Keyword args:
     - **kwargs: Additional keyword arguments for the plot_2D_PFs function.
@@ -2005,12 +2155,16 @@ def plot_last_openfield_PF(
     if PF_type == "history":
         round_dec = 0
         vmax = 10
-        PF_times = ext_util.get_times_for_each_BTSP_event(Pyrs, i=i, use_nans=False)
+        PF_times = ext_util.get_times_for_each_BTSP_event(
+            Pyrs, i=i, use_nans=False, t_end=t_end
+        )
         if len(PF_times):
             PF_t_start, PF_t_end = PF_times[-1]
     else:
         round_dec = 2
         vmax = None
+        if t_end is not None:
+            raise NotImplementedError("t_end is only applicable for PF_type 'history'.")
 
     skip_object_types = list()
     if no_teleport:
@@ -2025,8 +2179,8 @@ def plot_last_openfield_PF(
         alpha=alpha,
         obj_s=obj_s,
         lw=lw,
-        plot_BTSP_events=True,
-        BTSP_s=BTSP_S,
+        plot_BTSP_events=plot_BTSP_events,
+        BTSP_s=BTSP_s,
         BTSP_marker=BTSP_ASTERISK,
         skip_object_types=skip_object_types,
         no_legend=True,
@@ -2063,6 +2217,7 @@ def plot_openfield_corridor_PFs(
     alpha=1.0,
     no_teleport=True,
     axes=None,
+    **kwargs,
 ):
     """
     plot_openfield_corridor_PFs(Pyrs)
@@ -2090,6 +2245,9 @@ def plot_openfield_corridor_PFs(
         a new array is created. If provided, it should either have the same number of
         subplots as the number of PFs to plot, or one extra per row for the colorbar.
         Default is None.
+
+    Keyword args:
+    - **kwargs: Additional keyword arguments passed to plot_fcts.plot_2D_PFs().
 
     Returns:
     - sub_ax (plt.Axes): The subplot with the plotted PFs.
@@ -2153,18 +2311,16 @@ def plot_openfield_corridor_PFs(
     if isinstance(Pyrs, list):
         if len(Pyrs) != num_PFs:
             raise ValueError("Length of Pyrs list must match number of PFs.")
-        PFs = PFs.reshape(PFs.shape[0], 1, -1)
+        PFs = PFs.reshape(PFs.shape[0], 1, PFs.shape[1])
+        use_PF_axes = PF_axes
     else:
         Pyrs = [Pyrs]
-        PF_axes = [PF_axes]
+        use_PF_axes = [PF_axes]
         PFs = [PFs]
 
     for i, use_Pyrs in enumerate(Pyrs):
-        use_Pyrs = get_somatic_compartment(use_Pyrs)
-        if use_Pyrs.n != 1:
-            raise ValueError("Only single neuron plotting is supported.")
         plot_fcts.plot_2D_PFs(
-            use_Pyrs,
+            get_somatic_compartment(use_Pyrs),
             PF_type=PF_type,
             PFs=PFs[i],
             PF_centers=PF_centers,
@@ -2176,14 +2332,15 @@ def plot_openfield_corridor_PFs(
             no_legend=True,
             vmin=vmin,
             vmax=vmax,
-            ax=PF_axes[i],
+            ax=use_PF_axes[i],
             marker="s",
             plot_colorbar=False,
             cbar_side="right",
             cbar_outline=True,
+            **kwargs,
         )
 
-    for i, sub_ax in enumerate(axes[:, :-1].ravel()):
+    for i, sub_ax in enumerate(PF_axes):
         title = f"#{i + 1}"
         add_strs = list()
         if num_BTSP is not None:
@@ -2517,11 +2674,6 @@ def plot_openfield_teleportation_summary(learner, num_sec=6, width_per=1.875):
         sharey="row",
     )
 
-    for i in range(num_teleportations):
-        BTSP_str = " (BTSP)" if i in BTSP_teleportation_idxs else " (no BTSP)"
-        title_str = f"Teleport #{i + 1}{BTSP_str}"
-        axes[0, i].set_title(title_str, y=1.02)
-
     # first row: PFs
     PF_info = metrics.gather_PF_info(learner, position_name="reward")
     PF_axes = [axes[0, 0]]
@@ -2539,6 +2691,11 @@ def plot_openfield_teleportation_summary(learner, num_sec=6, width_per=1.875):
         no_teleport=False,
         obj_s=10,
     )
+
+    for i in range(num_teleportations):
+        BTSP_str = " (BTSP)" if i in BTSP_teleportation_idxs else " (no BTSP)"
+        title_str = f"Teleport #{i + 1}{BTSP_str}"
+        axes[0, i].set_title(title_str, y=1.04)
 
     comps = [
         learner.Pyrs.SomaticCompartment,
@@ -2572,7 +2729,7 @@ def plot_openfield_teleportation_summary(learner, num_sec=6, width_per=1.875):
                 t_start=t_start,
                 t_end=t_end,
                 BTSP_s=BTSP_S / 2,
-                mark_BTSP_kernel=False,
+                plot_BTSP_kernel=False,
                 plot_reward=(j == 0),
                 plot_teleportation=(j == 0),
                 sub_ax=sub_ax,
@@ -2623,3 +2780,317 @@ def plot_openfield_teleportation_summary(learner, num_sec=6, width_per=1.875):
             sub_ax.axis("off")
 
     return axes
+
+
+def plot_openfield_overlayed_last_PFs(learner, PF_type="history", sub_ax=None):
+    """
+    plot_openfield_overlayed_last_PFs(learner)
+
+    Plots the last place fields for an openfield experiment, overlayed.
+
+    Args:
+    - learner (Learner): Learner object containing the experiment data.
+    - PF_type (str, optional): PF evaluation method to plot. Default is "history".
+    - sub_ax (plt.Axes, optional): Subplot on which to plot the data. If None, a new
+        subplot is created. Default is None.
+
+    Returns:
+    - sub_ax (plt.Axes): The subplot with the plotted overlayed PFs.
+    """
+
+    if sub_ax is None:
+        _, sub_ax = plt.subplots(figsize=(2, 2))
+
+    data_dict = metrics.gather_PF_info(learner, position_name="reward")
+    PFs, PF_centers = retrieve_PF_data(data_dict, PF_type=PF_type, width=False)
+
+    overlayed_PF = PFs[-1].max(axis=0)
+    plot_openfield_corridor_PFs(
+        learner.Pyrs,
+        PFs=overlayed_PF.reshape(1, -1),
+        PF_centers=PF_centers,
+        PF_type=PF_type,
+        axes=[sub_ax],
+        plot_objects=False,
+    )
+    sub_ax.set_title("")
+
+    return sub_ax
+
+
+def plot_openfield_multitarget_summary(learner, PF_type="history", after_remap=False):
+    """
+    plot_openfield_multitarget_summary(learner)
+
+    Plots a summary figure for openfield multitarget experiments.
+
+    Args:
+    - learner (Learner): Learner object containing the experiment data.
+    - t_start (float, optional): Start time for trajectory plotting. Default is 0.
+    - PF_type (str, optional): PF evaluation method to plot. Default is "history".
+
+    Returns:
+    - ax1D (np.ndarray of plt.Axes): Array of subplots with the plotted summary.
+    """
+
+    gridspec_kw = {"width_ratios": [1.0, 1.0, 1.08], "wspace": 0.07}
+    _, ax1D = plt.subplots(1, 3, figsize=(5, 2), gridspec_kw=gridspec_kw)
+
+    if after_remap:
+        step = get_learner_remap_step(learner, idx=0, num_total=1)
+    else:
+        step = learner.agent_start_step
+    t_start = step * learner.Agent.dt
+
+    learner.Agent.plot_trajectories(
+        ax=ax1D[0],
+        t_start=t_start,
+        t_end=t_start + 100,
+        framerate=1 / learner.Agent.dt,
+        alpha=0.4,
+        s_2D=3,
+        s=15,
+        cmap_per=True,
+        plot_target=False,
+        plot_agent=False,
+        plot_traj_ends=True,
+        no_legend=True,
+    )
+
+    learner.Pyrs.SomaticCompartment.plot_BTSP_locations(
+        sub_ax=ax1D[1],
+        t_start=t_start,
+        s=BTSP_S / 2,
+        max_alpha=0.8,
+        marker=BTSP_ASTERISK,
+        plot_objects=False,
+        no_legend=True,
+    )
+
+    plot_openfield_overlayed_last_PFs(learner, PF_type=PF_type, sub_ax=ax1D[-1])
+
+    return ax1D
+
+
+def plot_openfield_multitarget_PFs(
+    Pyrs,
+    n="all",
+    PF_type="history",
+    plot_colorbar=False,
+    width_per=0.9,
+    split_time=None,
+):
+    """
+    plot_openfield_multitarget_PFs(Pyrs)
+
+    Plots place fields for multiple Pyr neurons in an openfield multitarget experiment.
+
+    Args:
+    - Pyrs (Pyr): Pyr object for openfield.
+    - n (int or str, optional): Number of Pyr neurons to plot. If "all", plots all
+        neurons. Default is "all".
+    - PF_type (str, optional): PF evaluation method to plot. Default is "history".
+    - plot_colorbar (bool, optional): Whether to plot the colorbar. Default is False.
+    - width_per (float, optional): Width per subplot. Default is 0.9.
+    - split_time (float, optional): If provided, plots last PFs calculated before and
+        after the time provided. Otherwise, plots object cell rate maps and
+        corresponding pyramidal neuron PFs. Default is None.
+
+    Returns:
+    - axes (np.ndarray of plt.Axes): Array of subplots with the plotted place fields.
+    """
+
+    if n == "all":
+        n = Pyrs.n
+
+    ncols = min(n, 10)
+    nrows = int(np.ceil(n / ncols)) * 2
+    _, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(ncols * width_per, nrows * width_per * 1.1),
+        gridspec_kw={"hspace": 0.11 / width_per, "wspace": 0.09 / width_per},
+    )
+
+    event_str = "ev." if width_per < 0.9 else "event"
+
+    top_axes = axes[::2].ravel()
+    bottom_axes = axes[1::2].ravel()
+
+    if split_time is None:
+        axis_sets = [bottom_axes]
+        t_ends = [None]
+    else:
+        axis_sets = [top_axes, bottom_axes]
+        t_ends = [split_time, None]
+
+    for i in range(n):
+        if split_time is None:
+            Objs = Pyrs.get_main_apical_input_layer(src_name="Obj")
+            dend_idx = Pyrs.get_index_of_main_apical_input(neuron_idx=i, src_name="Obj")
+            Objs.plot_rate_map(
+                ax=top_axes[i],
+                chosen_neurons=[dend_idx],
+                no_legend=True,
+                s=2,
+                colorbar=False,
+                wall_lw=2,
+            )
+            top_axes[i].set_title(f"#{i + 1}", fontsize="medium")
+
+        use_colorbar = plot_colorbar and (i % ncols == ncols - 1)
+        for j, axis_set in enumerate(axis_sets):
+            plot_last_openfield_PF(
+                Pyrs,
+                i=i,
+                PF_type=PF_type,
+                sub_ax=axis_set[i],
+                t_end=t_ends[j],
+                plot_colorbar=use_colorbar,
+                obj_s=2,
+                wall_lw=2,
+                plot_BTSP_events=False,
+            )
+            num_BTSP = len(
+                Pyrs.SomaticCompartment.get_BTSP_steps(
+                    chosen_neurons=[i], t_end=t_ends[j]
+                )
+            )
+            if j == 1:
+                num_BTSP = num_BTSP - prev_num_BTSP
+                title_str = f"+{num_BTSP} BTSP ev."
+            else:
+                if width_per < 0.9:
+                    event_str = "ev."
+                else:
+                    event_str = "event" if num_BTSP == 1 else "events"
+                title_str = f"{num_BTSP} BTSP {event_str}"
+            axis_set[i].set_title(title_str, fontsize="small", y=0.99)
+
+            prev_num_BTSP = num_BTSP
+
+    plot_util.match_clims(axes.ravel())
+
+    return axes
+
+
+def plot_openfield_remapping_pre_post_weights(learner):
+    """
+    plot_openfield_remapping_pre_post_weights(learner)
+
+    Plots pre- and post-remapping synaptic weights for an openfield remapping experiment.
+
+    Args:
+    - learner (Learner): Learner object containing the experiment data.
+
+    Returns:
+    - ax1D (np.ndarray of plt.Axes): Array of subplots with the plotted weights.
+    """
+
+    fig, ax1D = plt.subplots(1, 2, figsize=(2.7, 1.5), gridspec_kw={"wspace": 0.26})
+
+    _, _, PCs, _ = ext_util.extract_objects_from_Pyrs(learner.Pyrs)
+
+    remap_step = get_learner_remap_step(learner, idx=0, num_total=1)
+
+    recorded_weights = learner.get_recorded_weights()
+    idx = np.where(recorded_weights["steps"] < remap_step)[0][-1]
+
+    PF_weights_overlayed = recorded_weights["weights"][idx : idx + 1].max(axis=1)
+
+    if not gen_util.attribute_type_checker(PCs, "PlaceCells"):
+        raise ValueError("PCs is not a PlaceCells object.")
+    if not hasattr(PCs, "_current_sorter"):
+        raise ValueError("PCs does not have a current sorter used for remapping.")
+
+    shuffle_idxs = [-2, -1]
+
+    for i, shuffle_idx in enumerate(shuffle_idxs):
+        PF_centers = PCs.get_place_cell_centers(shuffle_idx)
+        plot_fcts.plot_2D_PFs(
+            get_somatic_compartment(learner.Pyrs),
+            PF_type="weights",
+            PFs=PF_weights_overlayed,
+            PF_centers=PF_centers,
+            round_dec=2,
+            wall_lw=2,
+            obj_s=10,
+            plot_BTSP_events=False,
+            no_legend=True,
+            ax=ax1D[i],
+            marker="s",
+            plot_objects=True,
+            plot_colorbar=(i == 1),
+            cbar_side="bottom",
+            cbar_size="7%",
+            cbar_outline=True,
+        )
+
+    cax = fig.axes[-1]
+    clabel = get_PF_label("weights", title=False)
+    cax.set_label(clabel)
+
+    return ax1D
+
+
+def plot_openfield_remapping_correlation_matrices(
+    learner, num_periods=[40, 200], approximate=True
+):
+    """
+    plot_openfield_remapping_correlation_matrices(learner)
+
+    Plots correlation matrices showing neural correlations across time in an openfield
+    remapping experiment.
+
+    Args:
+    - learner (Learner): Learner object containing the experiment data.
+    - num_periods (list of int, optional): List of number of periods to use for
+        correlation matrix calculation. Default is [40, 200].
+    - approximate (bool, optional): Whether to calculate a number of periods near the
+        values provided to place remapping transition between periods, instead of
+        using the exact values. Default is True.
+
+    Returns:
+    - ax1D (np.ndarray of plt.Axes): Array of subplots with the plotted correlation
+        matrices.
+    """
+
+    num_steps = learner.Agent.num_steps_total
+    remap_step = get_learner_remap_step(learner, idx=0, num_total=1)
+
+    BTSP_steps = learner.Pyrs.SomaticCompartment.get_BTSP_steps(
+        apply_step=True, applied_only=True
+    )
+    pre_remap_step = BTSP_steps[BTSP_steps < remap_step].max()
+    post_remap_step = BTSP_steps[BTSP_steps > remap_step].max()
+
+    if approximate:
+        num_periods_approx = list()
+        for num in num_periods:
+            _, denom = gen_util.get_integer_fraction(
+                remap_step / num_steps,
+                denom_min=int(np.min(num * 0.7)),
+                denom_max=int(np.max(num * 1.3)),
+            )
+            if denom is not None:
+                num = denom
+            num_periods_approx.append(num)
+        num_periods = num_periods_approx
+
+    _, ax1D = plt.subplots(1, len(num_periods), figsize=(len(num_periods) * 3.3, 2.3))
+    for i, num in enumerate(num_periods):
+        clabel = "Correlation" if i == len(num_periods) - 1 else ""
+        learner.Pyrs.SomaticCompartment.get_firingrate_CC_matrix(
+            num_periods=num, plot=True, sub_ax=ax1D[i], vmin=None, clabel=clabel
+        )
+        label = f"Time bins ({num})"
+        ax1D[i].set_xlabel(label)
+        ax1D[i].set_ylabel(label)
+        ax1D[i].set_title("")
+        for j, step in enumerate([pre_remap_step, remap_step, post_remap_step]):
+            line = step / num_steps * num - 0.5
+            ls = "solid" if j == 1 else "dashed"
+            ax1D[i].axhline(line, color="k", lw=0.7, ls=ls)
+            ax1D[i].axvline(line, color="k", lw=0.7, ls=ls)
+
+    return ax1D

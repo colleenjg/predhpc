@@ -4,7 +4,7 @@ import warnings
 
 import numpy as np
 
-from predhpc.util import ext_util, signal_util, params_util, plot_util
+from predhpc.util import ext_util, gen_util, signal_util, params_util, plot_util
 
 
 def calculate_layer_output(
@@ -787,13 +787,13 @@ def assess_Pyrs_learning_rates_spatially(
     """
 
     if BTSP:
-        if not hasattr(Pyrs, "BTSP_lr"):
+        if not gen_util.attribute_type_checker(Pyrs, "BTSPLayer"):
             raise ValueError("BTSP cannot be set to True if Pyrs is not a BTSPLayer.")
         lr = Pyrs.BTSP_lr / Pyrs.BTSP_integral
         kernel_kwargs = Pyrs.get_BTSP_kernel_kwargs()
 
     else:
-        if not hasattr(Pyrs, "lr"):
+        if not gen_util.attribute_type_checker(Pyrs, "HebbianLayer"):
             raise ValueError("Pyrs must be a HebbianLayer.")
         lr = Pyrs.lr
         kernel_kwargs = Pyrs.get_learning_kernel_kwargs()
@@ -824,7 +824,7 @@ def assess_Pyrs_learning_rates_spatially(
             "but assessment will assume uniformly arranged place cell centers."
         )
 
-    Env = Pyrs.Agent.Environment
+    Env = Pyrs.Environment
     env_1D = True if Env.D == 1 else False
     if env_1D:
         env_scale = Env.scale

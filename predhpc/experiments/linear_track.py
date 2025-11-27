@@ -82,9 +82,9 @@ def get_kwargs(experiment="speed_PF", speed_std=0):
         kwargs = {
             "wait_after_trajectory": 0,
             "speed_std": speed_std,
-            "max_num_steps": None,
-            "max_num_traj": 5,
-            "max_num_target_reaches": None,
+            "num_steps_can_stop": None,
+            "num_traj_can_stop": 5,
+            "num_target_reaches_can_stop": None,
             "num_repeats": 4,
             "save_name": f"linear_{experiment}",
         }
@@ -201,9 +201,9 @@ def get_Pyrs(
 
 def run_linear_track(
     skip_runs=1,
-    max_num_traj=None,
-    max_num_target_reaches=None,
-    max_num_steps=5000,
+    num_traj_can_stop=None,
+    num_target_reaches_can_stop=None,
+    num_steps_can_stop=5000,
     wait_after_trajectory=params_util.WAIT_LINEAR,
     speed_mean=params_util.SPEED_MEAN_LINEAR,
     speed_std=params_util.SPEED_STD,
@@ -222,15 +222,15 @@ def run_linear_track(
     Args:
     - skip_runs (int, optional): Number of trajectories to skip before enabling BTSP.
         Default is 1.
-    - max_num_traj (int, optional): Maximum number of trajectories to run.
-        Default is None.
-    - max_num_target_reaches (int or None, optional): Maximum number of target
-        reaches to run. Default is None.
-    - max_num_steps (int or None, optional): Maximum number of steps to run. Will
-        constrain other stopping conditions (number of target reaches or trajectories).
-        Pass None to avoid constraining these by number of steps, and learning will
-        only stop when one of those conditions are reached, if provided.
-        Default is 5000.
+    - num_traj_can_stop (int, optional): Number of trajectories to run after which
+        early stopping may be triggered. Default is None.
+    - num_target_reaches_can_stop (int or None, optional): Number of target
+        reaches after which early stopping may be triggered. Default is None.
+    - num_steps_can_stop (int or None, optional): Number of steps after which early
+        stopping can occur. Will override the learner object's other stopping conditions
+        (number of target reaches or trajectories). Pass None to avoid constraining
+        these by number of steps, and early stopping will only be triggered when one
+        (either) of those conditions is reached, if provided. Default is 5000.
     - wait_after_trajectory (float, optional): Number of steps to wait after completing
         a trajectory. Default is params_util.WAIT_LINEAR.
     - speed_mean (float, optional): Mean speed of the agent. Default is
@@ -269,9 +269,9 @@ def run_linear_track(
         learning_runs.append("shifted")
 
     run_kwargs = {
-        "max_num_traj": max_num_traj,
-        "max_num_steps": max_num_steps,
-        "max_num_target_reaches": max_num_target_reaches,
+        "num_traj_can_stop": num_traj_can_stop,
+        "num_steps_can_stop": num_steps_can_stop,
+        "num_target_reaches_can_stop": num_target_reaches_can_stop,
     }
 
     learner = Pyrs
@@ -321,9 +321,9 @@ def run_linear_track(
 
 def run_linear_experiment_grid(
     search_space,
-    max_num_traj=None,
-    max_num_target_reaches=None,
-    max_num_steps=5000,
+    num_traj_can_stop=None,
+    num_target_reaches_can_stop=None,
+    num_steps_can_stop=5000,
     direc=None,
     num_CPUs=4,
     num_repeats=4,
@@ -341,15 +341,15 @@ def run_linear_experiment_grid(
     Args:
     - search_space (dict or str): Search space for hyperparameter search, with keys
         and values for each pyramidal neuron parameter to search over.
-    - max_num_traj (int, optional): Maximum number of trajectories to run.
-        Default is None.
-    - max_num_target_reaches (int or None, optional): Maximum number of target
-        reaches to run. Default is None.
-    - max_num_steps (int or None, optional): Maximum number of steps to run. Will
-        constrain other stopping conditions (number of target reaches or trajectories).
-        Pass None to avoid constraining these by number of steps, and learning will
-        only stop when one of those conditions are reached, if provided.
-        Default is 5000.
+    - num_traj_can_stop (int, optional): Number of trajectories to run after which
+        early stopping may occur. Default is None.
+    - num_target_reaches_can_stop (int or None, optional): Number of target
+        reaches after which early stopping may be triggered. Default is None.
+    - num_steps_can_stop (int or None, optional): Number of steps after which early
+        stopping can occur. Will override the learner object's other stopping conditions
+        (number of target reaches or trajectories). Pass None to avoid constraining
+        these by number of steps, and early stopping will only be triggered when one
+        (either) of those conditions is reached, if provided. Default is 5000.
     - direc (str, optional): Directory to save results in. If None, a default
         directory is used (see hyper_util.get_save_directory()). Default is None.
     - num_CPUs (int, optional): Number of CPUs to run search across. Default is 4.
@@ -383,9 +383,9 @@ def run_linear_experiment_grid(
         kwargs_use.update(config)
 
         output_dict = run_linear_track(
-            max_num_traj=max_num_traj,
-            max_num_target_reaches=max_num_target_reaches,
-            max_num_steps=max_num_steps,
+            num_traj_can_stop=num_traj_can_stop,
+            num_target_reaches_can_stop=num_target_reaches_can_stop,
+            num_steps_can_stop=num_steps_can_stop,
             disable_tqdm=disable_tqdm,
             plot=plot,
             **kwargs_use,

@@ -108,6 +108,7 @@ class TwoCompLayer(object):
         """
 
         self.Agent = Agent
+        self.Environment = Agent.Environment
 
         self._organize_params(params)
         self._create_compartments()
@@ -460,7 +461,9 @@ class TwoCompLayer(object):
 
         main_apical_input_dict = self.ApicalCompartment.inputs[src_name]
 
-        if not isinstance(main_apical_input_dict["layer"], riab_neurons.PlaceCells):
+        if not gen_util.attribute_type_checker(
+            main_apical_input_dict["layer"], "PlaceCells"
+        ):
             raise ValueError(f"Input layer '{src_name}' is not a PlaceCells layer.")
 
         if return_dict:
@@ -956,7 +959,7 @@ class TwoCompLayer(object):
         """
 
         if compartment is None:
-            if self.Agent.Environment.dimensionality == "1D":
+            if self.Environment.dimensionality == "1D":
                 compartment = "all"
             else:
                 compartment = "somatic"
@@ -974,7 +977,7 @@ class TwoCompLayer(object):
         elif norm_by is not None:
             kwargs["norm_by"] = norm_by
 
-        if self.Agent.Environment.dimensionality == "2D" and compartment == "all":
+        if self.Environment.dimensionality == "2D" and compartment == "all":
             warnings.warn(
                 "Plotting rate maps for all compartments in a 2D environment will "
                 "result in only the somatic compartment appearing."
@@ -992,7 +995,7 @@ class TwoCompLayer(object):
             )
             ax = ax or ax_out
 
-        if not no_legend and self.Agent.Environment.dimensionality == "1D":
+        if not no_legend and self.Environment.dimensionality == "1D":
             self.add_compartment_legend(ax, compartment=compartment, loc="lower right")
 
         fig = np.asarray(ax).ravel()[0].figure
@@ -1041,12 +1044,12 @@ class TwoCompLayer(object):
         """
 
         if compartment is None:
-            if self.Agent.Environment.dimensionality == "1D":
+            if self.Environment.dimensionality == "1D":
                 compartment = "all"
             else:
                 compartment = "somatic"
 
-        if self.Agent.Environment.dimensionality == "2D" and compartment == "both":
+        if self.Environment.dimensionality == "2D" and compartment == "both":
             warnings.warn(
                 "Plotting rate maps across learning for both compartments in a 2D "
                 "environment will result in only the somatic compartment appearing."
@@ -1061,7 +1064,7 @@ class TwoCompLayer(object):
             )
             axes = axes or axes_out
 
-        if not no_legend and self.Agent.Environment.dimensionality == "1D":
+        if not no_legend and self.Environment.dimensionality == "1D":
             sub_ax = np.asarray(axes).ravel()[0]
             self.add_compartment_legend(
                 sub_ax, compartment=compartment, loc="lower right"
@@ -1081,7 +1084,7 @@ class TwoCompLayer(object):
 
         fig = np.asarray(axes).ravel()[0].figure
 
-        y = 0.9 if self.Agent.Environment.dimensionality == 1 else 0.97
+        y = 0.9 if self.Environment.dimensionality == 1 else 0.97
         fig.suptitle(title, y=y)
 
         plot_util.save_figure(fig, f"{self.name}_rate_maps_across_learning", save=autosave)  # type: ignore[attr-defined]
@@ -1481,15 +1484,15 @@ class TwoCompLayer(object):
                 min_steps_btw=min_steps_btw,
                 log=log_num_closest,
             )
-            closest_steps = gen_util.get_minima_indices(
+            closest_step_idxs = gen_util.get_minima_indices(
                 distances, minimum=min_dist, min_pts_btw=min_steps_btw
             )
 
-            if mark_closest and len(closest_steps):
+            if mark_closest and len(closest_step_idxs):
                 plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.2)
                 sub_ax.plot(
-                    t[closest_steps],
-                    np.zeros_like(closest_steps),
+                    t[closest_step_idxs - 1],
+                    np.zeros_like(closest_step_idxs),
                     lw=0,
                     marker="o",
                     ms=2,
@@ -1840,6 +1843,9 @@ class TwoCompLayer(object):
         t_start=None,
         t_end=None,
         max_spread=0.1,
+        hline=1,
+        xmin=0,
+        alpha=0.5,
         sub_ax=None,
         autosave=None,
     ):
@@ -1861,6 +1867,11 @@ class TwoCompLayer(object):
         - t_end (float, optional): End time of the plot. Default is None.
         - max_spread (float, optional): Max spread to apply to duplicate data over y
             axis. Default is True.
+        - hline (float, optional): Y value at which to draw a horizontal line.
+            Default is 1.
+        - xmin (float, optional): Minimum x value to display. Default is 0.
+        - ymin (float, optional): Minimum y value to display. Default is 0.
+        - alpha (float, optional): Alpha value for scatter plot points. Default is 0.5.
         - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
             global autosave setting for ratinabox is used. Default is None.
@@ -1889,21 +1900,34 @@ class TwoCompLayer(object):
         if sub_ax is None:
             _, sub_ax = plt.subplots(figsize=(6, 3))
 
-        sub_ax.axhline(1, color="k", ls="dashed", lw=1, alpha=0.3)
+        if hline is not None:
+            sub_ax.axhline(hline, color="k", ls="dashed", lw=1, alpha=0.3)
         sub_ax.scatter(
             nbr_visits_per_target,
             BTSP_counts,
             color=self.SomaticCompartment.color,
-            alpha=0.5,
+            alpha=alpha,
             s=10,
         )
 
-        plot_util.pad_axis(sub_ax, axis="x")
+        plot_util.pad_axis(sub_ax, axis="x", pad_prop=0.2)
         plot_util.pad_axis(sub_ax, axis="y")
-        if sub_ax.get_xlim()[0] > 0:
-            sub_ax.set_xlim(0, None)
+        if xmin is None:
+            xticks = sub_ax.get_xticks()
+            if len(xticks) > 1:
+                xmin, xmax = sub_ax.get_xlim()
+                xmin = min(min(xticks), xmin)
+                xmax = max(max(xticks), xmax)
+                sub_ax.set_xlim(xmin, xmax)
+        else:
+            sub_ax.set_xlim(xmin, None)
         if sub_ax.get_ylim()[0] > 0:
             sub_ax.set_ylim(0, None)
+
+        yticks = np.arange(BTSP_counts.max() + 1)
+        if len(yticks) > 5:
+            yticks = yticks[:: int(len(yticks) / 5) + 1]
+        sub_ax.set_yticks(yticks)
 
         sub_ax.spines[["right", "top"]].set_visible(False)
         sub_ax.set_xlabel("Number of target visits")

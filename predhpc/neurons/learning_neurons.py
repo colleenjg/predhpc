@@ -192,9 +192,7 @@ class SmoothFeedForwardLayer(riab_neurons.FeedForwardLayer):
         if evaluate_at == "last":
             V = np.zeros(self.n)
         elif evaluate_at == "all":
-            V = np.zeros(
-                (self.n, self.Agent.Environment.flattened_discrete_coords.shape[0])
-            )
+            V = np.zeros((self.n, self.Environment.flattened_discrete_coords.shape[0]))
         else:
             V = np.zeros((self.n, kwargs["pos"].shape[0]))
 
@@ -566,9 +564,6 @@ class LearnLayer(SmoothFeedForwardLayer):
         Initialise a layer that can learn weight updates. MSE with target is added to
         history.
 
-        Attributes:
-        - num_steps_total (int): Total number of update steps for the layer.
-
         Args:
         - Agent (agent.ResetableAgent): Associated agent.
         - params (dict, optional): Neuron layer parameters. Default is dict().
@@ -586,9 +581,22 @@ class LearnLayer(SmoothFeedForwardLayer):
         self.set_learn(True)
 
         self.history["target_MSE"] = list()
-        self.num_steps_total = 0
 
         return
+
+    @property
+    def num_steps_total(self):
+        """
+        self.num_steps_total
+
+        Obtain the total number of steps taken by the agent.
+
+        Returns:
+        - num_steps_total (int): Total number of steps taken.
+        """
+
+        num_steps_total = len(self.history["t"])
+        return num_steps_total
 
     @property
     def trainable_biases(self) -> bool:
@@ -765,9 +773,6 @@ class LearnLayer(SmoothFeedForwardLayer):
 
         Keyword args:
         - **kwargs: Keyword arguments passed to self.update_weights().
-
-        Attributes:
-        - num_steps_total (int): Total number of update steps for the layer.
         """
 
         with ext_util.TemporarilyChangeAttribute(self, "save_history", False):
@@ -778,8 +783,6 @@ class LearnLayer(SmoothFeedForwardLayer):
 
         if self.save_history is True:
             self.save_to_history()
-
-        self.num_steps_total += 1
 
         return
 
@@ -958,7 +961,7 @@ class LearnLayer(SmoothFeedForwardLayer):
         if title is None:
             title = "Rate maps across learning"
 
-        y = 0.9 if self.Agent.Environment.dimensionality == 1 else 0.97
+        y = 0.9 if self.Environment.dimensionality == 1 else 0.97
         fig.suptitle(title, y=y)
 
         plot_util.save_figure(fig, f"{self.name}_rate_maps_across_learning", save=autosave)  # type: ignore[attr-defined]
@@ -1129,7 +1132,7 @@ class HebbianLayer(LearnLayer):
         • self.update_weights()
         • self.update()
         • self.plot_learning_kernel()
-        • self.plot_normalization_values()
+        • self.plot_normalization_value_hist()
     """
 
     default_params = {
@@ -1366,7 +1369,7 @@ class HebbianLayer(LearnLayer):
         steps = steps[keep]
         norm_values = norm_values[keep]
 
-        t = t[steps - startid]
+        t = t[steps - startid - 1]
 
         if bias_norms or self.normalize_weights_divisively:
             norm_values = norm_values[:, chosen_neurons]
@@ -1610,7 +1613,7 @@ class HebbianLayer(LearnLayer):
 
         return sub_ax
 
-    def plot_normalization_values_over_time(
+    def plot_normalization_values(
         self,
         input_layer: str,
         t_start: float | None = None,
@@ -1618,15 +1621,17 @@ class HebbianLayer(LearnLayer):
         chosen_neurons: int | str = "all",
         bias_norms: bool = False,
         skip_initial: bool = False,
+        by_neuron: bool = False,
         in_min: bool = True,
         lw: float = 1,
         autosave: bool | None = None,
         sub_ax: plt.Axes | None = None,
     ):
         """
-        self.plot_normalization_values_over_time()
+        self.plot_normalization_values()
 
-        Plot the normalization values for the weights of the layer over time.
+        Plot the normalization values for the weights of the layer over time or by
+        neuron.
 
         Args:
         - input_layer (str): Name of the input layer.
@@ -1638,6 +1643,8 @@ class HebbianLayer(LearnLayer):
             Default is False.
         - skip_initial (bool, optional): Whether to skip the initial normalization
             value at time 0. Default is False.
+        - by_neuron (bool, optional): Whether to plot normalization values by neuron
+            instead of by time. Default is False.
         - in_min (bool, optional): Whether to plot the time in minutes. Default is True.
         - lw (float, optional): Line width of the plot. Default is 1.
         - autosave (bool, optional): Whether to save the figure. Default is None.
@@ -1650,9 +1657,16 @@ class HebbianLayer(LearnLayer):
 
         use_chosen_neurons = chosen_neurons
         if isinstance(chosen_neurons, str) and chosen_neurons == "max":
+            if by_neuron:
+                raise ValueError(
+                    "Cannot plot 'max' normalization by neuron. Choose specific "
+                    "neurons or 'all'."
+                )
             use_chosen_neurons = "all"
 
-        use_chosen_neurons = self.return_list_of_neurons(chosen_neurons=use_chosen_neurons)  # type: ignore[arg-type]
+        use_chosen_neurons = self.return_list_of_neurons(
+            chosen_neurons=use_chosen_neurons
+        )  # type: ignore[arg-type]
 
         steps, norm_values = self.get_normalization_values(
             input_layer=input_layer,
@@ -1662,9 +1676,10 @@ class HebbianLayer(LearnLayer):
             bias_norms=bias_norms,
         )
 
-        full_t = self.get_plotting_times(t_start=t_start, t_end=t_end)[0]
-        if in_min:
-            full_t = full_t / 60
+        if not by_neuron:
+            full_t = self.get_plotting_times(t_start=t_start, t_end=t_end)[0]
+            if in_min:
+                full_t = full_t / 60
 
         if isinstance(chosen_neurons, str) and chosen_neurons == "max":
             norm_values = norm_values.max(axis=1, keepdims=True)  # max
@@ -1673,9 +1688,10 @@ class HebbianLayer(LearnLayer):
             _, sub_ax = plt.subplots(figsize=(6, 3))
 
         if len(steps):
-            t = np.asarray(self.history["t"])[steps]
-            if in_min:
-                t = t / 60
+            if not by_neuron:
+                t = np.asarray(self.history["t"])[steps - 1]
+                if in_min:
+                    t = t / 60
 
             color = self.inputs[input_layer]["layer"].color
 
@@ -1683,9 +1699,13 @@ class HebbianLayer(LearnLayer):
                 keep_idx = np.where(np.diff(data) > 0)[0] + 1
                 if not skip_initial:
                     keep_idx = np.concatenate([[0], keep_idx])
+                if by_neuron:
+                    x_vals = np.full(len(keep_idx), use_chosen_neurons[i])
+                else:
+                    x_vals = t[keep_idx]
                 if lw > 0 and len(keep_idx) > 1:
                     sub_ax.plot(
-                        t[keep_idx],
+                        x_vals,
                         data[keep_idx],
                         color=color,
                         lw=lw,
@@ -1696,7 +1716,7 @@ class HebbianLayer(LearnLayer):
                     abv_bool = abv_1 if i == 1 else ~abv_1
                     if abv_bool.sum():
                         sub_ax.scatter(
-                            t[keep_idx][abv_bool],
+                            x_vals[abv_bool],
                             data[keep_idx][abv_bool],
                             color=color,
                             marker="d",
@@ -1704,7 +1724,7 @@ class HebbianLayer(LearnLayer):
                             alpha=alpha,
                         )
 
-            if len(norm_values):
+            if not by_neuron and len(norm_values):
                 abv_1 = np.where(norm_values.max(axis=1) > 1)[0]
                 if len(abv_1):
                     sub_ax.axvline(
@@ -1717,10 +1737,12 @@ class HebbianLayer(LearnLayer):
                     )
 
         xmin, xmax = sub_ax.get_xlim()
-        if xmin > full_t[0]:
-            sub_ax.set_xlim(left=full_t[0])
-        if xmax < full_t[-1]:
-            sub_ax.set_xlim(right=full_t[-1])
+
+        if not by_neuron:
+            if xmin > full_t[0]:
+                sub_ax.set_xlim(left=full_t[0])
+            if xmax < full_t[-1]:
+                sub_ax.set_xlim(right=full_t[-1])
 
         plot_util.pad_axis(sub_ax, axis="x", pad_prop=0.05)
         plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.5, prop_high=1.0)
@@ -1733,8 +1755,14 @@ class HebbianLayer(LearnLayer):
         if sub_ax.get_ylim()[1] < 1.05:
             sub_ax.set_ylim(top=1.05)
 
-        time_str = "Time (min)" if in_min else "Time (s)"
-        sub_ax.set_xlabel(time_str)
+        if by_neuron:
+            xlabel = "Neuron index"
+            name_str = "by_neuron"
+        else:
+            xlabel = "Time (min)" if in_min else "Time (s)"
+            name_str = "over_time"
+
+        sub_ax.set_xlabel(xlabel)
 
         norm_str = "Oja" if self.apply_Ojas_rule else "Divisive"
         sub_ax.set_ylabel(f"{norm_str} normalization value")
@@ -1747,7 +1775,7 @@ class HebbianLayer(LearnLayer):
         sub_ax.spines[["top", "right"]].set_visible(False)
 
         fig = sub_ax.figure
-        plot_util.save_figure(fig, f"{self.name}_norm_over_time", save=autosave)  # type: ignore[attr-defined]
+        plot_util.save_figure(fig, f"{self.name}_norm_{name_str}", save=autosave)  # type: ignore[attr-defined]
 
         return sub_ax
 
@@ -1767,7 +1795,7 @@ class HebbianLayer(LearnLayer):
         sub_ax: plt.Axes | None = None,
     ):
         """
-        self.plot_normalization_values()
+        self.plot_normalization_value_hist()
 
         Plot the normalization values for the weights of the layer.
 
@@ -1892,7 +1920,7 @@ class BTSPLayer(HebbianLayer):
         • self.add_BTSP_markers_to_plots()
         • self.plot_rate_map()
         • self.plot_rate_timeseries()
-        • self.plot_normalization_values_over_time()
+        • self.plot_normalization_values()
 
     """
 
@@ -2681,7 +2709,7 @@ class BTSPLayer(HebbianLayer):
             events for each neuron.
         """
 
-        if self.Agent.Environment.D != 1:
+        if self.Environment.D != 1:
             raise NotImplementedError(
                 "get_nbr_BTSP_position_bins() is only implemented for 1D environments."
             )
@@ -2690,13 +2718,13 @@ class BTSPLayer(HebbianLayer):
 
         nbr_BTSP_position_bins = np.zeros(self.n)
 
-        bins = np.linspace(0, self.Agent.Environment.scale, bins)
+        bins = np.linspace(0, self.Environment.scale, bins)
         pos = np.asarray(self.Agent.history["pos"])[:, 0]  # 1D
         for i, steps in BTSP_step_dict.items():
             if len(steps) == 0:
                 continue
 
-            all_BTSP_positions = pos[steps]
+            all_BTSP_positions = pos[steps - 1]
             pos_counts, _ = np.histogram(all_BTSP_positions, bins=bins)
             nbr_BTSP_position_bins[i] = len(np.where(pos_counts)[0])
 
@@ -2806,7 +2834,6 @@ class BTSPLayer(HebbianLayer):
             pre=pre, post=post, dt=self.Agent.dt
         )
         time = np.linspace(-pre, post, len(relative_indices))
-        num_steps_total = len(self.history["t"])
 
         chosen_neurons = self.get_chosen_neurons(chosen_neurons)
 
@@ -2819,7 +2846,7 @@ class BTSPLayer(HebbianLayer):
             responses = np.full((len(steps), len(relative_indices)), np.nan)
             for j, step in enumerate(steps):
                 indices = relative_indices + step
-                mask = (indices >= 0) * (indices < num_steps_total)
+                mask = (indices >= 0) * (indices < self.num_steps_total)
                 responses[j, mask] = firingrates[indices[mask], neuron_idx]
             BTSP_response_dict[neuron_idx] = responses
 
@@ -2926,20 +2953,19 @@ class BTSPLayer(HebbianLayer):
         if len(BTSP_targets) == 0:
             return
 
-        self.num_BTSP[np.asarray(BTSP_targets)] += +1
-        self.last_BTSP_step[np.asarray(BTSP_targets)] = self.num_steps_total - 1
+        step = self.num_steps_total + 1  # history not yet updated
+
+        self.num_BTSP[np.asarray(BTSP_targets)] += 1
+        self.last_BTSP_step[np.asarray(BTSP_targets)] = step
         for targ in BTSP_targets:
             self.last_BTSP_pos[targ] = self.Agent.pos
 
         self.BTSP_buffer["num_steps"][BTSP_targets] = 1
 
-        self.history["BTSP_events"].append(
-            self.num_steps_total - 1
-        )  # recorded after update
+        self.history["BTSP_events"].append(step)
         self.history["BTSP_targets"].append(BTSP_targets)
 
         if self.log_BTSP:
-            step = self.num_steps_total - 1  # compensate for step update call
             step_time_str = self.Agent.get_step_and_time(as_str=True, step=step)
             neuron_str = ""
             if self.n > 1:
@@ -3142,8 +3168,9 @@ class BTSPLayer(HebbianLayer):
             )  # normalize weights only (no learning update)
 
         if self.log_BTSP and self.BTSP_applied.sum():
-            step = self.num_steps_total - 1  # compensate for step update call
-            step_time_str = self.Agent.get_step_and_time(as_str=True, step=step)
+            step_time_str = self.Agent.get_step_and_time(
+                as_str=True, step=self.num_steps_total + 1  # history not yet updated
+            )
             neuron_str = ""
             if self.n > 1:
                 applied_idxs = np.where(self.BTSP_applied)[0]
@@ -3193,7 +3220,9 @@ class BTSPLayer(HebbianLayer):
         with ext_util.TemporarilyChangeAttribute(self, "save_history", False):
             super().update()
 
-        self._update_for_BTSP(BTSP_targets)
+        self._update_for_BTSP(
+            BTSP_targets
+        )  # compensate time step as history is not yet updated
 
         if self.save_history is True:
             self.save_to_history()
@@ -3907,6 +3936,7 @@ class BTSPLayer(HebbianLayer):
         self,
         pre=1,
         post=2,
+        shift=0,
         num_cols=10,
         ax=None,
         split=True,
@@ -3922,8 +3952,10 @@ class BTSPLayer(HebbianLayer):
         Plot the BTSP responses of the layer.
 
         Args:
-        - pre (float, optional): Time before BTSP event to plot. Default is 1.
-        - post (float, optional): Time after BTSP event to plot. Default is 2.
+        - pre (float, optional): Time before alignment point to plot. Default is 1.
+        - post (float, optional): Time after alignment point event to plot. Default is 2.
+        - shift (float, optional): Shift of alignment point from time of BTSP event.
+            Default is 0.
         - num_cols (int, optional): Number of columns for the subplot grid. Default is 10.
         - ax (plt.Axes or 2D np.ndarray, optional): Subplot to plot on. Default is None.
         - split (bool, optional): Whether to split the plot into subplots for each neuron.
@@ -3939,12 +3971,13 @@ class BTSPLayer(HebbianLayer):
         """
 
         time, BTSP_response_dict = self.get_BTSP_response_dict(
-            pre=pre,
-            post=post,
+            pre=pre - shift,
+            post=post + shift,
             chosen_neurons=chosen_neurons,
             t_start=t_start,
             t_end=t_end,
         )
+        time = time - shift
         chosen_neurons = self.get_chosen_neurons(chosen_neurons)
 
         if ax is None:
@@ -3990,7 +4023,7 @@ class BTSPLayer(HebbianLayer):
             sub_ax = ax.ravel()[i] if split else ax
 
             if split or i == 0:
-                sub_ax.axvline(0, color="k", ls="dashed")
+                sub_ax.axvline(0, color="k", ls="dashed", lw=1.5)
                 sub_ax.spines[["right", "top"]].set_visible(False)
 
             if BTSP_response_dict[neuron_idx] is None:
@@ -4064,6 +4097,10 @@ class BTSPLayer(HebbianLayer):
                 f"{num_neurons_with_BTSP}/{len(chosen_neurons)} neurons)"
             )
 
+        for sub_ax in np.asarray(ax).ravel():
+            if sub_ax.get_ylim()[0] > 0:
+                sub_ax.set_ylim(0, None)
+
         fig = np.asarray(ax).ravel()[0].figure
         plot_util.save_figure(fig, f"{self.name}_BTSP_responses", save=autosave)  # type: ignore[attr-defined]
 
@@ -4080,6 +4117,8 @@ class BTSPLayer(HebbianLayer):
         color: str | None = None,
         s: int = 10,
         marker: str | tuple = "x",
+        max_alpha: float = 1.0,
+        env_alpha: float = 0.6,
         obj_s: int = 10,
         autosave: bool | None = None,
         **kwargs,
@@ -4099,6 +4138,10 @@ class BTSPLayer(HebbianLayer):
         - color (str, optional): Color of the BTSP markers. Default is None.
         - s (int, optional): Size of the BTSP markers. Default is 10.
         - marker (str, optional): Marker style for the BTSP markers. Default is "x".
+        - max_alpha (float, optional): Maximum alpha value for the BTSP markers.
+            Default is 1.0.
+        - env_alpha (float, optional): Alpha value for the environment plot. Default is
+            0.6.
         - obj_s (int, optional): Size of the environment objects. Default is 10.
         - autosave (bool, optional): Whether to autosave the figure. Default is None.
 
@@ -4121,29 +4164,29 @@ class BTSPLayer(HebbianLayer):
 
         min_not_yet = self.num_steps_total - self.BTSP_buffer["num_steps"].max()
 
-        sub_ax = self.Agent.Environment.plot_environment(
-            alpha=0.6, s=obj_s, sub_ax=sub_ax, **kwargs
+        sub_ax = self.Environment.plot_environment(
+            alpha=env_alpha, s=obj_s, sub_ax=sub_ax, **kwargs
         )
 
-        if self.Agent.Environment.dimensionality == "1D":
+        if self.Environment.dimensionality == "1D":
             ymax = sub_ax.get_ylim()[1]
 
         for target, steps in BTSP_step_dict.items():
             for step in steps:
                 if step < startid:
-                    alpha = 0.6  # happened before
+                    alpha = 0.6 * max_alpha  # happened before
                 elif step >= min_not_yet:
-                    alpha = 0.3  # not yet applied
+                    alpha = 0.3 * max_alpha  # not yet applied
                 else:
-                    alpha = 1.0
+                    alpha = max_alpha
 
                 if target not in chosen_neurons:
                     continue
 
                 i = chosen_neurons.index(target)
 
-                pos = self.Agent.history["pos"][step]
-                if self.Agent.Environment.dimensionality == "1D":
+                pos = self.Agent.history["pos"][step - 1]
+                if self.Environment.dimensionality == "1D":
                     line_sep = (ymax - 1) / num_neurons
                     y_pos = 1 + line_sep * i + line_sep * 0.7
                     pos = pos + [y_pos]
@@ -4218,7 +4261,7 @@ class BTSPLayer(HebbianLayer):
             return
 
         ax1D = np.asarray(ax).ravel()
-        if timeseries or self.Agent.Environment.dimensionality == "1D":
+        if timeseries or self.Environment.dimensionality == "1D":
             if len(ax1D) != 1:
                 raise ValueError(
                     "Only one axis expected for timeseries or 1D rate map."
@@ -4249,15 +4292,15 @@ class BTSPLayer(HebbianLayer):
                     if in_steps:
                         x_pos = step
                     else:
-                        x_pos = t[step - startid]
+                        x_pos = t[step - startid - 1]
                         if in_min:
                             x_pos = x_pos / 60
                     line_sep = (ymax - 1) / num_neurons
                     y_pos = 1 + line_sep * i + line_sep * prop_y
                     pos = [x_pos, y_pos]
                 else:
-                    pos = self.Agent.history["pos"][step]
-                    if self.Agent.Environment.dimensionality == "1D":
+                    pos = self.Agent.history["pos"][step - 1]
+                    if self.Environment.dimensionality == "1D":
                         line_sep = (ymax - 1) / num_neurons
                         y_pos = 1 + line_sep * i + line_sep * prop_y
                         pos = pos + [y_pos]
@@ -4277,7 +4320,7 @@ class BTSPLayer(HebbianLayer):
     def plot_BTSP_ramp(
         self,
         sub_ax=None,
-        mark_BTSP=True,
+        plot_BTSP_events=True,
         neuron_idx=0,
         t_start=None,
         t_end=None,
@@ -4296,7 +4339,7 @@ class BTSPLayer(HebbianLayer):
         Args:
         - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
             created. Default is None.
-        - mark_BTSP (bool, optional): Whether to plot BTSP event markers.
+        - plot_BTSP_events (bool, optional): Whether to plot BTSP event markers.
             Default is True.
         - neuron_idx (int, optional): Index of the neuron to plot. Default is 0.
         - t_start (float, optional): Start time of the plot. Default is None.
@@ -4346,7 +4389,7 @@ class BTSPLayer(HebbianLayer):
         xlabel = "Time (min)" if in_min else "Time (s)"
         sub_ax.set_xlabel(xlabel)
 
-        if mark_BTSP:
+        if plot_BTSP_events:
             self.add_BTSP_markers_to_plots(
                 ax=sub_ax,
                 t_start=t_start,
@@ -4369,7 +4412,7 @@ class BTSPLayer(HebbianLayer):
     def plot_BTSP_ramp_factors(
         self,
         axes=None,
-        mark_BTSP=True,
+        plot_BTSP_events=True,
         neuron_idx=0,
         t_start=None,
         t_end=None,
@@ -4384,7 +4427,7 @@ class BTSPLayer(HebbianLayer):
         Args:
         - axes (1 or 2D np.ndarray): Array of subplots to plot on,
             with shape (2, 1) or (2, ). Default is None.
-        - mark_BTSP (bool, optional): Whether to plot BTSP event markers.
+        - plot_BTSP_events (bool, optional): Whether to plot BTSP event markers.
             Default is True.
         - neuron_idx (int, optional): Index of the neuron to plot. Default is 0.
         - t_start (float, optional): Start time of the plot. Default is None.
@@ -4420,7 +4463,7 @@ class BTSPLayer(HebbianLayer):
         ax1D = np.asarray(axes).ravel()
         self.plot_BTSP_ramp(
             ax1D[0],
-            mark_BTSP=mark_BTSP,
+            plot_BTSP_events=plot_BTSP_events,
             neuron_idx=neuron_idx,
             t_start=t_start,
             t_end=t_end,
@@ -4429,46 +4472,15 @@ class BTSPLayer(HebbianLayer):
         ax1D[0].set_xlabel("")
 
         ax1D[1].plot(t, firingrate, lw=1.2, color=self.color)
-        ax1D[1].axhline(self.BTSP_induction_threshold, ls="dashed", color=self.color)
+        if hasattr(self, "BTSP_induction_threshold"):
+            ax1D[1].axhline(
+                self.BTSP_induction_threshold, ls="dashed", color=self.color
+            )
 
         xlabel = "Time (min)" if in_min else "Time (s)"
         ax1D[1].set_xlabel(xlabel)
         ax1D[1].set_ylabel("Firing rates")
         ax1D[1].spines[["top", "right"]].set_visible(False)
-
-        i = 0
-        num_steps_for_plateau = int(np.ceil(self.BTSP_plateau_length / self.Agent.dt))
-        labels = ["BTSP event", "insufficient"]
-        while i < len(BTSP_ramp):
-            next_BTSP_possible = np.where(BTSP_ramp[i : i + num_steps_for_plateau] > 0)[
-                0
-            ]
-            if len(next_BTSP_possible):
-                next_BTSP_possible = next_BTSP_possible[0] + i
-                BTSP_slice = slice(
-                    next_BTSP_possible, next_BTSP_possible + num_steps_for_plateau + 1
-                )
-                i = next_BTSP_possible + num_steps_for_plateau + 1
-                if (BTSP_ramp[BTSP_slice] >= 1).any():
-                    alpha, l = 0.5, 0
-                    i += 1
-                else:
-                    alpha, l = 0.2, 1
-
-                start = max(0, next_BTSP_possible - 1)
-                end = min(len(t) - 1, next_BTSP_possible + num_steps_for_plateau)
-                ax1D[1].axvspan(
-                    t[start],
-                    t[end],
-                    alpha=alpha,
-                    lw=0,
-                    label=labels[l],
-                    color=self.color,
-                )
-
-                labels[l] = None
-            else:
-                i += num_steps_for_plateau
 
         if BTSP_ramp.max() < 0:
             ax1D[1].legend()
@@ -4486,7 +4498,7 @@ class BTSPLayer(HebbianLayer):
         chosen_neurons: (
             str | int | list[int] | np.ndarray[tuple[int], np.dtype[np.int64]]
         ) = "all",
-        mark_BTSP: bool = True,
+        plot_BTSP_events: bool = True,
         BTSP_s: int = 10,
         BTSP_lw: float = 1.0,
         ax: np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]] | None = None,
@@ -4505,7 +4517,7 @@ class BTSPLayer(HebbianLayer):
         - t_end (float, optional): End time. Default is None.
         - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
             Default is "all".
-        - mark_BTSP (bool, optional): Whether to include BTSP markers. Default is True.
+        - plot_BTSP_events (bool, optional): Whether to include BTSP markers. Default is True.
         - BTSP_s (int, optional): Size of the BTSP markers. Default is 10.
         - BTSP_lw (float, optional): Line width of the BTSP markers. Default is 1.0.
         - ax (np.ndarray or plt.Axes): Subplot or array of subplots. Single subplot
@@ -4533,7 +4545,7 @@ class BTSPLayer(HebbianLayer):
         if ax is None:
             ax = ax_out
 
-        if mark_BTSP:
+        if plot_BTSP_events:
             self.add_BTSP_markers_to_plots(
                 ax=ax,
                 t_start=t_start,
@@ -4559,7 +4571,7 @@ class BTSPLayer(HebbianLayer):
         ) = "all",
         xlim: tuple[float, float] | None = None,
         color: str | None = None,
-        mark_BTSP: bool = True,
+        plot_BTSP_events: bool = True,
         BTSP_s: int = 10,
         BTSP_lw: float = 1.0,
         BTSP_marker: str | tuple = "x",
@@ -4583,7 +4595,7 @@ class BTSPLayer(HebbianLayer):
             Default is "all".
         - xlim (tuple[float, float], optional): The x limits of the plot. Default is None.
         - color (str, optional): The color of the plot. Default is None.
-        - mark_BTSP (bool, optional): Whether to include BTSP markers. Default is True.
+        - plot_BTSP_events (bool, optional): Whether to include BTSP markers. Default is True.
         - BTSP_s (int, optional): Size of the BTSP markers. Default is 10.
         - BTSP_lw (float, optional): Line width of the BTSP markers. Default is 1.0.
         - BTSP_marker (str, optional): Marker style for the BTSP markers. Default is "x".
@@ -4610,7 +4622,7 @@ class BTSPLayer(HebbianLayer):
             **kwargs,
         )
 
-        if mark_BTSP:
+        if plot_BTSP_events:
             self.add_BTSP_markers_to_plots(
                 ax=sub_ax,
                 t_start=t_start,
@@ -4632,7 +4644,7 @@ class BTSPLayer(HebbianLayer):
 
         return sub_ax
 
-    def plot_normalization_values_over_time(
+    def plot_normalization_values(
         self,
         input_layer: str,
         t_start: float | None = None,
@@ -4640,16 +4652,18 @@ class BTSPLayer(HebbianLayer):
         chosen_neurons: int | str = "all",
         bias_norms: bool = False,
         skip_initial: bool = False,
+        by_neuron: bool = False,
         in_min: bool = True,
-        mark_BTSP: bool = True,
+        plot_BTSP_events: bool = True,
         lw: float = 1,
         autosave: bool | None = None,
         sub_ax: plt.Axes | None = None,
     ):
         """
-        self.plot_normalization_values_over_time()
+        self.plot_normalization_values()
 
-        Plot the normalization values for the weights of the layer over time.
+        Plot the normalization values for the weights of the layer over time or by
+        neuron.
 
         Args:
         - input_layer (str): Name of the input layer.
@@ -4661,8 +4675,10 @@ class BTSPLayer(HebbianLayer):
             Default is False.
         - skip_initial (bool, optional): Whether to skip the initial normalization
             values. Default is False.
+        - by_neuron (bool, optional): Whether to plot by neuron instead of over time.
+            Default is False.
         - in_min (bool, optional): Whether to plot the time in minutes. Default is True.
-        - mark_BTSP (bool, optional): Whether to mark the BTSP. Default is True.
+        - plot_BTSP_events (bool, optional): Whether to mark the BTSP. Default is True.
         - lw (float, optional): Line width of the plot. Default is 1.
         - autosave (bool, optional): Whether to save the figure. Default is None.
         - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
@@ -4672,12 +4688,13 @@ class BTSPLayer(HebbianLayer):
         - sub_ax (plt.Axes): Subplot with normalization values plotted.
         """
 
-        sub_ax = super().plot_normalization_values_over_time(
+        sub_ax = super().plot_normalization_values(
             input_layer=input_layer,
             t_start=t_start,
             t_end=t_end,
             chosen_neurons=chosen_neurons,
             bias_norms=bias_norms,
+            by_neuron=by_neuron,
             in_min=in_min,
             skip_initial=skip_initial,
             lw=lw,
@@ -4685,7 +4702,9 @@ class BTSPLayer(HebbianLayer):
             sub_ax=sub_ax,
         )
 
-        if mark_BTSP:
+        if plot_BTSP_events:
+            if by_neuron:
+                raise ValueError("Cannot mark BTSP events when plotting by neuron.")
             pre_ymin, pre_ymax = sub_ax.get_ylim()
             sub_ax.autoscale(axis="y")
             plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.5, prop_high=1.0)
@@ -4704,8 +4723,9 @@ class BTSPLayer(HebbianLayer):
             ymin, ymax = sub_ax.get_ylim()
             sub_ax.set_ylim(min(pre_ymin, ymin), max(pre_ymax, ymax))
 
+        name_str = "by_neuron" if by_neuron else "over_time"
         fig = sub_ax.figure
-        plot_util.save_figure(fig, f"{self.name}_norm_over_time", save=autosave)  # type: ignore[attr-defined]
+        plot_util.save_figure(fig, f"{self.name}_norm_{name_str}", save=autosave)  # type: ignore[attr-defined]
 
         return sub_ax
 
@@ -4785,10 +4805,11 @@ class NMDACurrent(object):
         self.name = name
         self.InputLayer = InputLayer
         self.Agent = self.InputLayer.Agent
+        self.Environment = self.Agent.Environment
         self.n = self.InputLayer.n
         self.firingrate = np.zeros(self.InputLayer.n)  # type: ignore[attr-defined]
 
-        if not isinstance(self.InputLayer, NMDALayer):
+        if not gen_util.attribute_type_checker(self.InputLayer, "NMDALayer"):
             raise TypeError(
                 f"InputLayer must be of type NMDALayer, not {type(self.InputLayer)}"
             )
@@ -4996,7 +5017,7 @@ class NMDACurrent(object):
             )  # avoid saturation when evaluating rate maps
 
             if evaluate_at == "all":
-                pos_dim = self.Agent.Environment.flattened_discrete_coords.shape[0]
+                pos_dim = self.Environment.flattened_discrete_coords.shape[0]
             else:
                 pos_dim = kwargs["pos"].shape[0]
 
@@ -5192,7 +5213,7 @@ class NMDACurrent(object):
 
         fig = ax1D[0].figure
 
-        y = 0.9 if self.Agent.Environment.dimensionality == 1 else 0.97
+        y = 0.9 if self.Environment.dimensionality == 1 else 0.97
         fig.suptitle(title, y=y)
 
         plot_util.save_figure(fig, f"{self.name}_NMDA_current_traces", save=autosave)  # type: ignore[attr-defined]
@@ -5358,7 +5379,7 @@ class NMDALayer(BTSPLayer):
         if evaluate_at == "last":
             V = np.zeros(n)
         elif evaluate_at == "all":
-            V = np.zeros((n, self.Agent.Environment.flattened_discrete_coords.shape[0]))
+            V = np.zeros((n, self.Environment.flattened_discrete_coords.shape[0]))
         else:
             V = np.zeros((n, kwargs["pos"].shape[0]))
 
@@ -5460,15 +5481,54 @@ class NMDALayer(BTSPLayer):
             **kwargs,
         )
 
-        t, startid, endid = self.get_plotting_times(t_start, t_end)
+        ax1D = np.asarray(axes).ravel()
+
+        t, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
+        if in_min:
+            t = t / 60
+
+        BTSP_ramp = np.asarray(self.history["BTSP_ramp"])[
+            startid : endid + 1, neuron_idx
+        ]
+
+        i = 0
+        num_steps_for_plateau = int(np.ceil(self.BTSP_plateau_length / self.Agent.dt))
+        labels = ["BTSP event", "insufficient"]
+        while i < len(BTSP_ramp):
+            next_BTSP_possible = np.where(BTSP_ramp[i : i + num_steps_for_plateau] > 0)[
+                0
+            ]
+            if len(next_BTSP_possible):
+                next_BTSP_possible = next_BTSP_possible[0] + i
+                BTSP_slice = slice(
+                    next_BTSP_possible, next_BTSP_possible + num_steps_for_plateau + 1
+                )
+                i = next_BTSP_possible + num_steps_for_plateau + 1
+                if (BTSP_ramp[BTSP_slice] >= 1).any():
+                    alpha, l = 0.5, 0
+                    i += 1
+                else:
+                    alpha, l = 0.2, 1
+
+                start = max(0, next_BTSP_possible - 1)
+                end = min(len(t) - 1, next_BTSP_possible + num_steps_for_plateau)
+                ax1D[1].axvspan(
+                    t[start],
+                    t[end],
+                    alpha=alpha,
+                    lw=0,
+                    label=labels[l],
+                    color=self.color,
+                )
+
+                labels[l] = None
+            else:
+                i += num_steps_for_plateau
+
         current = np.asarray(self.inputs["NMDACurrent"]["layer"].history["current"])[
             startid : endid + 1, neuron_idx
         ]
 
-        if in_min:
-            t = t / 60
-
-        ax1D = np.asarray(axes).ravel()
         ax1D[2].plot(
             t,
             current,
@@ -5486,3 +5546,79 @@ class NMDALayer(BTSPLayer):
         plot_util.save_figure(fig, f"{self.name}_BTSP_ramp", save=autosave)  # type: ignore[attr-defined]
 
         return axes
+
+    def plot_BTSP_responses(
+        self,
+        pre=1,
+        post=2,
+        shift=0,
+        align_to_plateau_onset=False,
+        mark_plateau_criteria=True,
+        autosave=None,
+        **kwargs,
+    ):
+        """
+        self.plot_BTSP_responses()
+
+        Plot the BTSP responses of the layer.
+
+        Args:
+        - pre (float, optional): Time before alignment point to plot. Default is 1.
+        - post (float, optional): Time after alignment point event to plot. Default is 2.
+        - shift (float, optional): Shift of alignment point from time of BTSP event.
+            Default is 0.
+        - align_to_plateau_onset (bool, optional): Whether to align the plot to the
+            plateau onset. If True, overrides shift. Default is False.
+        - mark_plateau_criteria (bool, optional): Whether to mark the plateau criteria
+            on the plot. Default is True.
+        - autosave (bool, optional): Whether to autosave the figure. Default is None.
+
+        Keyword args:
+        - **kwargs: Keyword arguments passed to BTSPLayer.plot_BTSP_responses().
+
+        Returns:
+        - ax (plt.Axes or 2D np.ndarray): Subplot with BTSP responses plotted.
+        """
+
+        if align_to_plateau_onset:
+            shift = -self.BTSP_plateau_length
+
+        ax = super().plot_BTSP_responses(
+            pre=pre,
+            post=post,
+            shift=shift,
+            autosave=False,
+            **kwargs,
+        )
+
+        if mark_plateau_criteria:
+            BTSP_range = np.asarray([-self.BTSP_plateau_length, 0]) - shift
+            if BTSP_range.min() < -pre or BTSP_range.max() > post:
+                raise NotImplementedError(
+                    "Cannot mark plateau length if it will extend outside of pre or "
+                    "post time."
+                )
+
+            for sub_ax in np.asarray(ax).ravel():
+                sub_ax.axhline(
+                    self.BTSP_induction_threshold,
+                    color="k",
+                    ls="dashed",
+                    lw=1.5,
+                    zorder=-5,
+                )
+
+                plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.05, prop_high=1.0)
+                sub_ax.axvspan(
+                    *BTSP_range,
+                    color=self.color or "k",
+                    alpha=0.5,
+                    lw=0,
+                    ymin=0.93,
+                    zorder=-6,
+                )
+
+        fig = np.asarray(ax).ravel()[0].figure
+        plot_util.save_figure(fig, f"{self.name}_BTSP_responses", save=autosave)  # type: ignore[attr-defined]
+
+        return ax

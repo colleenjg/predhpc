@@ -869,7 +869,7 @@ def plot_property_at_BTSP_and_closest_to_target_steps(
             if scale_size:
                 plot_kwargs["s"] = base_s * factors[np.where(all_steps == step)[0][0]]
 
-            sub_ax.scatter(x_data[step], y_data[step], **plot_kwargs)
+            sub_ax.scatter(x_data[step - 1], y_data[step - 1], **plot_kwargs)
 
         if not no_legend and len(steps):
             label = key.replace("_", " ").replace("steps ", "")
@@ -883,8 +883,8 @@ def plot_property_at_BTSP_and_closest_to_target_steps(
         steps_dict["steps_near_BTSP"], steps_dict["steps_of_nearest_BTSP"]
     ):
         sub_ax.plot(
-            [x_data[step] for step in steps],
-            [y_data[step] for step in steps],
+            [x_data[step - 1] for step in steps],
+            [y_data[step - 1] for step in steps],
             **line_kwargs,
         )
 
@@ -1752,7 +1752,7 @@ def plot_1D_BTSP_stats(
     _, BTSP_ramp_ax1D = plt.subplots(3, 1, figsize=(7, 6))
     _, PCs_sub_ax = plt.subplots(figsize=(7, 2))
 
-    if hasattr(Pyrs, "ApicalCompartment"):
+    if gen_util.attribute_type_checker(Pyrs, "TwoCompLayer"):
         Pyrs.SomaticCompartment.plot_BTSP_ramp_factors(
             axes=BTSP_ramp_ax1D, in_min=in_min
         )
@@ -2151,7 +2151,7 @@ def plot_1D_time_info(
     height_ratios: list[float] | None = None,
     lw: float = 1,
     s: float = 0.02,
-    base_s: float = 10,
+    base_obj_s: float = 10,
     figsize: tuple[float, float] | None = None,
     autosave: bool | None = None,
     **gridspec_kw,
@@ -2175,7 +2175,7 @@ def plot_1D_time_info(
     - lw (float, optional): Line width for the plots. Default is 1.
     - s (float, optional): Size of agent trajectory scatterplot markers. If None,
         defaults are used. Default is None.
-    - base_s (float, optional): Base size of scatterplot markers for objects in
+    - base_obj_s (float, optional): Base size of scatterplot markers for objects in
         environment. If None, defaults are used. Default is None.
     - figsize (tuple[float, float], optional): Figure size. If None, default size is
         used. Default is None.
@@ -2201,7 +2201,7 @@ def plot_1D_time_info(
     num_Pyr_ax = 1
     mark_all = True
     ax_key = "sub_ax"
-    if hasattr(Pyrs, "ApicalCompartment"):
+    if gen_util.attribute_type_checker(Pyrs, "TwoCompLayer"):
         ax_key = "ax"
         if "separate_axes" in Pyr_kwargs.keys() and Pyr_kwargs["separate_axes"]:
             plot_lateral = "plot_lateral" in Pyr_kwargs and Pyr_kwargs["plot_lateral"]
@@ -2230,7 +2230,7 @@ def plot_1D_time_info(
     Ag.plot_trajectories_across_time(
         framerate=1 / Ag.dt,
         s=s,
-        base_s=base_s,
+        base_obj_s=base_obj_s,
         obj_lw=lw,
         sub_ax=ax1D[0],
         autosave=False,
@@ -2262,7 +2262,7 @@ def plot_1D_time_info(
         norm_by=PCs.n / DIV_MULTI_NEURON,
         overlap=1,
         global_shift=-1,
-        shade_kwargs={"rasterized": True},  # svg too big, othersize
+        shade_kwargs={"rasterized": True},  # svg too big, otherwise
     )
     plot_util.pad_axis(ax1D[i], pad_prop=0.1, axis="y")
     ax1D[i].set_title("Place cell rate timeseries")
@@ -2364,6 +2364,7 @@ def plot_2D_PFs(
     plot_colorbar: bool = True,
     single_colorbar: bool = False,
     cbar_side: str = "right",
+    cbar_size: str | float = "5%",
     cbar_outline: bool = False,
     num_cols: int = 10,
     plot_BTSP_events: bool = False,
@@ -2421,6 +2422,7 @@ def plot_2D_PFs(
     - single_colorbar (bool, optional): Whether to use a single colorbar. Default is
         False.
     - cbar_side (str, optional): Side of the colorbar. Default is "right".
+    - cbar_size (str or float, optional): Size of the colorbar. Default is "5%".
     - cbar_outline (bool, optional): Whether to draw an outline around the colorbar.
         Default is False.
     - num_cols (int, optional): Number of columns for subplot array. Default is 10.
@@ -2511,7 +2513,7 @@ def plot_2D_PFs(
             f"place fields ({len(PFs)})."
         )
 
-    is_tmaze = hasattr(target_neurons.Agent.Environment, "T_ends")
+    is_tmaze = gen_util.attribute_type_checker(target_neurons.Environment, "TEnv")
     obj_s_kwarg = dict()
     if obj_s is not None:
         key = "base_s" if is_tmaze else "s"
@@ -2523,7 +2525,7 @@ def plot_2D_PFs(
         PFs = imshow_PFs
 
     for i in range(len(PFs)):
-        target_neurons.Agent.Environment.plot_environment(
+        target_neurons.Environment.plot_environment(
             sub_ax=ax1D[i], alpha=0.8, autosave=False, **kwargs, **obj_s_kwarg
         )
 
@@ -2544,7 +2546,7 @@ def plot_2D_PFs(
             ax1D[i].imshow(
                 PFs[i],
                 origin="lower",
-                extent=target_neurons.Agent.Environment.extent,
+                extent=target_neurons.Environment.extent,
                 vmin=vmin,
                 vmax=vmax,
                 cmap=cmap,
@@ -2589,6 +2591,7 @@ def plot_2D_PFs(
             label=clabel,
             end_only=single_colorbar,
             side=cbar_side,
+            size=cbar_size,
             outline=cbar_outline,
         )
 
@@ -2785,7 +2788,7 @@ def plot_place_cell_inputs_over_time(
 
     steps_dist = int(np.around(len(data) / target_num_samples))
     steps = np.arange(0, len(data), steps_dist)
-    data = data[steps]
+    data = data[steps - 1]
     num_steps = len(steps)
 
     num_cols = np.min([num_cols, num_steps])
@@ -2888,26 +2891,24 @@ def plot_overlayed_rate_maps(
     N_neurons = len(chosen_neurons)
 
     if sub_ax is None:
-        if NeuronLayer.Agent.Environment.dimensionality == "1D":
+        if NeuronLayer.Environment.dimensionality == "1D":
             _, sub_ax = plt.subplots(
                 figsize=(
                     MOUNTAIN_PLOT_WIDTH_MM / 25,
                     N_neurons * MOUNTAIN_PLOT_SHIFT_MM / 25,
                 )
             )
-        sub_ax = NeuronLayer.Agent.Environment.plot_environment(
-            alpha=0.6, autosave=False
-        )
+        sub_ax = NeuronLayer.Environment.plot_environment(alpha=0.6, autosave=False)
     elif plot_env:
-        sub_ax = NeuronLayer.Agent.Environment.plot_environment(
+        sub_ax = NeuronLayer.Environment.plot_environment(
             sub_ax=sub_ax, alpha=0.6, autosave=False
         )
 
     if sub_ax is None:
         raise RuntimeError("sub_ax is None.")
 
-    if NeuronLayer.Agent.Environment.dimensionality == "2D":
-        reshape = NeuronLayer.Agent.Environment.discrete_coords.shape[:2]
+    if NeuronLayer.Environment.dimensionality == "2D":
+        reshape = NeuronLayer.Environment.discrete_coords.shape[:2]
     else:
         reshape = [-1]
 
@@ -2927,16 +2928,16 @@ def plot_overlayed_rate_maps(
         raise ValueError(f"method {method} not recognized.")
 
     # PLOT 2D
-    if NeuronLayer.Agent.Environment.dimensionality == "2D":
-        ex = NeuronLayer.Agent.Environment.extent
+    if NeuronLayer.Environment.dimensionality == "2D":
+        ex = NeuronLayer.Environment.extent
         im = sub_ax.imshow(rate_map, extent=ex, zorder=0, cmap="inferno", aspect=1)
 
         if colorbar == True:
             plot_util.add_colorbars(axes=sub_ax, im=im, label="")
 
     # PLOT 1D
-    elif NeuronLayer.Agent.Environment.dimensionality == "1D":
-        x = NeuronLayer.Agent.Environment.flattened_discrete_coords[:, 0]
+    elif NeuronLayer.Environment.dimensionality == "1D":
+        x = NeuronLayer.Environment.flattened_discrete_coords[:, 0]
         _, sub_ax = rutils.mountain_plot(
             X=x,
             NbyX=rate_map.reshape(1, -1),
@@ -3066,7 +3067,7 @@ def plot_interleaved_openfield_rate_maps(
         squeeze=False,
     )
 
-    is_tmaze = hasattr(Pyrs.Agent.Environment, "T_ends")
+    is_tmaze = gen_util.attribute_type_checker(Objs.Environment, "TEnv")
     obj_s_kwarg = dict()
     no_legend = False if is_tmaze else True
     if obj_s is not None:
@@ -3131,7 +3132,7 @@ def compare_theoretical_and_true_weights(
         raise RuntimeError(f"{PCs_name} not found in inputs to Pyrs.")
     PCs = Pyrs.inputs[PCs_name]["layer"]
 
-    y = 1.7 if Pyrs.Agent.Environment.dimensionality == "1D" else 1.3
+    y = 1.7 if Pyrs.Environment.dimensionality == "1D" else 1.3
 
     theor_axes = list()
     for normalize_weights_divisively in [True, False]:
@@ -3149,7 +3150,7 @@ def compare_theoretical_and_true_weights(
 
     norm_theor_axes, no_norm_theor_axes = theor_axes
 
-    if Pyrs.Agent.Environment.dimensionality == "1D":
+    if Pyrs.Environment.dimensionality == "1D":
         true_ws = Pyrs.inputs[PCs_name]["w"]
         act_sub_ax = plot_1D_PFs(true_ws, PCs)
 
@@ -3158,13 +3159,13 @@ def compare_theoretical_and_true_weights(
         if target_position is None:
             target_position = Pyrs.Agent.target_position[0]
         if target_position is not None:
-            rel_pos = target_position / Pyrs.Agent.Environment.scale
+            rel_pos = target_position / Pyrs.Environment.scale
             peak_pt_diff = int(np.argmax(theor_ws) - len(theor_ws) * rel_pos)
         else:
             peak_pt_diff = np.argmax(theor_ws) - np.argmax(true_ws)
         rolled_theor_ws = np.roll(theor_ws, -peak_pt_diff)
 
-        x = np.linspace(0, Pyrs.Agent.Environment.scale, len(theor_ws) + 1)[:-1]
+        x = np.linspace(0, Pyrs.Environment.scale, len(theor_ws) + 1)[:-1]
         act_sub_ax.plot(x, rolled_theor_ws, color="k", alpha=0.7, label="theoret.")
         act_sub_ax.set_title("Actual weights vs theoretical weights")
         act_sub_ax.legend()
@@ -3172,10 +3173,10 @@ def compare_theoretical_and_true_weights(
         plot_util.pad_axis(act_sub_ax, axis="y", prop_high=1.0)
 
     else:
-        dim = Pyrs.Agent.Environment.scale / 4 * 3
+        dim = Pyrs.Environment.scale / 4 * 3
         _, act_sub_ax = plt.subplots(figsize=(dim, dim))
 
-        is_not_tmaze = not hasattr(Pyrs.Agent.Environment, "T_ends")
+        is_not_tmaze = not gen_util.attribute_type_checker(Pyrs.Environment, "TEnv")
         plot_2D_PFs(
             Pyrs,
             ax=act_sub_ax,

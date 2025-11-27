@@ -340,7 +340,7 @@ class RegressionLayer(learning_neurons.LearnLayer):
             elif self.last_fit_step == self.num_steps_total:
                 raise ValueError("Layer has not been updated since last fit step.")
 
-            kwargs["t_start"] = self.history["t"][self.last_fit_step]
+            kwargs["t_start"] = self.history["t"][self.last_fit_step - 1]
             fit_str = " (fitted)"
 
         sub_ax = super().plot_histogram(autosave=False, **kwargs)

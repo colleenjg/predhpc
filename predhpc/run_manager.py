@@ -18,19 +18,19 @@ from predhpc.neurons import (
 from predhpc.util import ext_util, gen_util, plot_util, params_util
 
 
-class AdjustMaxTraj:
+class AdjustNumTrajCanStop:
     def __init__(self, learner, complete_trajectory=True):
         self.learner = learner
         self.complete_trajectory = complete_trajectory
-        self.original_max_num_traj = learner.max_num_traj
+        self.original_num_traj_can_stop = learner.num_traj_can_stop
 
     def __enter__(self):
-        if self.original_max_num_traj is not None:
-            self.learner.max_num_traj = self.original_max_num_traj - 1
+        if self.original_num_traj_can_stop is not None:
+            self.learner.num_traj_can_stop = self.original_num_traj_can_stop - 1
 
     def __exit__(self, exc_type, exc_value, traceback):
-        if self.original_max_num_traj is not None:
-            self.learner.max_num_traj = self.original_max_num_traj
+        if self.original_num_traj_can_stop is not None:
+            self.learner.num_traj_can_stop = self.original_num_traj_can_stop
 
 
 class VNUpdater:
@@ -70,6 +70,7 @@ class VNUpdater:
         """
 
         self.Agent = Agent
+        self.Environment = Agent.Environment
 
         self.set_target(target=target)
 
@@ -90,7 +91,7 @@ class VNUpdater:
         """
 
         if isinstance(target, str):
-            target_positions = self.Agent.Environment.get_object_locations(target)
+            target_positions = self.Environment.get_object_locations(target)
             if len(target_positions) != 1:
                 raise ValueError(
                     "VNUpdater expects exactly one target object in the environment, "
@@ -286,8 +287,8 @@ class Learner:
         record_weights_at_BTSP=True,
         use_Hebbian=False,
         weight_recording_freq=100,
-        max_num_target_reaches=None,
-        max_num_traj=None,
+        num_target_reaches_can_stop=None,
+        num_traj_can_stop=None,
     ):
         """
         Learner()
@@ -309,10 +310,10 @@ class Learner:
             False.
         - weight_recording_freq (int, optional): Frequency at which to record weights
             if Hebbian learning is active. Default is 100.
-        - max_num_target_reaches (int, optional): Maximum number of target reaches.
-            Default is None.
-        - max_num_traj (int, optional): Maximum number of trajectories to complete.
-            Default is None.
+        - num_target_reaches_can_stop (int, optional): Number of target reaches from
+            which check_early_stop() may return True. Default is None.
+        - num_traj_can_stop (int, optional): Number of trajectories after which
+            check_early_stop() may return True. Default is None.
         """
 
         self.Pyrs = Pyrs
@@ -324,8 +325,8 @@ class Learner:
         self.use_Hebbian = use_Hebbian
         self.weight_recording_freq = weight_recording_freq
 
-        self.max_num_target_reaches = max_num_target_reaches
-        self.max_num_traj = max_num_traj
+        self.num_target_reaches_can_stop = num_target_reaches_can_stop
+        self.num_traj_can_stop = num_traj_can_stop
 
         self.set_init_attributes(BTSP_on=BTSP_on, reverse_linear=reverse_linear)
 
@@ -339,7 +340,7 @@ class Learner:
         - agent_step (int): Current step of the agent.
         """
 
-        agent_step = len(self.Agent.history["t"])
+        agent_step = self.Agent.num_steps_total
 
         return agent_step
 
@@ -356,8 +357,8 @@ class Learner:
             Agent diretion at each end. Default is False.
         """
 
-        self.Env, self.Agent, self.PCs, self.Objs = ext_util.extract_objects_from_Pyrs(
-            self.Pyrs
+        self.Environment, self.Agent, self.PCs, self.Objs = (
+            ext_util.extract_objects_from_Pyrs(self.Pyrs)
         )
 
         # Agent info
@@ -367,10 +368,14 @@ class Learner:
         self.num_prev_target_reaches = len(self.Agent.get_reached_target_df())
         self.traj_restarted = False
         self.early_stop_in_n = -1
+        if hasattr(self.Agent, "teleportation_df"):
+            self.initial_num_teleports = len(self.Agent.teleportation_df)
 
         # Pyrs info
-        self.two_compartment = isinstance(self.Pyrs, two_comp_neurons.TwoCompLayer)
-        self.one_comp_internal = isinstance(self.Pyrs, learning_neurons.NMDALayer)
+        self.two_compartment = gen_util.attribute_type_checker(
+            self.Pyrs, "TwoCompLayer"
+        )
+        self.one_comp_internal = gen_util.attribute_type_checker(self.Pyrs, "NMDALayer")
 
         # BTSP settings
         if self.two_compartment:
@@ -404,7 +409,7 @@ class Learner:
 
         # reversal
         self.reverse_linear = reverse_linear
-        if self.Env.D == 1:
+        if self.Environment.D == 1:
             self.positions = [self.Agent.start_position, self.Agent.reset_position]
             self.check_pt = 1
         elif reverse_linear:
@@ -495,10 +500,13 @@ class Learner:
         Returns:
         - BTSP_targets (list or None): List of target indices for BTSP learning or None.
         """
+
         # check for BTSP on previous update
         num_BTSP = len(self.Pyrs_for_weights.history["BTSP_events"])
         if num_BTSP > len(self.steps_BTSP_triggered) + self.num_BTSP_prev:
-            self.steps_BTSP_triggered.append(self.get_agent_step() - 1)
+            self.steps_BTSP_triggered.append(
+                self.get_agent_step() - 1
+            )  # updated after additional step has been taken
             self.BTSP_neurons.append(self.Pyrs_for_weights.history["BTSP_targets"][-1])
 
         # check for BTSP on current update
@@ -535,6 +543,22 @@ class Learner:
             self.weight_steps.append(step)
             self.steps_triggered.append(step_triggered)
 
+    def remap_PC_weights(self, randst=None, no_logs=False):
+        """
+        self.remap_PC_weights()
+
+        Shuffle place cell weights into somatic compartment of pyramidal neurons.
+        """
+
+        self.PCs.shuffle_place_cell_locations(randst=randst)
+        if not no_logs:
+            print("\nPlace cells shuffled for remapping.")
+
+        if not hasattr(self, "remap_steps"):
+            self.remap_steps = list()
+
+        self.remap_steps.append(self.step)
+
     def check_reverse(self, final=False):
         """
         self.check_reverse()
@@ -549,7 +573,7 @@ class Learner:
         if not self.reverse_linear:
             return
 
-        if self.Env.D != 1:
+        if self.Environment.D != 1:
             raise ValueError("Reversing only applies to 1D environment.")
 
         if final and self.check_pt == 0:
@@ -574,16 +598,19 @@ class Learner:
         """
 
         if self.early_stop_in_n < 0:
-            if self.max_num_target_reaches is not None:
-                max_num_target_reaches = (
+            if self.num_target_reaches_can_stop is not None:
+                num_target_reaches_can_stop = (
                     len(self.Agent.get_reached_target_df())
                     - self.num_prev_target_reaches
                 )
-                if max_num_target_reaches >= self.max_num_target_reaches:
+                if num_target_reaches_can_stop >= self.num_target_reaches_can_stop:
                     self.early_stop_in_n = 20
-            elif self.max_num_traj is not None:
+            elif self.num_traj_can_stop is not None:
                 total_traj_compl = self.Agent.get_num_completed_trajectories()
-                if total_traj_compl - self.num_prev_traj_compl >= self.max_num_traj:
+                if (
+                    total_traj_compl - self.num_prev_traj_compl
+                    >= self.num_traj_can_stop
+                ):
                     self.early_stop_in_n = 20
         else:
             if self.early_stop_in_n == 0:
@@ -624,14 +651,14 @@ class Learner:
             len(self.Agent.get_reached_target_df()) - self.num_prev_target_reaches
         )
         if (
-            self.max_num_target_reaches is None
-            or act_target_reaches >= self.max_num_target_reaches
+            self.num_target_reaches_can_stop is None
+            or act_target_reaches >= self.num_target_reaches_can_stop
         ):
             print(f"Reached target {act_target_reaches} times.")
         else:
             print(
                 f"Only reached target {act_target_reaches} times "
-                f"(target: {self.max_num_target_reaches})."
+                f"(target: {self.num_target_reaches_can_stop})."
             )
 
         self.Agent.log_trajectory_stats()
@@ -735,6 +762,342 @@ class Learner:
 
         if self.early_stop_in_n != -1:
             self.early_stop_in_n = -1  # reset early stop counter
+
+        return
+
+    def get_num_steps_since_last_BTSP_applied(self):
+        """
+        self.get_num_steps_since_last_BTSP_applied()
+
+        Get number of steps since the last BTSP event was applied.
+
+        Returns:
+        - num_steps (int or None): Number of steps since the last BTSP event was
+            applied. None if no BTSP events were applied. np.nan if the latest BTSP
+            event has not yet been applied.
+        """
+
+        BTSP_steps, applied = self.Pyrs_for_weights.get_BTSP_steps(applied_also=True)
+
+        num_steps = None
+        if len(BTSP_steps):
+            if np.isfinite(applied).all():
+                num_steps = self.Agent.num_steps_total - applied.max()
+            else:
+                num_steps = np.nan
+
+        return num_steps
+
+    def get_check_num_steps_since_last_BTSP_applied(self, min_steps=2000):
+        """
+        self.get_check_num_steps_since_last_BTSP_applied()
+
+        Continue learning until a minimum number of steps have passed since the last
+        BTSP event was applied.
+
+        Args:
+        - min_steps (int, optional): Minimum number of steps to continue learning after
+            the last BTSP event was applied. Default is 2000.
+
+        Returns:
+        - check_in (int): Number of steps to wait before checking whether minimum
+            number of steps after BTSP needs to be checked again.
+        """
+
+        num_steps_since = self.get_num_steps_since_last_BTSP_applied()
+        if num_steps_since is not None:
+            if np.isnan(num_steps_since):
+                check_in = min_steps
+            else:
+                check_in = min_steps - num_steps_since
+        else:
+            check_in = 0
+
+        check_in = max(0, check_in)
+
+        return check_in
+
+    def get_num_teleports_missing(self, min_num_teleports=0):
+        """
+        self.get_num_teleports_missing()
+
+        Get number of teleportation events missing to reach minimum.
+
+        Args:
+        - min_num_teleports (int, optional): Minimum number of teleportation events to
+            occur. Default is 0.
+
+        Returns:
+        - num_teleports_missing (int): Number of teleportation events missing to reach
+            minimum.
+        """
+
+        if min_num_teleports == 0:
+            return 0
+
+        if not hasattr(self.Agent, "teleportation_df"):
+            raise ValueError(
+                "Agent does not have teleportation tracking. Cannot continue to "
+                "minimum number of teleports."
+            )
+
+        num_teleports = len(self.Agent.teleportation_df) - self.initial_num_teleports
+        num_teleports_missing = max(0, min_num_teleports - num_teleports)
+
+        return num_teleports_missing
+
+    def get_num_steps_to_check_criteria_in(
+        self,
+        min_steps_after_BTSP=2000,
+        min_num_teleports=0,
+        check_teleport_every=1000,
+    ):
+        """
+        self.get_num_steps_to_check_criteria_in()
+
+        Get number of steps to check criteria in.
+
+        Args:
+        - min_steps_after_BTSP (int, optional): Minimum number of steps to continue
+            learning after the last BTSP event was applied. Default is 2000.
+        - min_num_teleports (int, optional): Minimum number of teleportation events to
+            occur. Default is 0.
+        - check_teleport_every (int, optional): Number of steps between checks for
+            whether the minimum number of teleportation events has occurred. Default is
+            1000.
+
+        Returns:
+        - check_in (int): Number of steps to wait before checking whether criteria
+            have been reached.
+        """
+
+        check_in = list()
+        if min_steps_after_BTSP > 0:
+            BTSP_check_in = self.get_check_num_steps_since_last_BTSP_applied(
+                min_steps_after_BTSP
+            )
+            if BTSP_check_in > 0:
+                check_in.append(BTSP_check_in)
+
+        num_teleports_missing = self.get_num_teleports_missing(min_num_teleports)
+        if num_teleports_missing > 0:
+            check_in.append(check_teleport_every)
+
+        if len(check_in):
+            check_in = min(check_in)
+        else:
+            check_in = 0
+
+        return check_in
+
+    def continue_to_meet_criteria(
+        self,
+        min_steps_after_BTSP=2000,
+        min_num_teleports=0,
+        check_teleport_every=1000,
+        updater=dict(),
+        no_logs=False,
+        max_num_steps=20000,
+        raise_error=True,
+    ):
+        """
+        self.continue_to_meet_criteria()
+
+        Continue learning until BTSP and teleportation criteria are met.
+
+        Args:
+        - min_steps_after_BTSP (int, optional): Minimum number of steps to continue
+            learning after the last BTSP event was applied. Default is 2000.
+        - min_num_teleports (int, optional): Minimum number of teleportation events to
+            occur. Default is 0.
+        - check_teleport_every (int, optional): Number of steps between checks for
+            whether the minimum number of teleportation events has occurred. Default is
+            1000.
+        - updater (object or dict, optional): Object or dictionary for updating
+            agent position. Default is dict().
+        - no_logs (bool, optional): Whether to disable logging. Default is False.
+        - max_num_steps (int, optional): Maximum number of steps to continue learning
+            in order to meet the criteria. Default is 20000.
+        - raise_error (bool, optional): Whether to raise an error if max_num_steps are
+            reached. Default is True.
+        """
+
+        criteria_strs = list()
+
+        check_in = self.get_num_steps_to_check_criteria_in(
+            min_steps_after_BTSP=min_steps_after_BTSP,
+            min_num_teleports=min_num_teleports,
+            check_teleport_every=check_teleport_every,
+        )
+
+        if check_in:
+            if not no_logs:
+                if min_steps_after_BTSP > 0:
+                    criteria_strs.append(
+                        f"{min_steps_after_BTSP} steps since last BTSP event was applied"
+                    )
+                if min_num_teleports > 0:
+                    criteria_strs.append(
+                        f"at least {min_num_teleports} teleportation events occurred"
+                    )
+                print(
+                    f"Continuing learning for up to {max_num_steps} steps until "
+                    f"{' and '.join(criteria_strs)}."
+                )
+
+            for _ in tqdm(range(max_num_steps), disable=no_logs):
+                if check_in <= 0:
+                    check_in = self.get_num_steps_to_check_criteria_in(
+                        min_steps_after_BTSP=min_steps_after_BTSP,
+                        min_num_teleports=min_num_teleports,
+                        check_teleport_every=check_teleport_every,
+                    )
+
+                    if check_in <= 0:
+                        break
+
+                else:
+                    check_in -= 1
+
+                self.update(updater=updater, no_logs=no_logs)
+
+            if check_in > 0 and raise_error:
+                check_in_strs = list()
+                BTSP_check_in = self.get_check_num_steps_since_last_BTSP_applied(
+                    min_steps=min_steps_after_BTSP
+                )
+                if BTSP_check_in > 0:
+                    num_steps_since = self.get_num_steps_since_last_BTSP_applied()
+                    if num_steps_since is not None and np.isfinite(num_steps_since):
+                        num_steps_str = (
+                            f"only {num_steps_since}/{min_steps_after_BTSP} have been"
+                        )
+                    else:
+                        num_steps_str = f"{min_steps_after_BTSP} steps have not been"
+                    check_in_strs.append(
+                        f"{num_steps_str} reached since last BTSP event was applied"
+                    )
+
+                teleport_missing = self.get_num_teleports_missing(min_num_teleports)
+                if teleport_missing > 0:
+                    check_in_strs.append(
+                        f"only {teleport_missing}/{min_num_teleports} teleportation "
+                        "events occurred"
+                    )
+
+                raise RuntimeError(
+                    f"Maximum of {max_num_steps} steps reached, but "
+                    f"{' and '.join(check_in_strs)}."
+                )
+
+    def complete_trajectory(self, updater=dict(), no_logs=False):
+        """
+        self.complete_trajectory()
+
+        Complete the current trajectory.
+
+        Args:
+        - updater (object or dict, optional): Object or dictionary for updating
+            agent position. Default is dict().
+        - no_logs (bool, optional): Whether to disable logging. Default is False.
+        """
+
+        if self.Agent.reached_end:
+            return
+
+        if not no_logs:
+            print("Completing last trajectory.")
+
+        def generator():
+            while True:
+                yield
+
+        break_next = False
+        for _ in tqdm(generator(), disable=no_logs):
+            self.update(updater=updater, no_logs=no_logs)
+            if break_next:
+                break
+            if self.Agent.reached_end:
+                break_next = True
+
+    def run(
+        self,
+        updater=dict(),
+        num_steps_can_stop=10000,
+        min_steps_after_BTSP=0,
+        min_num_teleports=0,
+        check_teleport_every=1000,
+        complete_trajectory=False,
+        no_logs=False,
+    ):
+        """
+        self.run()
+
+        Run a learning experiment.
+
+        Args:
+        - updater (object or dict, optional): Object or dictionary for updating
+            agent position. Default is dict().
+        - num_steps_can_stop (int or None, optional): Number of steps after which
+            early stopping can occur. Will override the learner object's other stopping
+            conditions (number of target reaches or trajectories). Pass None to avoid
+            constraining these by number of steps, and early stopping will only be
+            triggered when one (either) of those conditions is reached, if provided.
+            Default is 10000.
+        - min_steps_after_BTSP (int, optional): Minimum number of steps to continue
+            learning after the last BTSP event was applied. Default is 0.
+        - min_num_teleports (int, optional): Minimum number of teleportation events to
+            occur. Default is 0.
+        - check_teleport_every (int, optional): Number of steps between checks for
+            whether the minimum number of teleportation events has occurred. Default is
+            1000.
+        - complete_trajectory (bool, optional): Whether to complete the last trajectory.
+            Default is False.
+        - no_logs (bool, optional): Whether to disable logging. Default is False.
+        """
+
+        with AdjustNumTrajCanStop(self, complete_trajectory=complete_trajectory):
+            if num_steps_can_stop is None:
+
+                def infinite_generator():
+                    while True:
+                        yield
+
+                generator = infinite_generator()
+            else:
+                generator = range(num_steps_can_stop)
+
+            for _ in tqdm(generator, disable=no_logs):
+                stop = self.update(updater=updater, no_logs=no_logs)
+
+                if stop:
+                    break
+
+        continue_running = True
+        while continue_running:
+            continue_running = False
+            if min_steps_after_BTSP > 0:
+                self.continue_to_meet_criteria(
+                    min_steps_after_BTSP=min_steps_after_BTSP,
+                    min_num_teleports=min_num_teleports,
+                    check_teleport_every=check_teleport_every,
+                    updater=updater,
+                    no_logs=no_logs,
+                    max_num_steps=min_steps_after_BTSP * 10,
+                )
+
+            if complete_trajectory:
+                self.complete_trajectory(no_logs=no_logs)
+                check_in = self.get_num_steps_to_check_criteria_in(
+                    min_steps_after_BTSP=min_steps_after_BTSP,
+                    min_num_teleports=min_num_teleports,
+                    check_teleport_every=check_teleport_every,
+                )
+
+                if check_in < 0:
+                    continue_running = True
+
+        self.wrap_up(no_logs=no_logs)
 
         return
 
@@ -925,169 +1288,20 @@ def init_env_objects(
         return Pyrs
 
 
-def complete_learn_trajectory(learner, updater=dict(), no_logs=False):
-    """
-    complete_learn_trajectory(learner)
-
-    Complete the current trajectory for a learner.
-
-    Args:
-    - learner (Learner): Learner object.
-    - updater (object or dict, optional): Object or dictionary for updating
-        agent position. Default is dict().
-    - no_logs (bool, optional): Whether to disable logging. Default is False.
-    """
-
-    if learner.Agent.reached_end:
-        return
-
-    if not no_logs:
-        print("Completing last trajectory.")
-
-    def generator():
-        while True:
-            yield
-
-    break_next = False
-    for _ in tqdm(generator(), disable=no_logs):
-        learner.update(updater=updater, no_logs=no_logs)
-        if break_next:
-            break
-        if learner.Agent.reached_end:
-            break_next = True
-
-
-def continue_learn_to_min_steps_after_BTSP_applied(
-    learner,
-    min_steps=2000,
-    updater=dict(),
-    no_logs=False,
-    max_num_steps=20000,
-    raise_error=True,
-):
-    """
-    continue_to_min_steps_after_BTSP_applied(learner)
-
-    Continue learning until a minimum number of steps have passed since the last
-    BTSP event was applied.
-
-    Args:
-    - learner (Learner): Learner object.
-    - updater (object or dict, optional): Object or dictionary for updating
-        agent position. Default is dict().
-    - no_logs (bool, optional): Whether to disable logging. Default is False.
-    - max_num_steps (int, optional): Maximum number of steps to continue learning.
-        Default is 20000.
-    - raise_error (bool, optional): Whether to raise an error if max_num_steps are
-        reached. Default is True.
-    """
-
-    def get_check_in(learner):
-        BTSP_steps, applied = learner.Pyrs_for_weights.get_BTSP_steps(applied_also=True)
-        if len(BTSP_steps):
-            if np.isfinite(applied).all():
-                check_in = min_steps - (len(learner.Agent.history["t"]) - applied.max())
-            else:
-                check_in = min_steps
-        else:
-            check_in = 0
-
-        check_in = max(0, check_in)
-
-        return check_in
-
-    check_in = get_check_in(learner)
-
-    if check_in:
-        if not no_logs:
-            print(
-                f"Continuing learning for up to {max_num_steps} steps until at least "
-                f"{min_steps} steps after last BTSP event."
-            )
-
-        for _ in tqdm(range(max_num_steps), disable=no_logs):
-            if check_in <= 0:
-                check_in = get_check_in(learner)
-                if check_in <= 0:
-                    break
-
-            else:
-                check_in -= 1
-
-            learner.update(updater=updater, no_logs=no_logs)
-
-        if check_in > 0 and raise_error:
-            raise RuntimeError(
-                f"Maximum of {max_num_steps} steps reached and {min_steps} steps "
-                "since last BTSP event was applied was not reached."
-            )
-
-
-def run_learner(
-    learner,
-    updater=dict(),
-    max_num_steps=10000,
-    complete_trajectory=False,
-    no_logs=False,
-):
-    """
-    run_learner()
-
-    Run a learning experiment with a learner.
-
-    Args:
-    - learner (Learner): Learner object.
-    - updater (object or dict, optional): Object or dictionary for updating
-        agent position. Default is dict().
-    - max_num_steps (int, optional): Maximum number of steps to run. Will constrain
-        other stopping conditions (number of target reaches or trajectories). Pass None
-        to avoid constraining these by number of steps, and learning will only stop
-        when one of those conditions are reached, if provided. Default is 10000.
-    - complete_trajectory (bool, optional): Whether to complete the last trajectory.
-        Default is False.
-    - no_logs (bool, optional): Whether to disable logging. Default is False.
-    """
-
-    initial = 0
-    with AdjustMaxTraj(learner, complete_trajectory=complete_trajectory):
-        if max_num_steps is None:
-
-            def infinite_generator():
-                while True:
-                    yield
-
-            generator = infinite_generator()
-        else:
-            generator = range(max_num_steps)
-
-        for _ in tqdm(generator, disable=no_logs):
-            stop = learner.update(updater=updater, no_logs=no_logs)
-
-            if stop:
-                break
-
-    if complete_trajectory:
-        complete_learn_trajectory(learner, no_logs=no_logs)
-
-    learner.wrap_up(no_logs=no_logs)
-
-    return
-
-
 def learn(
     Pyrs_or_learner,
-    max_num_target_reaches=None,
-    max_num_traj=None,
-    max_num_steps=10000,
-    complete_trajectory=False,
+    num_target_reaches_can_stop=None,
+    num_traj_can_stop=None,
+    num_steps_can_stop=10000,
+    time_in_min_can_stop=None,
     record_weights_at_BTSP=True,
     weight_recording_freq=100,
     use_Hebbian=False,
     BTSP_on=None,
-    num_end_with_BTSP_disabled=0,
+    num_steps_end_with_BTSP_disabled=0,
     reverse_linear=False,
     updater=dict(),
-    no_logs=False,
+    **kwargs,
 ):
     """
     learn(Pyrs_or_learner)
@@ -1095,18 +1309,22 @@ def learn(
     Run a learning experiment with BTSP learning.
 
     Args:
-    - Pyrs_or_learner (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer or Learner):
-        Pyr. neuron layer or learner.
-    - max_num_target_reaches (int or None, optional): Maximum number of target reaches.
-        Default is None.
-    - max_num_traj (int or None, optional): Maximum number of trajectories to complete.
-        Default is None.
-    - max_num_steps (int or None, optional): Maximum number of steps to run. Will constrain
-        other stopping conditions (number of target reaches or trajectories). Pass None
-        to avoid constraining these by number of steps, and learning will only stop
-        when one of those conditions are reached, if provided. Default is 10000.
-    - complete_trajectory (bool, optional): Whether to complete the last trajectory.
-        Default is False.
+    - Pyrs_or_learner (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer or
+        Learner): Pyr. neuron layer or learner.
+    - num_target_reaches_can_stop (int or None, optional): Number of targets after
+        which early stopping may be triggered. Default is None.
+    - num_traj_can_stop (int or None, optional): Number of trajectories after which
+        early stopping may be triggered. Default is None.
+    - num_steps_can_stop (int or None, optional): Number of steps after which early
+        stopping can occur. Will override the learner object's other stopping conditions
+        (number of target reaches or trajectories). Pass None to avoid constraining
+        these by number of steps, and early stopping will only be triggered when one
+        (either) of those conditions is reached, if provided. Default is 10000.
+    - time_in_min_can_stop (float or None, optional): Time in minutes after which
+        early stopping can occur. Will be converted to number of steps based on Agent
+        dt. Overrides num_steps_can_stop if provided. Pass None to avoid constraining
+        these by time, and early stopping will only be triggered when one (either) of
+        those conditions is reached, if provided. Default is None.
     - record_weights_at_BTSP (bool, optional): Whether to record weights at BTSP events.
         Default is True.
     - weight_recording_freq (int, optional): Frequency at which to record weights if
@@ -1114,26 +1332,36 @@ def learn(
     - use_Hebbian (bool, optional): Whether to use Hebbian learning. Default is False.
     - BTSP_on (int, optional): Trajectory number at which BTSP is enabled or
         triggered. 1 for first trajectory. Default is None.
-    - num_end_with_BTSP_disabled (int, optional): Number of final steps to run without BTSP
-        learning. Default is 0.
+    - num_steps_end_with_BTSP_disabled (int, optional): Number of final steps to run without
+        BTSP learning. Default is 0.
     - reverse_linear (bool, optional): If using a linear track, whether to reverse
         Agent diretion at each end. Default is False.
     - updater (object or dict, optional): Object or dictionary for updating
         agent position. Default is dict().
-    - no_logs (bool, optional): Whether to disable logging. Default is False.
+
+    Keyword Args:
+    - **kwargs: Keyword arguments for learner.run().
 
     Returns:
     - learner (Learner): Learner object.
     """
 
-    stop_BTSP = None
-    if num_end_with_BTSP_disabled:
-        stop_BTSP = max(0, max_num_steps - num_end_with_BTSP_disabled)
+    if time_in_min_can_stop is not None:
+        num_steps_can_stop = int(time_in_min_can_stop * 60 / Pyrs_or_learner.Agent.dt)
 
-    if isinstance(Pyrs_or_learner, Learner):
+    stop_BTSP = None
+    if num_steps_end_with_BTSP_disabled:
+        if num_steps_can_stop is None:
+            raise ValueError(
+                "num_steps_can_stop must be provided if num_steps_end_with_BTSP_disabled "
+                "is provided."
+            )
+        stop_BTSP = max(0, num_steps_can_stop - num_steps_end_with_BTSP_disabled)
+
+    if gen_util.attribute_type_checker(Pyrs_or_learner, "Learner"):
         learner = Pyrs_or_learner
-        learner.max_num_target_reaches = max_num_target_reaches
-        learner.max_num_traj = max_num_traj
+        learner.num_target_reaches_can_stop = num_target_reaches_can_stop
+        learner.num_traj_can_stop = num_traj_can_stop
     else:
         learner = Learner(
             Pyrs_or_learner,
@@ -1143,16 +1371,14 @@ def learn(
             record_weights_at_BTSP=record_weights_at_BTSP,
             use_Hebbian=use_Hebbian,
             weight_recording_freq=weight_recording_freq,
-            max_num_target_reaches=max_num_target_reaches,
-            max_num_traj=max_num_traj,
+            num_target_reaches_can_stop=num_target_reaches_can_stop,
+            num_traj_can_stop=num_traj_can_stop,
         )
 
-    run_learner(
-        learner,
+    learner.run(
         updater=updater,
-        max_num_steps=max_num_steps,
-        complete_trajectory=complete_trajectory,
-        no_logs=no_logs,
+        num_steps_can_stop=num_steps_can_stop,
+        **kwargs,
     )
 
     return learner
@@ -1165,19 +1391,12 @@ def learn_openfield_BTSP(
     Pyrs_or_learner: (
         learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | Learner | None
     ) = None,
-    max_num_steps: int | None = 10000,
-    complete_trajectory: bool = False,
-    record_weights_at_BTSP: bool = True,
-    weight_recording_freq: int = 100,
-    use_Hebbian: bool = False,
-    num_end_with_BTSP_disabled: int = 0,
-    min_steps_after_BTSP: int = 0,
     corridor: bool = False,
     updater: dict[str, Any] | None = None,
     teleportation_enabled: bool | None = None,
-    no_logs: bool = False,
+    init_kwargs: dict[str, Any] = dict(),
     autosave: bool | None = None,
-    **init_kwargs,
+    **kwargs,
 ):
     """
     learn_openfield_BTSP()
@@ -1187,33 +1406,19 @@ def learn_openfield_BTSP(
     Args:
     - Pyrs_or_learner (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer or Learner):
         Pyr. neuron layer or learner.
-    - max_num_steps (int or None, optional): Maximum number of steps to run. Will
-        constrain other stopping conditions (number of target reaches or trajectories).
-        Pass None to avoid constraining these by number of steps, and learning will
-        only stop when one of those conditions are reached, if provided.
-        Default is 10000.
-    - complete_trajectory (bool, optional): Whether to complete the last trajectory.
-        Default is False.
-    - record_weights_at_BTSP (bool, optional): Whether to record weights at BTSP events.
-        Default is True.
-    - weight_recording_freq (int, optional): Frequency at which to record weights if
-        Hebbian learning is active. Default is 100.
-    - use_Hebbian (bool, optional): Whether to use Hebbian learning. Default is False.
-    - num_end_with_BTSP_disabled (int, optional): Number of final steps to run without BTSP
-        learning. Default is 0.
-    - min_steps_after_BTSP (int, optional): Minimum number of steps to run after the
-        last BTSP event is applied. Default is 0.
     - corridor (bool, optional): Whether to use the openfield corridor environment.
         Default is False.
     - updater (object or dict, optional): Object or dictionary for updating
         agent position. Default is None.
     - teleportation_enabled (bool, optional): Whether teleportation should be enabled.
         Default is None.
-    - no_logs (bool, optional): Whether to disable logging. Default is False.
-    - autosave (bool, optional): Whether to autosave. Default is None.
+    - init_kwargs (dict, optional): Keyword arguments for init_env_objects().
+        Default is dict().
+    - autosave (bool, optional): Whether to autosave the figure. If None, the global
+        autosave setting for ratinabox is used. Default is None.
 
     Keyword Args:
-    - **init_kwargs: Keyword arguments for init_env_objects().
+    - **kwargs: Keyword arguments for learn().
 
     Returns:
     - learner (Learner): Learner object.
@@ -1228,11 +1433,11 @@ def learn_openfield_BTSP(
             **init_kwargs,
         )
 
-    if isinstance(Pyrs_or_learner, Learner):
+    if gen_util.attribute_type_checker(Pyrs_or_learner, "Learner"):
         Pyrs = Pyrs_or_learner.Pyrs
     else:
         Pyrs = Pyrs_or_learner
-    if not isinstance(Pyrs.Agent.Environment, env.OpenField):
+    if not gen_util.attribute_type_checker(Pyrs.Environment, "OpenField"):
         raise ValueError("Pyrs must be an openfield environment.")
 
     if updater is None:
@@ -1251,27 +1456,7 @@ def learn_openfield_BTSP(
     if teleportation_enabled is not None:
         Pyrs.Agent.allow_teleportation(teleportation_enabled)
 
-    learner = learn(
-        Pyrs_or_learner,
-        BTSP_on=None,
-        max_num_steps=max_num_steps,
-        complete_trajectory=complete_trajectory,
-        record_weights_at_BTSP=record_weights_at_BTSP,
-        weight_recording_freq=weight_recording_freq,
-        use_Hebbian=use_Hebbian,
-        num_end_with_BTSP_disabled=num_end_with_BTSP_disabled,
-        updater=updater,
-        no_logs=no_logs,
-    )
-
-    if min_steps_after_BTSP > 0:
-        continue_learn_to_min_steps_after_BTSP_applied(
-            learner,
-            min_steps=min_steps_after_BTSP,
-            updater=updater,
-            no_logs=no_logs,
-            max_num_steps=min_steps_after_BTSP * 10,
-        )
+    learner = learn(Pyrs_or_learner, BTSP_on=None, updater=updater, **kwargs)
 
     return learner
 
@@ -1308,7 +1493,7 @@ def plot_T_maze(
         shape (3, 1). See description for details.
     """
 
-    if isinstance(Pyrs_or_Objs, learning_neurons.BTSPLayer):
+    if gen_util.attribute_type_checker(Pyrs_or_Objs, "BTSPLayer"):
         _, Ag, extracted_PCs, _ = ext_util.extract_objects_from_Pyrs(Pyrs_or_Objs)
         PCs = PCs or extracted_PCs
     else:
@@ -1338,7 +1523,7 @@ def plot_T_maze(
     ax1D[1].set_title("Place cell rate maps")
 
     # Plot Pyr. rate map on T-maze
-    if isinstance(Pyrs_or_Objs, learning_neurons.BTSPLayer):
+    if gen_util.attribute_type_checker(Pyrs_or_Objs, "BTSPLayer"):
         Pyrs_or_Objs.plot_rate_map(ax=ax1D[2], method=method)
         title = f"{Pyrs_or_Objs.name.replace('_', ' ')} rate map"  # type: ignore[attr-defined]
     else:
@@ -1369,19 +1554,12 @@ def learn_T_maze_BTSP(
     Pyrs_or_learner: (
         learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | Learner | None
     ) = None,
-    max_num_target_reaches: int = 200,
-    max_num_traj: int | None = None,
-    max_num_steps: int | None = 10000,
-    complete_trajectory: bool = True,
-    record_weights_at_BTSP: bool = True,
-    weight_recording_freq: int = 100,
-    use_Hebbian: bool = False,
-    BTSP_on: int | None = None,
     updater: dict[str, Any] | None = None,
-    no_logs: bool = False,
+    complete_trajectory: bool = True,
     plot: bool = True,
+    init_kwargs: dict[str, Any] = dict(),
     autosave: bool | None = None,
-    **init_kwargs,
+    **kwargs,
 ):
     """
     learn_T_maze_BTSP()
@@ -1391,32 +1569,19 @@ def learn_T_maze_BTSP(
     Args:
     - Pyrs_or_learner (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer or Learner):
         Pyr. neuron layer or learner.
-    - max_num_target_reaches (int or None, optional): Maximum number of target reaches.
-        Default is 200.
-    - max_num_traj (int or None, optional): Maximum number of trajectories to complete.
-        Default is None.
-    - max_num_steps (int or None, optional): Maximum number of steps to run. Will constrain
-        other stopping conditions (number of target reaches or trajectories). Pass None
-        to avoid constraining these by number of steps, and learning will only stop
-        when one of those conditions are reached, if provided. Default is 10000.
-    - complete_trajectory (bool, optional): Whether to complete the last trajectory.
-        Default is True.
-    - record_weights_at_BTSP (bool, optional): Whether to record weights at BTSP events.
-        Default is True.
-    - weight_recording_freq (int, optional): Frequency at which to record weights if
-        Hebbian learning is active. Default is 100.
-    - use_Hebbian (bool, optional): Whether to use Hebbian learning. Default is False.
-    - BTSP_on (int, optional): Trajectory number at which BTSP is enabled or
-        triggered. 1 for first trajectory. Default is None.
     - updater (object or dict, optional): Object or dictionary for updating
         agent position. Default is None.
-    - no_logs (bool, optional): Whether to disable logging. Default is False.
+    - complete_trajectory (bool, optional): Whether to complete the last trajectory.
+        Default is True.
     - plot (bool, optional): Whether to plot the environment and neurons. Default is
         True.
-    - autosave (bool, optional): Whether to autosave. Default is None.
+    - init_kwargs (dict, optional): Keyword arguments for init_env_objects().
+        Default is dict().
+    - autosave (bool, optional): Whether to autosave the figure. If None, the global
+        autosave setting for ratinabox is used. Default is None.
 
     Keyword Args:
-    - **init_kwargs: Keyword arguments for init_env_objects().
+    - **kwargs: Keyword arguments for learn().
 
     Returns:
     - learner (Learner): Learner object.
@@ -1439,11 +1604,11 @@ def learn_T_maze_BTSP(
         )
 
     else:
-        if isinstance(Pyrs_or_learner, Learner):
+        if gen_util.attribute_type_checker(Pyrs_or_learner, "Learner"):
             Pyrs = Pyrs_or_learner.Pyrs
         else:
             Pyrs = Pyrs_or_learner
-        if not isinstance(Pyrs.Agent.Environment, env.TEnv):
+        if not gen_util.attribute_type_checker(Pyrs.Environment, "TEnv"):
             raise ValueError("Pyrs must be a T-maze environment.")
 
     if updater is None:
@@ -1454,27 +1619,24 @@ def learn_T_maze_BTSP(
 
     learner = learn(
         Pyrs_or_learner,
-        max_num_target_reaches=max_num_target_reaches,
-        max_num_traj=max_num_traj,
-        max_num_steps=max_num_steps,
-        complete_trajectory=complete_trajectory,
-        record_weights_at_BTSP=record_weights_at_BTSP,
-        weight_recording_freq=weight_recording_freq,
-        use_Hebbian=use_Hebbian,
-        BTSP_on=BTSP_on,
         updater=updater,
-        no_logs=no_logs,
+        complete_trajectory=complete_trajectory,
+        **kwargs,
     )
 
     if plot:
         if learner.Objs is None:
-            spatial_axes = plot_T_maze(learner.Pyrs, autosave=autosave, method="groundtruth")  # type: ignore[arg-type]
+            spatial_axes = plot_T_maze(
+                learner.Pyrs, autosave=autosave, method="groundtruth"
+            )
         else:
-            spatial_axes = plot_T_maze(learner.Objs, learner.PCs, autosave=autosave, method="history")  # type: ignore[arg-type]
+            spatial_axes = plot_T_maze(
+                learner.Objs, learner.PCs, autosave=autosave, method="history"
+            )
 
-        rate_maps_axes = learner.Pyrs.plot_rate_maps_across_learning()  # type: ignore[attr-defined]
+        rate_maps_axes = learner.Pyrs.plot_rate_maps_across_learning()
 
-        BTSP_ax1D = plot_fcts.plot_time_series_with_BTSP_events(learner.Pyrs)  # type: ignore[arg-type]
+        BTSP_ax1D = plot_fcts.plot_time_series_with_BTSP_events(learner.Pyrs)
 
         return learner, spatial_axes, rate_maps_axes, BTSP_ax1D
 
@@ -1489,20 +1651,15 @@ def learn_1D_BTSP(
     Pyrs_or_learner: (
         learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | Learner | None
     ) = None,
-    max_num_target_reaches: int = 10,
-    max_num_traj: int | None = None,
-    max_num_steps: int | None = 5000,
-    complete_trajectory: bool = True,
-    record_weights_at_BTSP: bool = True,
-    weight_recording_freq: int = 100,
-    use_Hebbian: bool = False,
-    BTSP_on: int | None = None,
     reverse: bool = False,
     updater: dict[str, Any] = dict(),
-    no_logs: bool = False,
+    num_target_reaches_can_stop: int | None = 10,
+    num_steps_can_stop: int | None = 5000,
+    complete_trajectory: bool = True,
     plot: bool = True,
     autosave: bool | None = None,
-    **init_kwargs,
+    init_kwargs: dict[str, Any] = dict(),
+    **kwargs,
 ):
     """
     learn_1D_BTSP()
@@ -1512,36 +1669,28 @@ def learn_1D_BTSP(
     Args:
     - Pyrs_or_learner (learning_neurons.BTSPLayer or two_comp_neurons.TwoCompLayer, Learner, optional):
         Pyr. neurons. If None, will be initialized. Default is None.
-    - max_num_target_reaches (int or None, optional): Maximum number of target reaches.
-        Default is 10.
-    - max_num_traj (int or None, optional): Maximum number of trajectories to complete.
-        Default is None.
-    - max_num_steps (int or None, optional): Maximum number of steps to run. Will constrain
-        other stopping conditions (number of target reaches or trajectories). Pass None
-        to avoid constraining these by number of steps, and learning will only stop
-        when one of those conditions are reached, if provided. Default is 5000.
-    - complete_trajectory (bool, optional): Whether to complete the last trajectory.
-        Default is True.
-    - record_weights_at_BTSP (bool, optional): Whether to record weights at BTSP events.
-        Default is True.
-    - weight_recording_freq (int, optional): Frequency at which to record weights.
-        Default is 100.
-    - use_Hebbian (bool, optional): Whether to use Hebbian learning.
-        Default is False.
-    - BTSP_on (int, optional): Trajectory number at which BTSP is enabled or
-        triggered. 1 for first trajectory. Default is None.
     - reverse (bool, optional): Whether to reverse Agent diretion at each end.
         Default is False.
     - updater (object or dict, optional): Object or dictionary for updating
         agent position. Default is dict().
-    - no_logs (bool, optional): Whether to disable logging. Default is False.
+    - num_target_reaches_can_stop (int or None, optional): Number of targets after
+        which early stopping may be triggered. Default is 10.
+    - num_steps_can_stop (int or None, optional): Number of steps after which early
+        stopping can occur. Will override the learner object's other stopping conditions
+        (number of target reaches or trajectories). Pass None to avoid constraining
+        these by number of steps, and early stopping will only be triggered when one
+        (either) of those conditions is reached, if provided. Default is 5000.
+    - complete_trajectory (bool, optional): Whether to complete the last trajectory.
+        Default is True.
     - plot (bool, optional): Whether to plot the environment and neurons. Default is
         True.
+    - init_kwargs (dict, optional): Keyword arguments for init_env_objects().
+        Default is dict().
     - autosave (bool, optional): Whether to autosave the figure. If None, the global
         autosave setting for ratinabox is used. Default is None.
 
     Keyword Args:
-    - **init_kwargs: Keyword arguments for init_env_objects().
+    - **kwargs: Keyword arguments for learn().
 
     Returns:
     - learner (Learner): Learner object.
@@ -1561,27 +1710,22 @@ def learn_1D_BTSP(
             **init_kwargs,
         )
     else:
-        if isinstance(Pyrs_or_learner, Learner):
+        if gen_util.attribute_type_checker(Pyrs_or_learner, "Learner"):
             Pyrs = Pyrs_or_learner.Pyrs
         else:
             Pyrs = Pyrs_or_learner
 
-        if Pyrs.Agent.Environment.D != 1:
+        if Pyrs.Environment.D != 1:
             raise ValueError("Pyrs must be a 1D environment.")
 
     learner = learn(
         Pyrs_or_learner,
-        max_num_target_reaches=max_num_target_reaches,
-        max_num_traj=max_num_traj,
-        max_num_steps=max_num_steps,
-        complete_trajectory=complete_trajectory,
-        record_weights_at_BTSP=record_weights_at_BTSP,
-        weight_recording_freq=weight_recording_freq,
-        use_Hebbian=use_Hebbian,
-        BTSP_on=BTSP_on,
         reverse_linear=reverse,
         updater=updater,
-        no_logs=no_logs,
+        num_target_reaches_can_stop=num_target_reaches_can_stop,
+        num_steps_can_stop=num_steps_can_stop,
+        complete_trajectory=complete_trajectory,
+        **kwargs,
     )
 
     if plot:

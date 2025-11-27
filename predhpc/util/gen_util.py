@@ -1,5 +1,6 @@
 import copy
 from datetime import datetime
+from fractions import Fraction
 from pathlib import Path
 import random
 import time
@@ -21,6 +22,47 @@ class TempFigureDirectory:
         ratinabox.figure_directory = self.original_figure_directory
 
 
+def attribute_type_checker(var, var_type):
+    """
+    attribute_type_checker(var, var_type)
+
+    Check whether a variable is of a specific type (amongst implemented types) based on
+    a prespecified attribute for each class. This method is more robust to module
+    reloading.
+
+    Args:
+    - var (object): Variable to check.
+    - var_type (str): Expected type of the variable.
+
+    Raises:
+    - TypeError: If the variable is not of the expected type.
+    """
+
+    var_dict = {
+        "TEnv": "stem_width_as_prop_of_x",
+        "OpenField": "init_random_walls",
+        "PlaceCells": "place_cell_center_type",
+        "ObjectCells": "input_object_types",
+        "LearnLayer": "lr",
+        "HebbianLayer": "regularization_alpha",
+        "NMDACurrent": "NMDA_activation_decay_tau",
+        "NMDALayer": "BTSP_induction_threshold",
+        "BTSPLayer": "BTSP_lr",
+        "TwoCompLayer": "apical_first",
+        "Learner": "agent_start_step",
+    }
+
+    if var_type not in var_dict.keys():
+        raise NotImplementedError(
+            f"Robust type checking not implemented for type {var_type}. "
+            f"Only the following types are supported: {list(var_dict.keys())}."
+        )
+
+    result = hasattr(var, var_dict[var_type])
+
+    return result
+
+
 def seed_all(seed=None):
     """
     seed_all()
@@ -36,6 +78,60 @@ def seed_all(seed=None):
         seed = int(seed)
         random.seed(seed)
         np.random.seed(seed)
+
+
+def get_integer_fraction(value, denom_min=None, denom_max=None, raise_error=True):
+    """
+    get_integer_fraction(value, denom_min, denom_max)
+
+    Obtain the integer fraction representation of a value within specified denominator
+    limits.
+
+    Args:
+    - value (float): Value to convert to integer fraction.
+    - denom_min (int): Minimum denominator.
+    - denom_max (int): Maximum denominator.
+
+    Returns:
+    - numerator (int): Numerator of the integer fraction.
+    - denominator (int): Denominator of the integer fraction.
+    """
+
+    fraction = Fraction.from_float(value)
+
+    if denom_max is not None and denom_min is not None:
+        if denom_max <= denom_min:
+            raise ValueError(
+                "Denominator max must be strictly greater than denominator min."
+            )
+
+    use_denom_max = denom_max
+    for i in range(3):
+        if use_denom_max is not None:
+            fraction = fraction.limit_denominator(use_denom_max)
+
+        numerator, denominator = fraction.numerator, fraction.denominator
+
+        if denom_min is not None and denominator < denom_min:
+            factor = int(np.ceil(denom_min / denominator))
+            numerator *= factor
+            denominator *= factor
+
+        if denom_max is not None and denominator > denom_max:
+            numerator, denominator = None, None
+            use_denom_max = use_denom_max // 2
+            if use_denom_max < 3:
+                break
+        else:
+            break
+
+    if numerator is None and raise_error:
+        raise RuntimeError(
+            f"Could not find integer fraction for value {value} "
+            f"with denominator between {denom_min} and {denom_max}."
+        )
+
+    return numerator, denominator
 
 
 def delete_np_dict(filepath):

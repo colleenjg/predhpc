@@ -1,7 +1,6 @@
-from sklearn import metrics
 import numpy as np
 
-from predhpc.util import signal_util, ext_util
+from predhpc.util import signal_util, gen_util, ext_util
 
 WIDTH = 0.5  # symmetical width (m) around PC peak to use for pre/post weight ratio
 
@@ -85,7 +84,7 @@ def evaluate_PFs(
         (place cells x dimensions).
     """
 
-    if hasattr(Pyrs, "SomaticCompartment"):
+    if gen_util.attribute_type_checker(Pyrs, "TwoCompLayer"):
         Pyrs = Pyrs.SomaticCompartment
 
     if PC_name not in Pyrs.inputs.keys():
@@ -94,18 +93,18 @@ def evaluate_PFs(
     PCs = Pyrs.inputs["PCs"]["layer"]
 
     PF_centers = PCs.place_cell_centers
-    if Pyrs.Agent.Environment.D == 1:
+    if Pyrs.Environment.D == 1:
         PF_centers = PF_centers[:, 0]
         sorter = np.argsort(PF_centers)
         PF_centers = PF_centers[sorter]
-    elif Pyrs.Agent.Environment.D == 2:
+    elif Pyrs.Environment.D == 2:
         if len(PF_centers.shape) != 2 or PF_centers.shape[1] != 2:
             raise ValueError(
                 "PF_centers must be a 2D array with shape (num_PF_centers, 2)."
             )
     else:
         raise NotImplementedError(
-            f"Expected environment to be 1 or 2D, but found {Pyrs.Agent.Environment.D}."
+            f"Expected environment to be 1 or 2D, but found {Pyrs.Environment.D}."
         )
 
     chosen_neurons = np.asarray(
@@ -115,7 +114,7 @@ def evaluate_PFs(
     if method in ["weights", "applied_weights", "smoothed_weights"]:
         PFs = Pyrs.inputs["PCs"]["w"][chosen_neurons]
         if method == "smoothed_weights":
-            if Pyrs.Agent.Environment.D == 1:
+            if Pyrs.Environment.D == 1:
                 PFs = PFs[:, sorter]
             else:
                 raise NotImplementedError(
@@ -139,9 +138,9 @@ def evaluate_PFs(
             PFs = Pyrs.activation_function(V, deriv=False)
 
     elif method == "history":
-        if Pyrs.Agent.Environment.D == 1:
+        if Pyrs.Environment.D == 1:
             dist = np.absolute(np.diff(PF_centers)).mean()
-        elif Pyrs.Agent.Environment.D == 2:
+        elif Pyrs.Environment.D == 2:
             dist = np.inf
             for i in range(2):
                 dist = min(
@@ -231,7 +230,7 @@ def get_PF_weight_peak_relative_position(Pyrs, target_position=None, **kwargs):
         if target_position is None:
             target_position = Pyrs.Agent.target_position[0]
         peak_rel_pos = PF_centers[peak_idx] - target_position
-        scale = Pyrs.Agent.Environment.scale
+        scale = Pyrs.Environment.scale
         if peak_rel_pos < -scale / 2:
             peak_rel_pos += scale
         elif peak_rel_pos > scale / 2:
@@ -296,7 +295,7 @@ def compute_PF_width(Pyrs, k=1, prop_peak=signal_util.DFT_PROP_PEAK, **kwargs):
     - width (float): Width of the place field.
     """
 
-    if Pyrs.Agent.Environment.D != 1:
+    if Pyrs.Environment.D != 1:
         raise NotImplementedError("PF width only implemented for 1D environments.")
 
     PF, PF_centers, peak_idx = get_PF_info(Pyrs, **kwargs)
@@ -304,7 +303,7 @@ def compute_PF_width(Pyrs, k=1, prop_peak=signal_util.DFT_PROP_PEAK, **kwargs):
     if peak_idx is None:
         width = 0
     else:
-        scale = Pyrs.Agent.Environment.scale
+        scale = Pyrs.Environment.scale
         width = signal_util.compute_signal_width(
             PF, PF_centers, prop_peak=prop_peak, k=k, max_x=scale
         )
@@ -337,7 +336,7 @@ def compute_BTSP_metrics(Pyrs, t_start=0, bins=21, width=WIDTH, k=1, **kwargs):
         - BTSP_metric: BTSP metric value
     """
 
-    if Pyrs.Agent.Environment.D != 1:
+    if Pyrs.Environment.D != 1:
         raise NotImplementedError("BTSP metrics only implemented for 1D environments.")
 
     num_BTSP_events = Pyrs.SomaticCompartment.get_BTSP_counts(t_start=t_start)[0]
@@ -449,7 +448,7 @@ def gather_PF_info(learner, k=SMOOTH_K, position_name=None, min_total=None):
     PF_info["PC_weights"] = PC_weights
 
     # for 1D environments
-    if learner.Pyrs.Agent.Environment.D == 1:
+    if learner.Pyrs.Environment.D == 1:
         next_trajectory = True
         sorter = np.argsort(PF_info["PC_place_centers"][:, 0])
         PF_info["PC_place_centers"] = PF_info["PC_place_centers"][sorter, 0]
@@ -501,7 +500,7 @@ def gather_PF_info(learner, k=SMOOTH_K, position_name=None, min_total=None):
         if PF is None:
             history_PFs[i] = np.full(PF_shape, np.nan)
 
-    if learner.Pyrs.Agent.Environment.D == 1:
+    if learner.Pyrs.Environment.D == 1:
         t_start, t_end = PF_times[last_idx]
         PF_info["PF_widths"] = compute_PF_width(
             learner.Pyrs, k=k, method="history", t_start=t_start, t_end=t_end

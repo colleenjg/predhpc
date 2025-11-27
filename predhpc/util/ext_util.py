@@ -44,11 +44,11 @@ def extract_objects_from_Pyrs(Pyrs):
         Object cells (None if not applicable).
     """
 
-    Env = Pyrs.Agent.Environment
+    Env = Pyrs.Environment
 
     Ag = Pyrs.Agent
 
-    if hasattr(Pyrs, "SomaticCompartment"):  # two compartment
+    if gen_util.attribute_type_checker(Pyrs, "TwoCompLayer"):
         Obj_key = list(Pyrs.ApicalCompartment.inputs.keys())[-1]
         Objs = Pyrs.ApicalCompartment.inputs[Obj_key]["layer"]
 
@@ -60,10 +60,10 @@ def extract_objects_from_Pyrs(Pyrs):
         PCs = Pyrs.inputs[PC_key]["layer"]
 
     if Objs is not None:
-        if not hasattr(Objs, "input_object_types"):
+        if not gen_util.attribute_type_checker(Objs, "ObjectCells"):
             raise RuntimeError(f"Objs incorrectly identified. Got {type(Objs)}.")
 
-    if not hasattr(PCs, "place_cell_centers"):
+    if not gen_util.attribute_type_checker(PCs, "PlaceCells"):
         raise RuntimeError(f"PCs incorrectly identified. Got {type(PCs)}.")
 
     return Env, Ag, PCs, Objs
@@ -745,7 +745,7 @@ def estimate_1D_place_cell_density(PCs):
     - PC_density_1D (float): Place cell density (PC/m).
     """
 
-    Env = PCs.Agent.Environment
+    Env = PCs.Environment
     if Env.D == 1:
         env_scale = Env.scale
         PC_density_1D = PCs.n / env_scale
@@ -759,12 +759,20 @@ def estimate_1D_place_cell_density(PCs):
 
 
 def get_times_for_each_BTSP_event(
-    NeuronLayer, i=0, t_buffer=6, next_trajectory=False, min_total=60, use_nans=False
+    NeuronLayer,
+    i=0,
+    t_buffer=6,
+    next_trajectory=False,
+    min_total=60,
+    use_nans=False,
+    t_start=None,
+    t_end=None,
 ):
     """
     get_times_for_each_BTSP_event(NeuronLayer)
 
-    Obtain a start and end times for each BTSP event.
+    Obtain a start and end times for collecting place field information before and
+    after each BTSP event.
 
     Args:
     - NeuronLayer: The neuron layer object.
@@ -776,17 +784,27 @@ def get_times_for_each_BTSP_event(
         end times for each BTSP event. Default is 60.
     - use_nans (bool): Whether to use NaNs for BTSP events with insufficient time.
         Default is False.
+    - t_start (float, optional): Start time for the first period. If None, uses 0.
+        Default is None.
+    - t_end (float, optional): End time for the last period. If None, uses current time.
+        Default is None.
 
     Returns:
     - times (list of tuples): Start and end times for each applied BTSP event.
     """
 
     BTSP_applied = NeuronLayer.get_BTSP_steps(
-        applied_only=True, apply_step=True, chosen_neurons=[i]
+        applied_only=True,
+        apply_step=True,
+        chosen_neurons=[i],
+        t_start=t_start,
+        t_end=t_end,
     )
 
+    t_start = t_start or 0
+    t_final_end = t_end or NeuronLayer.Agent.t
+
     times = list()
-    t_start = 0
     for step in BTSP_applied:
         t_end = step * NeuronLayer.Agent.dt - 1
         if t_end - t_start >= min_total:
@@ -805,7 +823,7 @@ def get_times_for_each_BTSP_event(
                 )
             t_start = sub_df.loc[sub_df.index[0]]["start_time"]
 
-    t_end = NeuronLayer.Agent.t
+    t_end = t_final_end
     if t_end - t_start >= min_total:
         times.append((t_start, t_end))
 
@@ -841,7 +859,7 @@ def create_weights_dict(weights, steps, t, steps_triggered=None):
 
     weights = np.asarray(weights)
     if len(steps):
-        time = np.asarray(t)[steps]
+        time = np.asarray(t)[steps - 1]
     else:
         time = np.asarray([])
 
@@ -854,18 +872,22 @@ def create_weights_dict(weights, steps, t, steps_triggered=None):
 
 
 def assess_firingrate_CC_across_periods(
-    firingrates, num_periods=8, plot=True, sub_ax=None
+    firingrates, num_periods=8, plot=True, sub_ax=None, **kwargs
 ):
     """
     assess_firingrate_CC_across_periods(firingrates)
 
-    Assess the correlation coefficient of firing rates across time periods.
+    Assess the correlation coefficient of neural firing rate correlations across time
+    periods.
 
     Args:
     - firingrates (2D np.ndarray): Firing rates, with shape (frames, neurons).
     - num_periods (int, optional): Number of time periods to assess. Default is 8.
     - plot (bool, optional): Whether to plot the correlation coefficient. Default is True.
     - sub_ax (plt.Axes, optional): Axes to plot on. Default is None.
+
+    Keyword args:
+    - **kwargs: Additional keyword arguments to pass to the plotting function.
 
     Returns:
     - gen_CC (2D np.ndarray): General correlation coefficient across time periods.
@@ -893,7 +915,7 @@ def assess_firingrate_CC_across_periods(
     if plot:
         from predhpc.util import plot_util
 
-        sub_ax = plot_util.plot_CC_across_periods(gen_CC, sub_ax=sub_ax)
+        sub_ax = plot_util.plot_CC_across_periods(gen_CC, sub_ax=sub_ax, **kwargs)
         return gen_CC, sub_ax
     else:
         return gen_CC

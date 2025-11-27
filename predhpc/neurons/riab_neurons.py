@@ -1,5 +1,6 @@
 from collections.abc import Callable
 import copy
+from operator import index
 import warnings
 
 from matplotlib import pyplot as plt
@@ -57,6 +58,16 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
     ignored_params = {key: None for key in ignored_param_keys}
 
     fixed_params = dict()  # type: dict[str, Any]
+
+    @property
+    def Environment(self):
+        """
+        self.Environment
+
+        Obtain the environment associated with the agent the layer is associated with.
+        """
+
+        return self.Agent.Environment
 
     def get_chosen_neurons(self, chosen_neurons="all"):
         """
@@ -177,17 +188,17 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         chosen_neurons = self.get_chosen_neurons(chosen_neurons)
 
         if bin_size is None:
-            bin_size = 0.05 if self.Agent.Environment.D == 2 else 0.1
-        extent = self.Agent.Environment.extent
+            bin_size = 0.05 if self.Environment.D == 2 else 0.1
+        extent = self.Environment.extent
 
-        if self.Agent.Environment.D == 1:
+        if self.Environment.D == 1:
             pos = pos[:, 0]
 
         rate_maps = list()
         for chosen_neuron in chosen_neurons:
             outputs = rutils.bin_data_for_histogramming(
                 data=pos,
-                extent=self.Agent.Environment.extent,
+                extent=self.Environment.extent,
                 dx=bin_size,
                 weights=firingrates[:, chosen_neuron],
                 norm_by_bincount=True,
@@ -201,7 +212,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
 
         rate_maps = np.asarray(rate_maps)
 
-        if self.Agent.Environment.D == 2:
+        if self.Environment.D == 2:
             rate_maps = rate_maps[:, ::-1]
 
         xedges = np.arange(extent[0], extent[1] + bin_size / 2, bin_size)
@@ -209,7 +220,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         if rate_maps.shape[1] == len(centers) + 1:
             rate_maps = rate_maps[:, :-1]
 
-        if self.Agent.Environment.D == 2:
+        if self.Environment.D == 2:
             yedges = np.arange(extent[2], extent[3] + bin_size / 2, bin_size)
             ycenters = (yedges[1:] + yedges[:-1]) / 2
             centers = np.asarray(np.meshgrid(centers, ycenters)).reshape(2, -1).T
@@ -221,24 +232,32 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         return rate_maps, centers
 
     def get_firingrate_CC_matrix(
-        self, num_periods: int = 8, plot: bool = False, sub_ax: plt.Axes | None = None
+        self,
+        num_periods: int = 8,
+        plot: bool = False,
+        sub_ax: plt.Axes | None = None,
+        **kwargs,
     ):
         """
         self.get_firingrate_CC_matrix()
 
-        Obtain the firing rate cross-correlation matrix across periods.
+        Obtain the neural firing rate correlation coefficient matrix across periods.
 
         Args:
         - num_periods (int, optional): Number of periods to assess. Default is 8.
-        - plot (bool, optional): Whether to plot the firing rate cross-correlation
+        - plot (bool, optional): Whether to plot the firing rate correlation coefficient
             matrix. Default is False.
         - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
             created. Default is None.
 
+        Keyword args:
+        - **kwargs: Additional keyword arguments to pass to
+            ext_util.assess_firingrate_CC_across_periods().
+
         Returns:
-        - CC_matrix (2D np.ndarray): Firing rate cross-correlation matrix across periods.
+        - CC_matrix (2D np.ndarray): Firing rate correlation coefficient matrix across periods.
         if plot:
-        - sub_ax (plt.Axes): Subplot with firing rate cross-correlation matrix plotted.
+        - sub_ax (plt.Axes): Subplot with firing rate correlation coefficient matrix plotted.
         """
 
         outputs = ext_util.assess_firingrate_CC_across_periods(
@@ -246,6 +265,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
             num_periods=num_periods,
             plot=plot,
             sub_ax=sub_ax,
+            **kwargs,
         )
 
         if plot:
@@ -392,7 +412,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         - occupancy (1D np.ndarray): Occupancy of the bins.
         """
 
-        if self.Agent.Environment.dimensionality != "1D":
+        if self.Environment.dimensionality != "1D":
             raise ValueError(
                 "Rate colormap plotting is only supported for 1D environments."
             )
@@ -408,7 +428,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         ]
         rel_pos = (
             np.asarray(self.Agent.history["pos"])[startid : endid + 1, 0]
-            / self.Agent.Environment.scale
+            / self.Environment.scale
         )
         vel = np.asarray(self.Agent.history["vel"])[startid : endid + 1, 0]
 
@@ -738,6 +758,12 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         elif norm_by:
             kwargs["norm_by"] = norm_by
 
+        # avoid very complex fill_between objects
+        chosen_neurons = self.get_chosen_neurons(chosen_neurons)
+        factor = 10000 / len(chosen_neurons)
+        if len(t) > factor and "shade_skiprate" not in kwargs.keys():
+            kwargs["shade_skiprate"] = int(np.ceil(len(t) / factor))
+
         _, sub_ax = super().plot_rate_timeseries(
             t_start=t_start,
             t_end=t_end,
@@ -749,7 +775,6 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         )
 
         if adjust_ylim:
-            chosen_neurons = self.get_chosen_neurons(chosen_neurons)
             min_fr, max_fr = self.get_min_max_firingrates(
                 t_start=t_start, t_end=t_end, chosen_neurons=chosen_neurons
             )
@@ -982,7 +1007,7 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
         """
 
         mean_speed = self.Agent.speed_mean
-        if self.Agent.Environment.dimensionality == "2D" and self.Agent.speed_std != 0:
+        if self.Environment.dimensionality == "2D" and self.Agent.speed_std != 0:
             mean_speed = rutils.get_rayleigh_mean(mean_speed)
 
         sigma_in_steps = ext_util.get_sigma_in_steps(
@@ -1004,7 +1029,7 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
         place cell order.
 
         Args:
-        - randst (int, optional): Random seed. Default is None.
+        - randst (int or np.random.RandomState, optional): Random seed. Default is None.
         - shuffle_sorter (1D np.ndarray, optional): Shuffle sorter. Default is None.
         - record (bool, optional): Whether to record the shuffle. Default is True.
 
@@ -1013,7 +1038,10 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
         """
 
         if shuffle_sorter is None:
-            randst = np.random.RandomState(randst)
+            if randst is None:
+                randst = np.random
+            elif isinstance(randst, int):
+                randst = np.random.RandomState(randst)
             shuffle_sorter = np.arange(self.n)
             randst.shuffle(shuffle_sorter)
 
@@ -1033,6 +1061,37 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
             self.shuffle_times.append(self.Agent.t)
 
         return shuffle_sorter
+
+    def get_place_cell_centers(self, shuffle_index=-1):
+        """
+        self.get_place_cell_centers()
+
+        Get the place cell centers in the original or shuffled order.
+
+        Args:
+        - shuffle_index (int, optional): Index of the shuffle to get. -1 for current
+            order, -2 for previous shuffle, etc. Default is -1.
+
+        Returns:
+        - place_cell_centers (2D np.ndarray): Place cell centers in the specified order.
+        """
+
+        place_cell_centers = self.place_cell_centers.copy()
+        if shuffle_index < 0:
+            shuffle_index = len(self.shuffle_sorters) + 1 + shuffle_index
+
+        if shuffle_index > len(self.shuffle_sorters):
+            raise ValueError("Index out of range of recorded shuffles.")
+
+        if len(self.shuffle_sorters) and shuffle_index != len(self.shuffle_sorters):
+            if shuffle_index == 0:
+                shuffler = np.arange(len(place_cell_centers))
+            else:
+                shuffler = self.shuffle_sorters[shuffle_index - 1]
+            unshuffler = np.argsort(self.shuffle_sorters[-1])
+            place_cell_centers = self.place_cell_centers[unshuffler][shuffler]
+
+        return place_cell_centers
 
     def plot_place_cell_locations(
         self,
@@ -1077,7 +1136,7 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
             fig = sub_ax.figure
 
         if plot_env or sub_ax is None:
-            sub_ax = self.Agent.Environment.plot_environment(
+            sub_ax = self.Environment.plot_environment(
                 sub_ax=sub_ax, alpha=0.6, autosave=False, **kwargs
             )
 
@@ -1087,9 +1146,9 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
             place_cell_centers = place_cell_centers[chosen_neurons]
 
         x = place_cell_centers[:, 0]
-        if self.Agent.Environment.dimensionality == "1D":
+        if self.Environment.dimensionality == "1D":
             y = np.zeros_like(x)
-        elif self.Agent.Environment.dimensionality == "2D":
+        elif self.Environment.dimensionality == "2D":
             y = place_cell_centers[:, 1]
 
         sub_ax.scatter(x, y, c=self.color, alpha=alpha, marker=marker, s=s, zorder=2)

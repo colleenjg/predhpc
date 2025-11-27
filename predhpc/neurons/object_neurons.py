@@ -6,7 +6,7 @@ import numpy as np
 
 from predhpc import env
 from predhpc.neurons import riab_neurons
-from predhpc.util import ext_util, plot_util
+from predhpc.util import gen_util, ext_util, plot_util
 
 if TYPE_CHECKING:
     import ratinabox  # type: ignore[import]
@@ -107,7 +107,7 @@ class ObjectInstanceCells(riab_neurons.PlaceCells):
         """
 
         if not hasattr(self, "_input_object_types"):
-            self._input_object_types = self.Agent.Environment.objects["object_types"]
+            self._input_object_types = self.Environment.objects["object_types"]
         return self._input_object_types
 
     @property
@@ -123,7 +123,7 @@ class ObjectInstanceCells(riab_neurons.PlaceCells):
         """
 
         if not hasattr(self, "_input_object_locations"):
-            self._input_object_locations = self.Agent.Environment.objects["objects"]
+            self._input_object_locations = self.Environment.objects["objects"]
         return self._input_object_locations
 
     def _get_num_neurons(self):
@@ -151,7 +151,7 @@ class ObjectInstanceCells(riab_neurons.PlaceCells):
         preventing them from being dynamically updated.
         """
 
-        if self.place_cell_centers is not self.Agent.Environment.objects["objects"]:
+        if self.place_cell_centers is not self.Environment.objects["objects"]:
             warnings.warn(
                 "Object cell centers have been detached from the environment object "
                 "locations, preventing them from being dynamically updated."
@@ -284,7 +284,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
         """
 
         if not hasattr(self, "_input_object_types"):
-            self._input_object_types = self.Agent.Environment.objects["object_types"]
+            self._input_object_types = self.Environment.objects["object_types"]
         return self._input_object_types
 
     @property
@@ -300,7 +300,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
         """
 
         if not hasattr(self, "_input_object_locations"):
-            self._input_object_locations = self.Agent.Environment.objects["objects"]
+            self._input_object_locations = self.Environment.objects["objects"]
         return self._input_object_locations
 
     @property
@@ -363,9 +363,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
             object_types, counts = np.unique(self.object_types, return_counts=True)
             _neuron_type_dict = dict()
             for object_type, count in zip(object_types, counts):
-                object_name = self.Agent.Environment.object_type_num_to_name_dict[
-                    object_type
-                ]
+                object_name = self.Environment.object_type_num_to_name_dict[object_type]
                 if "teleport" in object_name:
                     object_name = "teleport"
 
@@ -434,7 +432,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
 
         if (
             self.PlaceCellInputs.place_cell_centers
-            is not self.Agent.Environment.objects["objects"]
+            is not self.Environment.objects["objects"]
         ):
             warnings.warn(
                 "Object cell centers have been detached from the environment object "
@@ -492,7 +490,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
             elif evaluate_at == "all":
                 V_shape = (
                     self.n,
-                    self.Agent.Environment.flattened_discrete_coords.shape[0],
+                    self.Environment.flattened_discrete_coords.shape[0],
                 )
             else:
                 V_shape = (self.n, kwargs["pos"].shape[0])
@@ -568,7 +566,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
         """
 
         if self.is_dummy:
-            sub_ax = self.Agent.Environment.plot_environment(
+            sub_ax = self.Environment.plot_environment(
                 sub_ax=sub_ax, alpha=0.6, autosave=False
             )
             plot_util.save_figure(sub_ax.figure, f"{self.name}_place_cell_locations", save=autosave)  # type: ignore[attr-defined]
@@ -634,7 +632,7 @@ class FixedObjectCells(ObjectCells):
         """
         self.Agent = Agent
 
-        if not isinstance(self.Agent.Environment, env.OpenField):
+        if not gen_util.attribute_type_checker(self.Environment, "OpenField"):
             raise ValueError("Environment must be an OpenField to use FixedObjectCells")
 
         self.check_if_ignored_params(params)
@@ -665,9 +663,7 @@ class FixedObjectCells(ObjectCells):
 
             object_types = list()
             for object_type in np.unique(self.input_object_types):
-                object_name = self.Agent.Environment.object_type_num_to_name_dict[
-                    object_type
-                ]
+                object_name = self.Environment.object_type_num_to_name_dict[object_type]
 
                 if hasattr(self, f"num_{object_name}"):
                     num = getattr(self, f"num_{object_name}")
@@ -738,7 +734,7 @@ class WeightedObjectCells(ObjectCells):
         """
         self.Agent = Agent
 
-        if not isinstance(self.Agent.Environment, env.OpenField):
+        if not gen_util.attribute_type_checker(self.Environment, "OpenField"):
             raise ValueError(
                 "Environment must be an OpenField to use WeightedObjectCells"
             )
@@ -772,9 +768,7 @@ class WeightedObjectCells(ObjectCells):
 
             weight_dict = dict()
             for object_type in np.unique(self.input_object_types):
-                object_name = self.Agent.Environment.object_type_num_to_name_dict[
-                    object_type
-                ]
+                object_name = self.Environment.object_type_num_to_name_dict[object_type]
 
                 if not hasattr(self, f"{object_name}_weight"):
                     continue
@@ -867,7 +861,7 @@ class FixedObjectVectorCells(riab_neurons.ObjectVectorCells):
 
         self.Agent = Agent
 
-        if not isinstance(self.Agent.Environment, env.OpenField):
+        if not gen_util.attribute_type_checker(self.Environment, "OpenField"):
             raise ValueError("Environment must be an OpenField to use FixedObjectCells")
 
         if "n" in params and params["n"] != n:
@@ -906,7 +900,7 @@ class FixedObjectVectorCells(riab_neurons.ObjectVectorCells):
         """
 
         if not hasattr(self, "_input_object_types"):
-            self._input_object_types = self.Agent.Environment.objects["object_types"]
+            self._input_object_types = self.Environment.objects["object_types"]
         return self._input_object_types
 
     @property
@@ -921,7 +915,7 @@ class FixedObjectVectorCells(riab_neurons.ObjectVectorCells):
         """
 
         if not hasattr(self, "_input_object_locations"):
-            self._input_object_locations = self.Agent.Environment.objects["objects"]
+            self._input_object_locations = self.Environment.objects["objects"]
         return self._input_object_locations
 
     @property
@@ -941,9 +935,7 @@ class FixedObjectVectorCells(riab_neurons.ObjectVectorCells):
 
             object_types = list()
             for object_type in np.unique(self.input_object_types):
-                object_name = self.Agent.Environment.object_type_num_to_name_dict[
-                    object_type
-                ]
+                object_name = self.Environment.object_type_num_to_name_dict[object_type]
 
                 if hasattr(self, f"num_{object_name}"):
                     num = getattr(self, f"num_{object_name}")
@@ -971,9 +963,7 @@ class FixedObjectVectorCells(riab_neurons.ObjectVectorCells):
             object_types, counts = np.unique(self.object_types, return_counts=True)
             _neuron_type_dict = dict()
             for object_type, count in zip(object_types, counts):
-                object_name = self.Agent.Environment.object_type_num_to_name_dict[
-                    object_type
-                ]
+                object_name = self.Environment.object_type_num_to_name_dict[object_type]
                 if "teleport" in object_name:
                     object_name = "teleport"
 
@@ -1012,9 +1002,7 @@ class FixedObjectVectorCells(riab_neurons.ObjectVectorCells):
 
         tuning_types = list()
         for object_type in np.unique(self.object_types):
-            object_name = self.Agent.Environment.object_type_num_to_name_dict[
-                object_type
-            ]
+            object_name = self.Environment.object_type_num_to_name_dict[object_type]
             if object_name == "novel":
                 tuning_types.extend([object_type] * self.num_novel)  # type: ignore[attr-defined]
             elif object_name == "reward":
@@ -1099,7 +1087,7 @@ class WeightedObjectVectorCells(riab_neurons.ObjectVectorCells):
 
         self.Agent = Agent
 
-        if not isinstance(self.Agent.Environment, env.OpenField):
+        if not gen_util.attribute_type_checker(self.Environment, "OpenField"):
             raise ValueError(
                 "Environment must be an OpenField to use WeightedObjectCells"
             )
@@ -1128,7 +1116,7 @@ class WeightedObjectVectorCells(riab_neurons.ObjectVectorCells):
         """
 
         if not hasattr(self, "_input_object_types"):
-            self._input_object_types = self.Agent.Environment.objects["object_types"]
+            self._input_object_types = self.Environment.objects["object_types"]
         return self._input_object_types
 
     @property
@@ -1143,7 +1131,7 @@ class WeightedObjectVectorCells(riab_neurons.ObjectVectorCells):
         """
 
         if not hasattr(self, "_input_object_locations"):
-            self._input_object_locations = self.Agent.Environment.objects["objects"]
+            self._input_object_locations = self.Environment.objects["objects"]
         return self._input_object_locations
 
     @property
@@ -1163,9 +1151,7 @@ class WeightedObjectVectorCells(riab_neurons.ObjectVectorCells):
 
             weight_dict = dict()
             for object_type in np.unique(self.input_object_types):
-                object_name = self.Agent.Environment.object_type_num_to_name_dict[
-                    object_type
-                ]
+                object_name = self.Environment.object_type_num_to_name_dict[object_type]
 
                 if not hasattr(self, f"{object_name}_weight"):
                     continue
@@ -1196,9 +1182,7 @@ class WeightedObjectVectorCells(riab_neurons.ObjectVectorCells):
             object_types, counts = np.unique(self.object_types, return_counts=True)
             _neuron_type_dict = dict()
             for object_type, count in zip(object_types, counts):
-                object_name = self.Agent.Environment.object_type_num_to_name_dict[
-                    object_type
-                ]
+                object_name = self.Environment.object_type_num_to_name_dict[object_type]
                 if "teleport" in object_name:
                     object_name = "teleport"
 
@@ -1238,9 +1222,7 @@ class WeightedObjectVectorCells(riab_neurons.ObjectVectorCells):
 
         tuning_types = list()
         for object_type in np.unique(self.object_types):
-            object_name = self.Agent.Environment.object_type_num_to_name_dict[
-                object_type
-            ]
+            object_name = self.Environment.object_type_num_to_name_dict[object_type]
             if object_name == "novel":
                 tuning_types.extend([object_type] * self.num_novel)  # type: ignore[attr-defined]
             elif object_name == "reward":

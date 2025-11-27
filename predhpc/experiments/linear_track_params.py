@@ -205,7 +205,7 @@ def run_linear_track(
             Pyrs_or_learner=Pyrs,
             use_Hebbian=False,
             BTSP_on=skip_runs + 1,
-            max_num_steps=num_steps,
+            num_steps_can_stop=num_steps,
             record_weights_at_BTSP=False,
             no_logs=disable_tqdm,
             plot=plot,

@@ -904,7 +904,7 @@ def init_rate_map_axes(
     if target_neurons is not None:
         for i, sub_ax in enumerate(axes.ravel()):
             if i < num_plots:
-                target_neurons.Agent.Environment.plot_environment(
+                target_neurons.Environment.plot_environment(
                     sub_ax=sub_ax,
                     autosave=False,
                     **kwargs,
@@ -914,6 +914,31 @@ def init_rate_map_axes(
         sub_ax.axis("off")
 
     return axes
+
+
+def match_clims(axlist, image_idx=-1):
+    """
+    match_clims(axlist)
+
+    Match the color limits for the images in a list of subplots.
+
+    Args:
+    - axlist (list): List of subplots to match color limits for.
+    - image_idx (int, optional): Index of the image to match color limits for.
+        Default is -1 (last image).
+
+    Returns:
+    - vmin (float): Minimum color limit.
+    - vmax (float): Maximum color limit.
+    """
+
+    vmin = min([sub_ax.get_images()[image_idx].get_clim()[0] for sub_ax in axlist])
+    vmax = max([sub_ax.get_images()[image_idx].get_clim()[1] for sub_ax in axlist])
+    for sub_ax in axlist:
+        im = sub_ax.get_images()[image_idx]
+        im.set_clim(vmin, vmax)
+
+    return vmin, vmax
 
 
 def add_dummy_colorbar_axis(
@@ -1611,7 +1636,7 @@ def plot_binned_rates(
     return ax
 
 
-def plot_CC_across_periods(CC, sub_ax=None):
+def plot_CC_across_periods(CC, sub_ax=None, vmin=0, vmax=1, clabel="Similarity"):
     """
     plot_CC_across_periods(CC)
 
@@ -1620,6 +1645,9 @@ def plot_CC_across_periods(CC, sub_ax=None):
     Args:
     - CC (2D np.ndarray): Correlation matrix across time periods.
     - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
+    - vmin (float, optional): Minimum value for colormap. Default is 0.
+    - vmax (float, optional): Maximum value for colormap. Default is 1.
+    - clabel (str, optional): Colorbar label. Default is "Similarity".
 
     Returns:
     - sub_ax (plt.Axes): Subplot with the correlation matrix plotted.
@@ -1629,11 +1657,11 @@ def plot_CC_across_periods(CC, sub_ax=None):
         fig, sub_ax = plt.subplots(figsize=(4, 3))
     else:
         fig = sub_ax.figure
-    im = sub_ax.imshow(CC, vmin=0, vmax=1)
+    im = sub_ax.imshow(CC, vmin=vmin, vmax=vmax)
     cbar = fig.colorbar(im)
-    cbar.ax.set_ylabel("Similarity")
-    sub_ax.set_xlabel("Binned time periods")
-    sub_ax.set_ylabel("Binned time periods")
+    cbar.ax.set_ylabel(clabel)
+    sub_ax.set_xlabel(f"Binned time periods ({CC.shape[0]})")
+    sub_ax.set_ylabel(f"Binned time periods ({CC.shape[1]})")
     sub_ax.set_xticks(list())
     sub_ax.set_yticks(list())
 

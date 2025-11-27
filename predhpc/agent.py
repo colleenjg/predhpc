@@ -170,6 +170,37 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         self._last_end_step = -1
 
     @property
+    def num_steps_total(self):
+        """
+        self.num_steps_total
+
+        Obtain the total number of steps taken by the agent.
+
+        Returns:
+        - num_steps_total (int): Total number of steps taken.
+        """
+
+        num_steps_total = len(self.history["t"])
+        return num_steps_total
+
+    @property
+    def current_trajectory_length(self):
+        """
+        self.current_trajectory_length
+
+        Obtain the current trajectory length for the agent.
+
+        Returns:
+        - current_trajectory_length (int): Length of the current trajectory.
+        """
+
+        if not hasattr(self, "current_trajectory_start"):
+            raise AttributeError("current_trajectory_start attribute is not set.")
+
+        current_trajectory_length = self.num_steps_total - self.current_trajectory_start
+        return current_trajectory_length
+
+    @property
     def target_df_columns(self) -> list:
         """
         self.target_df_columns
@@ -280,7 +311,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         from the exponential distribution.
 
         Attributes:
-        - current_trajectory_length (int): Current trajectory length.
+        - current_trajectory_start (int): Start step of the current trajectory.
         - num_steps_total (int): Total number of steps taken.
         - trajectory_length (int): Target length of the current trajectory.
         - trajectory_lengths (1D np.ndarray): All trajectory lengths.
@@ -304,7 +335,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             )
 
         self.trajectory_lengths = None
-        self.current_trajectory_length = 0
+        self.current_trajectory_start = int(self.num_steps_total)
         if self.trajectory_length is not None:
             if not isinstance(self.trajectory_length, int):
                 self.trajectory_length = np.maximum(self.trajectory_length, 1)
@@ -312,8 +343,6 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                     raise ValueError("If passing iterable, must have length > 0.")
                 self.trajectory_lengths = self.trajectory_length
                 self.trajectory_length = self.trajectory_lengths[0]
-
-        self.num_steps_total = 0
 
     def _add_new_trajectory_to_df(self):
         """
@@ -1127,7 +1156,9 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         - completed_df (pd.DataFrame): Dataframe of all completed trajectories.
         """
 
-        completed_df = self.trajectory_df.loc[self.trajectory_df["end_step"].notna()]
+        completed_df = self.trajectory_df.loc[
+            self.trajectory_df["end_step"].notna()
+        ].copy()
 
         return completed_df
 
@@ -1145,7 +1176,9 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         return num_completed_trajectories
 
-    def get_trajectory_lengths(self, t_start=None, t_end=None, complete_only=False):
+    def get_trajectory_lengths(
+        self, t_start=None, t_end=None, complete_only=False, min_length: int = 1
+    ):
         """
         self.get_trajectory_lengths()
 
@@ -1158,6 +1191,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         - complete_only (bool, optional): If True, only include trajectories that fit
             completely in the time constraints. Otherwise, the length for the first
             and last trajectories may be truncated. Default is False.
+        - min_length (int, optional): Minimum trajectory length (in steps) to include.
+            Default is 1.
 
         Returns:
         - trajectory_lengths (list): Lengths of all trajectories.
@@ -1165,8 +1200,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         _, startid, endid = self.get_plotting_times(t_start=t_start, t_end=t_end)
 
-        start_steps = self.trajectory_df["start_step"].values
-        end_steps = self.trajectory_df["end_step"].values
+        start_steps = self.trajectory_df["start_step"].values.copy()
+        end_steps = self.trajectory_df["end_step"].values.copy()
 
         if len(end_steps) and np.isnan(end_steps)[-1]:
             if complete_only:
@@ -1200,6 +1235,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             end_steps = end_steps[:end_idx]
 
         trajectory_lengths = (end_steps - start_steps).astype(int)
+
+        trajectory_lengths = trajectory_lengths[trajectory_lengths >= min_length]
 
         return trajectory_lengths
 
@@ -1248,20 +1285,21 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         print(log_str)
 
-    def log_trajectories(self):
+    def log_trajectories(self, min_length: int = 3):
         """
         self.log_trajectories()
 
         Log the trajectory lengths.
         """
 
-        trajectory_lengths = self.get_trajectory_lengths()
+        trajectory_lengths = self.get_trajectory_lengths(min_length=min_length)
+
         print(
             f"Trajectory lengths ({len(trajectory_lengths)}) "
             f"(in steps): {trajectory_lengths}"
         )
 
-    def log_trajectory_stats(self, log_as_time: bool = True):
+    def log_trajectory_stats(self, log_as_time: bool = True, min_length: int = 3):
         """
         self.log_trajectory_stats()
 
@@ -1272,7 +1310,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             (sec/min). Otherwise, they are logged in steps. Default is True.
         """
 
-        traj_lengths = self.get_trajectory_lengths()
+        traj_lengths = self.get_trajectory_lengths(min_length=min_length)
         traj_length_unit = "steps"
 
         # get trajectory lengths in seconds
@@ -1526,10 +1564,10 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         if min_steps_btw > 0 and len(reached_position_steps) > 1:
             step_diff = np.diff(reached_position_steps)
-            keep_steps = np.concatenate(
+            keep_idxs = np.concatenate(
                 [[0], np.where(step_diff >= min_steps_btw)[0] + 1]
             )
-            reached_position_steps = reached_position_steps[keep_steps]
+            reached_position_steps = reached_position_steps[keep_idxs]
 
         return reached_position_steps
 
@@ -1648,7 +1686,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         dataframe.
 
         Attributes:
-        - current_trajectory_length (int): Current trajectory length.
+        - current_trajectory_start (int): Start step of the current trajectory.
         - _end_trajectory (method): End the current trajectory.
         """
 
@@ -1660,7 +1698,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
             i = (len(self.trajectory_df) - 1) % len(self.trajectory_lengths)
             self.trajectory_length = self.trajectory_lengths[i]
 
-        self.current_trajectory_length = 0
+        self.current_trajectory_start = int(self.num_steps_total)
 
         if self.wait_after_trajectory > 0 and self._waiting_after_trajectory == 0:
             self._waiting_after_trajectory = self.wait_after_trajectory + 1
@@ -1682,7 +1720,6 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         end are reached, and if so, resets the agent.
 
         Attributes:
-        - current_trajectory_length (int): Current trajectory length.
         - manual_pos (bool): Whether position was set manually.
         - num_steps_total (int): Total number of steps taken.
         - pos (1D np.ndarray): Position.
@@ -1720,9 +1757,6 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         if self.Environment.dimensionality == "1D" and self.fixed_direction:
             self._check_and_adjust_current_velocity_for_1D(dt=dt)
-
-        self.current_trajectory_length += 1
-        self.num_steps_total += 1
 
     def get_speed_label(self, linear=True, directional=False, cm=True, incl_unit=True):
         """
@@ -2382,7 +2416,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         alpha: float = 0.6,
         color: str = "k",
         s: int | float | None = None,
-        base_s: int | float | None = None,
+        base_obj_s: int | float | None = None,
         obj_lw: float = 1,
         plot_targets: bool = True,
         rasterize_traj: bool = False,
@@ -2411,7 +2445,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         - color (str, optional): Trajectory point color or colors. Default is 'k'.
         - s (float, optional): Size of trajectory scatterplot markers. If None,
             defaults are used. Default is None.
-        - base_s (float, optional): Base size of scatterplot markers for objects in
+        - base_obj_s (float, optional): Base size of scatterplot markers for objects in
             environment. If None, defaults are used. Default is None.
         - obj_lw (float, optional): Line width for objects. Default is 1.
         - plot_targets (bool, optional): Whether to plot the target. Default is True.
@@ -2453,8 +2487,8 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         if s is None:
             s = 1 if self.Environment.D == 1 else 3
-        if base_s is None:
-            base_s = s * 10 / self.Environment.D
+        if base_obj_s is None:
+            base_obj_s = s * 10 / self.Environment.D
 
         alpha = alpha / self.Environment.D
         alpha_pts = 0.9 / self.Environment.D
@@ -2473,7 +2507,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 self.add_position_across_time_to_plot(
                     sub_ax,
                     position_name=position_name,
-                    base_s=base_s,
+                    base_s=base_obj_s,
                     lw=obj_lw,
                     alpha=alpha_pts,
                     t_start=t_start,
@@ -2847,7 +2881,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
                 alpha=alpha,
                 color=colors,
                 s=0.02,
-                base_s=10,
+                base_obj_s=10,
                 plot_targets=plot_target,
                 xlim=xlim,
                 autosave=False,
@@ -3063,7 +3097,7 @@ class TAgent(ResetableAgent):
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
 
-        if not isinstance(Env, env.TEnv):
+        if not gen_util.attribute_type_checker(Env, "TEnv"):
             raise TypeError("Env must be a TEnv object.")
 
         super().__init__(Env, self.params)
@@ -3641,7 +3675,7 @@ class OpenFieldAgent(ResetableAgent):
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
 
-        if not isinstance(Env, env.OpenField):
+        if not gen_util.attribute_type_checker(Env, "OpenField"):
             raise TypeError("Env must be an OpenField object.")
 
         self.allow_teleportation(False)  # only enable after initialization
@@ -4614,7 +4648,7 @@ class OpenFieldAgent(ResetableAgent):
             pair_nums = self.teleportation_df["teleport_pair_num"].tolist()
             teleport_str = "\n    ".join(
                 [
-                    f"through pair {pair_num} at step {step} ({self.history['t'][step]:.2f} sec.)"
+                    f"through pair {pair_num} at step {step} ({self.history['t'][step - 1]:.2f} sec.)"
                     for step, pair_num in zip(step_nums, pair_nums)
                 ]
             )
@@ -4657,7 +4691,7 @@ class OpenFieldAgent(ResetableAgent):
         all positions, including target.
 
         Attributes:
-        - current_trajectory_length (int): The current trajectory length.
+        - current_trajectory_start (int): The start step of the current trajectory.
         - trajectory_lengths (list): List of trajectory lengths.
 
         Args:
@@ -4672,7 +4706,7 @@ class OpenFieldAgent(ResetableAgent):
             i = (len(self.trajectory_df) - 1) % len(self.trajectory_lengths)
             self.trajectory_length = self.trajectory_lengths[i]
 
-        self.current_trajectory_length = 0
+        self.current_trajectory_start = int(self.num_steps_total)
 
         self._add_new_trajectory_to_df()
 
@@ -5017,7 +5051,7 @@ class OpenFieldAgent(ResetableAgent):
                     label = None
 
                 if timeseries:
-                    x_pos = t[step_num]
+                    x_pos = t[step_num - 1]
                     pos = [x_pos, y_pos]
                     plot_params["s"] /= 2
                     if plot_lines:
@@ -5039,7 +5073,7 @@ class OpenFieldAgent(ResetableAgent):
                             marker="s",
                         )
                 else:
-                    pos = self.history["pos"][step_num + startid]
+                    pos = self.history["pos"][step_num + startid - 1]
 
                 if plot_markers:
                     sub_ax.scatter(*pos, alpha=alpha, label=label, **plot_params)
@@ -5419,7 +5453,7 @@ class OpenFieldAgent(ResetableAgent):
 
             object_type = self.teleportation_df.loc[idx, "in_object_type_num"]
             color = env_plot_params_dict[object_type]["color"]
-            sub_ax.axvline(t[step], color=color, ls="dashed", alpha=0.8, zorder=-1)
+            sub_ax.axvline(t[step - 1], color=color, ls="dashed", alpha=0.8, zorder=-1)
 
         # plot target objects
         env_plot_params_dict_copy = copy.deepcopy(env_plot_params_dict)
