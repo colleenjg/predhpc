@@ -2049,8 +2049,9 @@ def plot_openfield_multitarget_remapping(learner=None, plot_type="summary", **kw
     Args:
     - learner (Learner): Learner object for openfield multitarget.
         If None, a new Learner object is created.
-    - plot_type (str): Type of plot to produce. Options are "summary", "pre-post",
-        "correlations" or see plot_openfield_multitarget(). Default is "summary".
+    - plot_type (str): Type of plot to produce. Options are "summary",
+        "pre_post_weights", "pre_post_BTSP", "correlations" or see
+        plot_openfield_multitarget(). Default is "summary".
 
     Keyword Args:
     - **kwargs: Additional keyword arguments passed to plotting functions.
@@ -2065,14 +2066,14 @@ def plot_openfield_multitarget_remapping(learner=None, plot_type="summary", **kw
             time_in_min_can_stop=OPENFIELD_TIME_IN_MIN,
         )
 
-    if plot_type == "pre-post":
+    if plot_type == "pre_post_weights":
         ax = paper_plot_fcts.plot_openfield_remapping_pre_post_weights(
             learner, **kwargs
         )
     elif plot_type == "correlations":
-        ax = paper_plot_fcts.plot_openfield_remapping_correlation_matrices(
-            learner, **kwargs
-        )
+        ax = paper_plot_fcts.plot_remapping_correlation_matrices(learner, **kwargs)
+    elif plot_type == "pre_post_BTSP":
+        ax = paper_plot_fcts.plot_remapping_pre_post_BTSP(learner, **kwargs)
     else:
         if plot_type == "summary":
             kwargs["after_remap"] = True
@@ -2266,7 +2267,7 @@ def get_fig_dict():
         8: {
             "A": {
                 "fct": plot_openfield_multitarget_remapping,
-                "plot_type": "pre-post",
+                "plot_type": "pre_post_weights",
             },
             "B-D": {
                 "fct": plot_openfield_multitarget_remapping,
@@ -2278,7 +2279,7 @@ def get_fig_dict():
                 "n": 9,
             },
             "F": {"fct": plot_openfield_multitarget_remapping, "plot_type": "counts"},
-            "G-H": {
+            "G": {
                 "fct": plot_openfield_multitarget_remapping,
                 "plot_type": "correlations",
             },

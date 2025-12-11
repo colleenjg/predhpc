@@ -259,6 +259,43 @@ def add_1D_position_markers(
         )
 
 
+def add_regression_line(sub_ax, x_data, y_data, prop_x=0.2, prop_y=0.95, log=True):
+    """
+    add_regression_line(sub_ax, x_data, y_data)
+
+    Adds a linear regression line to the given subplot.
+
+    Args:
+    - sub_ax (plt.Axes): Subplot to which to add the regression line.
+    - x_data (1D np.ndarray): X data for the regression.
+    - y_data (1D np.ndarray): Y data for the regression.
+    - prop_x (float, optional): Proportion along the x-axis to place the regression
+        equation text. Default is 0.2.
+    - prop_y (float, optional): Proportion along the y-axis to place the regression
+        equation text. Default is 0.95.
+    - log (bool, optional): If True, prints R^2 and p-value of the regression.
+        Default is True.
+
+    Returns:
+    - regr (LinregressResult): Result of the linear regression.
+    """
+
+    regr = scipy.stats.linregress(x_data, y_data)
+    x = np.asarray(sub_ax.get_xlim())
+    y = x * regr.slope + regr.intercept
+    sub_ax.plot(x, y, alpha=0.6, color="k", ls="dashed", zorder=-5, lw=LW)
+
+    regr_str = f"y = {regr.slope:.2f}x + {regr.intercept:.2f}"
+    x_text = gen_util.get_proportion_edges(sub_ax.get_xlim(), prop=prop_x)
+    y_text = gen_util.get_proportion_edges(sub_ax.get_ylim(), prop=prop_y)
+    sub_ax.text(x_text, y_text, regr_str, fontsize=12)
+
+    if log:
+        print(f"R^2: {regr.rvalue**2:.2f}, p-value: {regr.pvalue:.4f}")
+
+    return regr
+
+
 def get_BTSP_times_and_cmap(NeuronLayer, BTSP_idx=0):
     """
     get_BTSP_times_and_cmap(NeuronLayer)
@@ -791,7 +828,9 @@ def plot_BTSP_responses(Pyrs, sub_ax=None, **kwargs):
     return sub_ax
 
 
-def plot_BTSP_counts_vs_target_visits(Pyrs, hline=None, xmin=None, max_spread=0.1):
+def plot_BTSP_counts_vs_target_visits(
+    Pyrs, hline=None, xmin=None, plot_regression=False
+):
     """
     plot_BTSP_counts_vs_target_visits(Pyrs)
 
@@ -799,18 +838,33 @@ def plot_BTSP_counts_vs_target_visits(Pyrs, hline=None, xmin=None, max_spread=0.
 
     Args:
     - Pyrs (Pyr): Pyr object.
+    - hline (float, optional): Y-value at which to draw a horizontal line.
+        Default is None.
+    - xmin (float, optional): Minimum x-value for the plot. Default is None.
+    - plot_regression (bool, optional): Whether to plot a regression line.
+        Default is False.
 
     Returns:
     - sub_ax (plt.Axes): Subplot with the plotted BTSP counts versus target visits.
     """
 
     _, sub_ax = plt.subplots(figsize=(2.5, 1.8))
+
+    num_BTSP = Pyrs.SomaticCompartment.get_BTSP_counts().max()
+
+    max_spread = max(0.1, min(0.5, 0.1 * num_BTSP))
+
     Pyrs.plot_BTSP_counts_vs_target_visits(
         sub_ax=sub_ax, alpha=0.8, max_spread=max_spread, hline=hline, xmin=xmin
     )
     sub_ax.set_title("")
     sub_ax.set_xlabel("Object visits")
     sub_ax.set_ylabel("BTSP events")
+
+    if plot_regression:
+        nbr_visits = Pyrs.get_nbr_visits_per_target()
+        BTSP_counts = Pyrs.SomaticCompartment.get_BTSP_counts()
+        add_regression_line(sub_ax, nbr_visits, BTSP_counts, prop_x=0.1, prop_y=0.8)
 
     return sub_ax
 
@@ -1345,18 +1399,9 @@ def plot_linear_speed_PF_widths(
         start_idx=start_y_idx,
     )
 
-    # Add regression line last
-    regr = scipy.stats.linregress(speed_data["speed_means"], PF_widths)
-    x = np.asarray(sub_ax.get_xlim())
-    y = x * regr.slope + regr.intercept
-    sub_ax.plot(x, y, alpha=0.6, color="k", ls="dashed", zorder=-5, lw=LW)
+    add_regression_line(sub_ax, speed_data["speed_means"], PF_widths)
 
-    regr_str = f"y = {regr.slope:.2f}x + {regr.intercept:.2f}"
-    x_text = sub_ax.get_xlim()[1] * 0.2
-    y_text = np.diff(sub_ax.get_ylim()) * 0.95 + sub_ax.get_ylim()[0]
-    sub_ax.text(x_text, y_text, regr_str, fontsize=12)
-
-    regr_kwargs = {
+    mark_kwargs = {
         "color": color,
         "ls": "dotted",
         "lw": LW,
@@ -1374,12 +1419,12 @@ def plot_linear_speed_PF_widths(
         sub_ax.plot(
             [speed_mean, speed_mean],
             [ymin, width],
-            **regr_kwargs,
+            **mark_kwargs,
         )
         sub_ax.plot(
             [xmin, speed_mean],
             [width, width],
-            **regr_kwargs,
+            **mark_kwargs,
         )
 
     return sub_ax
@@ -3033,19 +3078,83 @@ def plot_openfield_remapping_pre_post_weights(learner):
     return ax1D
 
 
-def plot_openfield_remapping_correlation_matrices(
-    learner, num_periods=[40, 200], approximate=True
+def plot_remapping_pre_post_BTSP(
+    learner, applied_only=False, alpha=0.5, plot_regression=False
 ):
     """
-    plot_openfield_remapping_correlation_matrices(learner)
+    plot_remapping_pre_post_BTSP(learner)
 
-    Plots correlation matrices showing neural correlations across time in an openfield
-    remapping experiment.
+    Plots number of BTSP events pre- and post-remapping for a remapping experiment.
 
     Args:
     - learner (Learner): Learner object containing the experiment data.
-    - num_periods (list of int, optional): List of number of periods to use for
-        correlation matrix calculation. Default is [40, 200].
+
+    Returns:
+    - sub_ax (plt.Axes): Subplot with the plotted BTSP events pre and post remapping.
+    """
+
+    _, sub_ax = plt.subplots(figsize=(2.5, 1.8))
+    remap_step = get_learner_remap_step(learner, idx=0, num_total=1)
+    remap_time = remap_step * learner.Agent.dt
+
+    times = [(None, remap_time), (remap_time, None)]
+    BTSP_counts = list()
+    for t_start, t_end in times:
+        num_BTSP = learner.Pyrs.SomaticCompartment.get_BTSP_counts(
+            t_start=t_start, t_end=t_end, applied_only=applied_only
+        )
+        BTSP_counts.append(num_BTSP)
+
+    BTSP_pre, BTSP_post = BTSP_counts
+
+    max_spread = max(0.1, min(0.5, 0.1 * BTSP_pre.max()))
+    BTSP_pre_plot = gen_util.spread_data(BTSP_post, BTSP_pre, max_spread=max_spread)
+
+    sub_ax.scatter(
+        BTSP_pre_plot,
+        BTSP_post,
+        color=learner.Pyrs.SomaticCompartment.color,
+        alpha=alpha,
+        s=10,
+    )
+
+    for i, axis in enumerate(["x", "y"]):
+        ticks = np.arange(BTSP_counts[i].max() + 1)
+        if len(ticks) > 5:
+            ticks = ticks[:: int(len(ticks) / 5) + 1]
+        tick_setter = sub_ax.set_xticks if axis == "x" else sub_ax.set_yticks
+        tick_setter(ticks)
+        lim_getter = sub_ax.get_xlim if axis == "x" else sub_ax.get_ylim
+        if lim_getter()[0] > 0:
+            lim_setter = sub_ax.set_xlim if axis == "x" else sub_ax.set_ylim
+            lim_setter(0, None)
+
+    plot_util.pad_axis(sub_ax, axis="x", pad_prop=0.2)
+    plot_util.pad_axis(sub_ax, axis="y")
+
+    sub_ax.spines[["right", "top"]].set_visible(False)
+
+    sub_ax.set_title("")
+    sub_ax.set_xlabel("BTSP events (pre)")
+    sub_ax.set_ylabel("BTSP events (post)")
+
+    if plot_regression:
+        add_regression_line(sub_ax, BTSP_pre, BTSP_post, prop_x=0.1, prop_y=0.75)
+
+    return sub_ax
+
+
+def plot_remapping_correlation_matrices(learner, num_periods=40, approximate=True):
+    """
+    plot_remapping_correlation_matrices(learner)
+
+    Plots correlation matrices showing neural correlations across time in a remapping
+    experiment.
+
+    Args:
+    - learner (Learner): Learner object containing the experiment data.
+    - num_periods (int or list of int, optional): Number of periods or list of number
+        of periods to use for correlation matrix calculation. Default is 40.
     - approximate (bool, optional): Whether to calculate a number of periods near the
         values provided to place remapping transition between periods, instead of
         using the exact values. Default is True.
@@ -3064,6 +3173,9 @@ def plot_openfield_remapping_correlation_matrices(
     pre_remap_step = BTSP_steps[BTSP_steps < remap_step].max()
     post_remap_step = BTSP_steps[BTSP_steps > remap_step].max()
 
+    if isinstance(num_periods, int):
+        num_periods = [num_periods]
+
     if approximate:
         num_periods_approx = list()
         for num in num_periods:
@@ -3077,7 +3189,10 @@ def plot_openfield_remapping_correlation_matrices(
             num_periods_approx.append(num)
         num_periods = num_periods_approx
 
-    _, ax1D = plt.subplots(1, len(num_periods), figsize=(len(num_periods) * 3.3, 2.3))
+    _, axes = plt.subplots(
+        1, len(num_periods), figsize=(len(num_periods) * 3.3, 2.3), squeeze=False
+    )
+    ax1D = axes.ravel()
     for i, num in enumerate(num_periods):
         clabel = "Correlation" if i == len(num_periods) - 1 else ""
         learner.Pyrs.SomaticCompartment.get_firingrate_CC_matrix(
