@@ -136,6 +136,8 @@ def gather_learner_data(
             learner.Environment.horizontal_in_from_left
         )
 
+    data_dict = metrics.add_traj_idxs_from_times(data_dict, learner)
+
     return data_dict
 
 
@@ -149,9 +151,10 @@ def aggregate_from_data_dicts(data_dicts):
     Args:
     - data_dicts (list of dict): List of data dictionaries to compile with the
         following keys: "PC_place_centers", "PC_weights", "PFs", "PF_centers",
-        "PF_times", "BTSP_times", "num_BTSP", and optionally
-        "visit_times", "num_visits", "norm_values", "seed", and
-        optionally "teleportation_times", "num_teleportations".
+        "PF_times", "PF_traj_idxs", "BTSP_times", "BTSP_traj_idxs", "num_BTSP", and
+        optionally "visit_times", "visit_traj_idxs", "num_visits", "norm_values",
+        "seeds", "end_time_initial", "teleportation_times", "teleportation_traj_idxs",
+        "num_teleportations".
     - seeds (list of int, optional): List of seeds corresponding to each data
         dictionary. Default is None.
 
@@ -178,28 +181,23 @@ def aggregate_from_data_dicts(data_dicts):
         )
         teleportation_shape = (len(data_dicts), max_num_teleportations)
 
+    keys_to_reshape = ["PC_weights", "PC_smoothed_weights", "PFs", "norm_values"]
+    for key_start in ["PF", "BTSP", "BTSP_applied", "visit", "teleportation"]:
+        for key_end in ["times", "traj_idxs"]:
+            keys_to_reshape.append(f"{key_start}_{key_end}")
+
     data_dict = dict()
     for key in data_dicts[0].keys():
         if key in ["PC_place_centers", "PF_centers"]:
             data_dict[key] = data_dicts[0][key]
-        elif key in [
-            "PC_weights",
-            "PC_smoothed_weights",
-            "PFs",
-            "PF_times",
-            "norm_values",
-            "BTSP_applied_times",
-            "BTSP_times",
-            "visit_times",
-            "teleportation_times",
-        ]:
-            if key == "visit_times":
+        elif key in keys_to_reshape:
+            if key in ["visit_times", "visit_traj_idxs"]:
                 shape = visit_shape
-            elif key == "teleportation_times":
+            elif key in ["teleportation_times", "teleportation_traj_idxs"]:
                 shape = teleportation_shape
-            elif key == "BTSP_times":
+            elif key in ["BTSP_times", "BTSP_traj_idxs"]:
                 shape = BTSP_shape
-            elif key == "BTSP_applied_times":
+            elif key in ["BTSP_applied_times", "BTSP_applied_traj_idxs"]:
                 shape = BTSP_applied_shape
             else:
                 shape = weights_shape
@@ -209,13 +207,20 @@ def aggregate_from_data_dicts(data_dicts):
                 data = sub_data_dict[key]
                 data_dict[key][j, : data.shape[0]] = data
         else:
-            data_dict[key] = np.asarray([data_dict[key] for data_dict in data_dicts])
+            data_dict[key] = np.asarray(
+                [sub_data_dict[key] for sub_data_dict in data_dicts]
+            )
 
     if "seed" in data_dict.keys():
         data_dict["seeds"] = data_dict.pop("seed")
 
-    if "end_time" in data_dict.keys():
-        data_dict["end_times"] = data_dict.pop("end_time")
+    for key in "end_time", "end_time_initial":
+        if key in data_dict.keys():
+            data_dict[key.replace("time", "times")] = data_dict.pop(key)
+
+    for key in "end_traj_idx", "end_traj_idx_initial":
+        if key in data_dict.keys():
+            data_dict[key.replace("idx", "idxs")] = data_dict.pop(key)
 
     if "target_shift" in data_dict.keys():
         data_dict["target_shifts"] = data_dict.pop("target_shift")
@@ -291,7 +296,7 @@ def log_max_normalization_value(norm_values):
     print(log_str)
 
 
-def log_num_BTSP_if_above(num_BTSP, above=1):
+def log_num_BTSP_if_above(num_BTSP, above=1, traj_idxs=None):
     """
     log_num_BTSP_if_above(num_BTSP, above=1)
 
@@ -300,6 +305,7 @@ def log_num_BTSP_if_above(num_BTSP, above=1):
     Args:
     - num_BTSP (1D np.ndarray): Number of BTSP events recorded.
     - above (int): Threshold value. Default is 1.
+    - log_traj_idx (bool): Whether to log trajectory indices. Default is False.
     """
 
     if np.any(num_BTSP > above):
@@ -308,7 +314,17 @@ def log_num_BTSP_if_above(num_BTSP, above=1):
             if n > above:
                 n_strs.append(f"{n} in {np.sum(num_BTSP == n)}/{len(num_BTSP)}")
         event_str = "event" if above == 1 else "events"
-        log_str = f"More than {above} BTSP {event_str}: {', '.join(n_strs)}."
+        log_str = f"More than {above} BTSP {event_str}: {', '.join(n_strs)}"
+        if traj_idxs is None:
+            traj_str = "."
+        else:
+            traj_idx_min = int(np.nanmin(traj_idxs))
+            traj_idx_max = int(np.nanmax(traj_idxs))
+            if traj_idx_min != traj_idx_max:
+                traj_str = f" (btw traj. {traj_idx_min + 1} and {traj_idx_max + 1})."
+            else:
+                traj_str = f" (on traj. {traj_idx_min + 1})."
+        log_str = f"{log_str}{traj_str}"
         print(log_str)
 
 
@@ -417,6 +433,7 @@ def run_linear(
     Pyrs=None,
     num_steps_can_stop=5000,
     time_in_min_can_stop=None,
+    num_target_reaches_can_stop=None,
     BTSP_on=None,
     seed=True,
     inhibition="balanced",
@@ -441,6 +458,8 @@ def run_linear(
         stop. If specified, it overrides num_steps_can_stop. Note that additional
         criteria (trajectory completion, minimum number of BTSP events, etc.) may
         prolong learning. Default is None.
+    - num_target_reaches_can_stop (int or None, optional): Number of target reaches
+        after which early stopping can occur. Default is None.
     - BTSP_on (int): Trajectory on which to turn on BTSP. 1 for first trajectory.
         Default is None.
     - seed (bool or int): Whether to seed the random number generator with the paper
@@ -489,7 +508,7 @@ def run_linear(
         Pyrs,
         BTSP_on=BTSP_on,
         num_steps_can_stop=num_steps_can_stop,
-        num_target_reaches_can_stop=None,
+        num_target_reaches_can_stop=num_target_reaches_can_stop,
         plot=False,
         no_logs=no_logs,
         **kwargs,
@@ -610,13 +629,20 @@ def run_linear_speed(
         - "PC_smoothed_weights": Smoothed place cell input weights.
         - "PC_smoothed_weight_widths": Last smoothed place cell input weight widths.
         - "PFs": Place fields computed from history.
+        - "PF_times": Times used to compute each place field.
+        - "PF_traj_idxs": Trajectory indices corresponding to times used to compute
+            each place field.
         - "PF_centers": Place field centers.
         - "PF_widths": Last place field widths.
         - "BTSP_times": Times of BTSP events.
+        - "BTSP_traj_idxs": Trajectory indices of BTSP events.
         - "num_BTSP": Number of BTSP events.
-        - "BTSP_applied_times": Times when BTSP events were applied.
+        - "BTSP_applied_traj_idxs": Trajectory indices of applied BTSP events.
         - "num_BTSP_applied": Number of applied BTSP events.
+        - "end_time_initial": End time after initial learning phase.
+        - "end_traj_idx_initial": End trajectory index after initial learning phase.
         - "end_time": End time of the experiment.
+        - "end_traj_idx": End trajectory index of the experiment.
         - "norm_values": Weight normalization values used.
         if seed:
         - "seed": Seed for the experiment.
@@ -653,7 +679,8 @@ def run_linear_speed(
     if num_BTSP_applied == 0:
         raise RuntimeError("No BTSP occurred.")
 
-    # t_start = Pyrs.Agent.t
+    end_time_initial = Pyrs.Agent.t
+
     Pyrs.Agent.set_speed(mean=test_speed_mean, std=test_speed_std)
     run_linear(
         Pyrs,
@@ -664,7 +691,13 @@ def run_linear_speed(
         seed=False,
     )
 
-    data_dict = gather_learner_data(learner, seed=seed, k=k, speed_mean=speed_mean)
+    data_dict = gather_learner_data(
+        learner,
+        seed=seed,
+        k=k,
+        speed_mean=speed_mean,
+        end_time_initial=end_time_initial,
+    )
 
     return learner, data_dict
 
@@ -711,17 +744,29 @@ def run_linear_speeds(
         - "PFs" (3D np.ndarray): Array of place fields computed from history with shape
             (speeds, fields, centers).
         - "PF_widths" (1D np.ndarray): Array of last place field widths.
-        - "PF_times" (3D np.ndarray): Array of start and end times for place fields
-            computed from history with shape (speeds, fields, 2).
+        - "PF_times" (3D np.ndarray): Array of times used to compute each place field
+            with shape (speeds, fields, 2).
+        - "PF_traj_idxs" (3D np.ndarray): Array of trajectory indices corresponding to
+            times used to compute each place field with shape (speeds, fields, 2).
         - "BTSP_times" (2D np.ndarray): Array of BTSP event times with shape
             (speeds, events).
+        - "BTSP_traj_idxs" (2D np.ndarray): Array of trajectory indices of BTSP events
+            with shape (speeds, events).
         - "num_BTSP" (1D np.ndarray): Number of BTSP events recorded for each speed.
         - "BTSP_applied_times" (2D np.ndarray): Array of BTSP event application times
             with shape (speeds, events).
+        - "BTSP_applied_traj_idxs" (2D np.ndarray): Array of trajectory indices of
+            applied BTSP events with shape (speeds, events).
         - "num_BTSP_applied" (1D np.ndarray): Number of BTSP events applied for each
             speed.
         - "norm_values" (2D np.ndarray): Weight normalization values used for each speed.
+        - "end_times_initial" (1D np.ndarray): End time after initial learning phase
+            for each speed.
+        - "end_traj_idxs_initial" (1D np.ndarray): End trajectory index after initial
+            learning phase for each speed.
         - "end_times" (1D np.ndarray): End time of the experiment for each speed.
+        - "end_traj_idxs" (1D np.ndarray): End trajectory index of the experiment for
+            each speed.
         - "seeds" (1D np.ndarray): Array of seeds for each speed.
     """
 
@@ -879,6 +924,7 @@ def run_linear_shift(
         - "num_BTSP_applied": Number of BTSP events that were applied in total for the
             neuron layer.
         - "norm_values": Weight normalization values used.
+        - "end_time_initial": End time after initial learning phase.
         - "end_time": End time of the experiment.
         if seed:
         - "seed": Seed for the experiment.
@@ -888,11 +934,9 @@ def run_linear_shift(
         seed = PAPER_SEED + i
         gen_util.seed_all(seed)
 
-    # initial_shift_dict = None
     if learner is None:
         learner, _ = run_linear_speed(
             speed_mean=params_util.SPEED_MEAN_LINEAR,
-            i=0,
             speed_std=speed_std,
             time_in_min_can_stop=time_in_min_can_stop,
             k=k,
@@ -907,6 +951,8 @@ def run_linear_shift(
     )
     if num_BTSP_applied != 1:
         raise RuntimeError("Learner does not have exactly one BTSP event.")
+
+    end_time_initial = learner.Pyrs.Agent.t
 
     with warnings.catch_warnings():
         warnings.filterwarnings(
@@ -938,7 +984,6 @@ def run_linear_shift(
             f"but found {num_BTSP_applied}."
         )
 
-    # t_start = learner.Pyrs.Agent.t
     run_linear(
         learner.Pyrs,
         time_in_min_can_stop=time_in_min_can_stop,
@@ -958,7 +1003,13 @@ def run_linear_shift(
     if additional > 0:
         raise RuntimeError(f"Expected no new BTSP events, but {additional} occurred.")
 
-    data_dict = gather_learner_data(learner, seed=seed, k=k, target_shift=target_shift)
+    data_dict = gather_learner_data(
+        learner,
+        seed=seed,
+        k=k,
+        target_shift=target_shift,
+        end_time_initial=end_time_initial,
+    )
 
     return learner, data_dict
 
@@ -1003,14 +1054,26 @@ def run_linear_shifts(
         - "PF_widths" (1D np.ndarray): Array of last place field widths.
         - "PF_times" (3D np.ndarray): Array of start and end times for place fields
             computed from history with shape (shifts, fields, 2).
+        - "PF_traj_idxs" (3D np.ndarray): Array of trajectory indices corresponding to
+            times used to compute each place field with shape (shifts, fields, 2).
         - "BTSP_times" (2D np.ndarray): Array of BTSP event times with shape
             (shifts, events).
+        - "BTSP_traj_idxs" (2D np.ndarray): Array of trajectory indices of BTSP events
+            with shape (shifts, events).
         - "num_BTSP" (1D np.ndarray): Number of BTSP events recorded for each shift.
         - "BTSP_applied_times" (2D np.ndarray): Array of BTSP event application times
             with shape (shifts, events).
+        - "BTSP_applied_traj_idxs" (2D np.ndarray): Array of trajectory indices of
+            applied BTSP events with shape (shifts, events).
         - "num_BTSP_applied" (1D np.ndarray): Number of BTSP events applied for each
             shift.
+        - "end_times_initial" (1D np.ndarray): End time after initial learning phase
+            for each speed.
+        - "end_traj_idxs_initial" (1D np.ndarray): End trajectory index after initial
+            learning phase for each speed.
         - "end_times" (1D np.ndarray): End time of the experiment for each shift.
+        - "end_traj_idxs" (1D np.ndarray): End trajectory index of the experiment for
+            each shift.
         - "norm_values" (2D np.ndarray): Weight normalization values used for each speed.
         - "seeds" (1D np.ndarray): Array of seeds for each shift.
     """
@@ -1172,7 +1235,8 @@ def run_linear_fct(fct_name="speeds", overwrite=False, seed=True, num_jobs=1):
         gen_util.save_np_dict(save_path, data_dict)
         gen_util.get_duration_str(start_time, log=True)
 
-    log_num_BTSP_if_above(data_dict["num_BTSP"], above=above)
+    traj_idxs = data_dict["BTSP_traj_idxs"][:, 1:] - data_dict["end_traj_idxs_initial"]
+    log_num_BTSP_if_above(data_dict["num_BTSP"], above=above, traj_idxs=traj_idxs)
     if "norm_values" in data_dict.keys():
         log_max_normalization_value(data_dict["norm_values"])
 
@@ -1522,19 +1586,29 @@ def run_openfield_corridors(seed=True, num_repeats=10):
             (repeats, fields, centers).
         - "PF_times" (3D np.ndarray): Array of start and end times for place fields
             computed from history with shape (speeds, fields, 2).
+        - "PF_traj_idxs" (3D np.ndarray): Array of trajectory indices corresponding to
+            times used to compute each place field with shape (repeats, fields, 2).
         - "BTSP_times" (2D np.ndarray): Array of times at which BTSP events were
             applied for each repeat.
+        - "BTSP_traj_idxs" (2D np.ndarray): Array of trajectory indices of BTSP events
+            with shape (repeats, events).
         - "num_BTSP" (1D np.ndarray): Number of BTSP events that were recorded for each
             run.
         - "BTSP_applied_times" (2D np.ndarray): Array of times at which BTSP events
             were applied for each repeat.
+        - "BTSP_applied_traj_idxs" (2D np.ndarray): Array of trajectory indices of
+            applied BTSP events with shape (repeats, events).
         - "num_BTSP_applied" (1D np.ndarray): Number of BTSP events that were applied
             for each run.
         - "visit_times" (1D np.ndarray): Array of times at which the agent visited the
             reward location.
+        - "visit_traj_idxs" (1D np.ndarray): Array of trajectory indices at which the
+            agent visited the reward location.
         - "num_visits" (int): Number of visits to the reward location for each run.
         - "norm_values" (1D np.ndarray): Normalization values used for each run.
         - "end_times" (1D np.ndarray): End time of the experiment for each run.
+        - "end_traj_idxs" (1D np.ndarray): End trajectory index of the experiment for
+            each run.
         - "seeds": Array of random seeds used for each run.
     """
 
@@ -1749,16 +1823,25 @@ def run_openfield_corridor_teleports(num_repeats=2, seed=True):
         - "PFs": Array of place fields computed from history.
         - "PF_centers": Array of place field centers.
         - "PF_times": Array of place field history collection times.
+        - "PF_traj_idxs": Array of trajectory indices corresponding to times used to
+            compute each place field.
         - "BTSP_times": Array of times at which BTSP events were applied.
-        - "num_BTSP": Number of BTSP events that were applied in total.
+        - "BTSP_traj_idxs": Array of trajectory indices of BTSP events.
+        - "num_BTSP": Number of BTSP events that were recorded in total.
+        - "BTSP_applied_times": Array of times at which BTSP events were applied.
+        - "BTSP_applied_traj_idxs": Array of trajectory indices of applied BTSP events.
+        - "num_BTSP_applied": Number of BTSP events that were applied.
         - "visit_times": Array of times at which the agent visited the reward location.
-        - "num_visits": Number of visits to the reward location.
+        - "visit_traj_idxs": Array of trajectory indices at which the agent visited the
+            target location.
+        - "num_visits": Number of visits to the target location.
         - "teleportation_times": Array of times at which teleportation events occurred.
         - "num_teleportations": Number of teleportation events that occurred.
         - "init_teleport_pairs": Array of teleportation pairs coordinates initialized.
         - "horizontal_in_from_left": Array of teleportation in port directions.
         - "norm_values": Normalization values used for each run.
         - "end_times": End time of the experiment for each run.
+        - "end_traj_idxs": End trajectory index of the experiment for each run.
         - "seeds": Array of random seeds used for each run.
     """
 
@@ -2205,10 +2288,10 @@ def get_fig_dict():
             },
         },
         4: {
-            "A": {"fct": plot_linear_shift_PFs, "plot_type": "examples"},
+            "A-B": {"fct": plot_linear_shift_PFs, "plot_type": "examples"},
         },
         "4S": {
-            "A": {"fct": plot_linear_shift_PFs, "plot_type": "all"},
+            "A-B": {"fct": plot_linear_shift_PFs, "plot_type": "all"},
         },
         5: {
             "A-D": {"fct": plot_openfield_corridor, "plot_type": "components"},

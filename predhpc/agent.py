@@ -521,6 +521,54 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         if std is not None:
             self.speed_std = std
 
+    def get_trajectory_idx(self, step: int | None = None, time: float | None = None):
+        """
+        self.get_trajectory_idx()
+
+        Obtain the trajectory index corresponding to a step or time.
+
+        Args:
+        - step (int, optional): Step to obtain trajectory index for. Default is None.
+        - time (float, optional): Time to obtain trajectory index for. Default is None.
+        Returns:
+        - traj_num (int): Trajectory number.
+        """
+
+        if step is not None and time is not None:
+            raise ValueError("Must provide either step or time, not both.")
+
+        if time is None:
+            if step is None:
+                raise ValueError("Step must be provided if time is not.")
+            time = step * self.dt
+
+        if time < 0:
+            raise ValueError("Time or step cannot be smaller than 0.")
+
+        if time > self.t:
+            raise ValueError(
+                f"Time or step cannot be larger than current agent time {self.t:.4f}."
+            )
+
+        start_times = self.trajectory_df["start_time"].to_numpy()
+        greater_than = np.where(time >= start_times)[0]
+        if len(greater_than) == 0:
+            raise ValueError(
+                "Time or step is before the first recorded trajectory start time "
+                f"{start_times[0]:.4f}."
+            )
+        traj_idx = greater_than[-1]
+
+        if traj_idx == len(start_times) - 1:
+            end_times = self.trajectory_df["end_time"].to_numpy()
+            if np.isfinite(end_times[-1]) and time > end_times[-1]:
+                raise ValueError(
+                    "Time or step is beyond the last recorded trajectory end time "
+                    f"{end_times[-1]:.4f}."
+                )
+
+        return traj_idx
+
     def get_step_and_time(self, step=None, min=False, as_str=False):
         """
         self.get_step_and_time()

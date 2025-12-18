@@ -380,6 +380,42 @@ def compute_BTSP_metrics(Pyrs, t_start=0, bins=21, width=WIDTH, k=1, **kwargs):
     return BTSP_metrics
 
 
+def add_traj_idxs_from_times(data_dict, learner):
+    """
+    add_traj_idxs_from_times(data_dict, learner)
+
+    Adds trajectory indices to the data dictionary based on time values.
+
+    Args:
+    - data_dict (dict): Dictionary containing time values with keys containing
+        "_times".
+    - learner (Learner): The learner object to get trajectory information from.
+
+    Modifies:
+    - data_dict: Adds new keys with trajectory indices corresponding to the time
+        values.
+    """
+
+    data_dict = data_dict.copy()
+
+    time_keys = [key for key in data_dict.keys() if "_time" in key]
+    for key in time_keys:
+        traj_key = key.replace("_time", "_traj_idx")
+        if traj_key in data_dict.keys():
+            continue
+        traj_idxs = np.full(np.asarray(data_dict[key]).ravel().shape, np.nan)
+        for i, time in enumerate(np.asarray(data_dict[key]).ravel()):
+            if np.isnan(time):
+                continue
+            traj_idxs[i] = learner.Pyrs.Agent.get_trajectory_idx(time=time)
+        if isinstance(data_dict[key], np.ndarray):
+            data_dict[traj_key] = traj_idxs.reshape(data_dict[key].shape)
+        else:
+            data_dict[traj_key] = traj_idxs[0]  # single value case
+
+    return data_dict
+
+
 def gather_PF_info(learner, k=SMOOTH_K, position_name=None, min_total=None):
     """
     gather_PF_info(learner)
@@ -400,16 +436,22 @@ def gather_PF_info(learner, k=SMOOTH_K, position_name=None, min_total=None):
     Returns:
     - PF_info (dict): A dictionary containing gathered PF information:
         - "BTSP_times": Times of applied BTSP events.
-        - "num_BTSP": Number of applied BTSP events.
+        - "BTSP_traj_idxs": Trajectory indices of applied BTSP events.
+        - "num_BTSP": Number of recorded BTSP events.
         - "BTSP_applied_times": Times of applied BTSP events.
+        - "BTSP_applied_traj_idxs": Trajectory indices of applied BTSP events.
         - "num_BTSP_applied": Number of applied BTSP events.
         - "PC_place_centers": Place cell centers.
         - "PC_weights": Place cell input weights.
         - "PFs": Place fields computed from history.
         - "PF_centers": Place field centers.
+        - "PF_times": Times used to compute each place field.
+        - "PF_traj_idxs": Trajectory indices corresponding to times used to compute
+            each place field.
 
         if position_name is not None:
         - "visit_times": Times of position visits.
+        - "visit_traj_idxs": Trajectory indices of position visits.
         - "num_visits": Number of position visits.
 
         if 1D environment:
@@ -500,14 +542,16 @@ def gather_PF_info(learner, k=SMOOTH_K, position_name=None, min_total=None):
         if PF is None:
             history_PFs[i] = np.full(PF_shape, np.nan)
 
+    PF_info["PFs"] = np.asarray(history_PFs)
+    PF_info["PF_centers"] = PF_centers
+    PF_info["PF_times"] = np.asarray(PF_times)
+
     if learner.Pyrs.Environment.D == 1:
         t_start, t_end = PF_times[last_idx]
         PF_info["PF_widths"] = compute_PF_width(
             learner.Pyrs, k=k, method="history", t_start=t_start, t_end=t_end
         )
 
-    PF_info["PFs"] = np.asarray(history_PFs)
-    PF_info["PF_centers"] = PF_centers
-    PF_info["PF_times"] = np.asarray(PF_times)
+    PF_info = add_traj_idxs_from_times(PF_info, learner)
 
     return PF_info
