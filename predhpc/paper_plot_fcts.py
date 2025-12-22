@@ -296,11 +296,19 @@ def add_regression_line(sub_ax, x_data, y_data, prop_x=0.2, prop_y=0.95, log=Tru
     return regr
 
 
-def get_BTSP_times_and_cmap(NeuronLayer, BTSP_idx=0):
+def get_BTSP_times_and_cmap(NeuronLayer, chosen_neuron=0, BTSP_idx=0):
     """
     get_BTSP_times_and_cmap(NeuronLayer)
 
     Retrieves BTSP event times and colormap for the given NeuronLayer object.
+
+    Args:
+    - NeuronLayer (NeuronLayer): The NeuronLayer for which to retrieve BTSP times and
+        colormap.
+    - chosen_neuron (int, optional): Index of the neuron to retrieve BTSP times for.
+        Default is 0.
+    - BTSP_idx (int, optional): Index of the BTSP event to retrieve times for.
+        Default is 0.
 
     Returns:
     - t_start (float): Start time for plotting.
@@ -308,7 +316,10 @@ def get_BTSP_times_and_cmap(NeuronLayer, BTSP_idx=0):
     - cmap (ListedColormap): Colormap for BTSP events.
     """
 
-    BTSP_times = NeuronLayer.get_BTSP_steps() * NeuronLayer.Agent.dt
+    BTSP_times = (
+        NeuronLayer.get_BTSP_steps(chosen_neurons=[chosen_neuron])
+        * NeuronLayer.Agent.dt
+    )
     if len(BTSP_times) == 0:
         raise RuntimeError("No BTSP events found for the neuron layer.")
     if BTSP_idx >= len(BTSP_times):
@@ -448,6 +459,81 @@ def plot_1D_PFs(
     return sub_ax
 
 
+def add_BTSP_kernel_to_timeseries(
+    NeuronLayer,
+    sub_ax,
+    chosen_neuron=0,
+    t_start=None,
+    t_end=None,
+    BTSP_kernel_s=60,
+    BTSP_kernel_lw=1,
+    plot_colorbar=True,
+    y=0,
+):
+    """
+    add_BTSP_kernel_to_timeseries(NeuronLayer, sub_ax)
+
+    Plots BTSP kernel in a neuron rate timeseries plot.
+
+    Args:
+    - NeuronLayer (NeuronLayer): The NeuronLayer for which to plot the BTSP kernel.
+    - sub_ax (plt.Axes): The subplot to plot on.
+    - chosen_neuron (int, optional): The index of the neuron to plot the BTSP kernel
+        for. Default is 0.
+    - t_start (float, optional): Start time for the plot. Default is None.
+    - t_end (float, optional): End time for the plot. Default is None.
+    - BTSP_kernel_s (int, optional): Size of the BTSP kernel markers. Default is 60.
+    - BTSP_kernel_lw (float, optional): Line width of the BTSP kernel markers.
+        Default is 1.
+    - plot_colorbar (bool, optional): Whether to plot a colorbar for the BTSP kernel.
+        Default is True.
+    - y (float, optional): Y-coordinate at which to plot the BTSP kernel. Default is 0.
+    """
+
+    num_lines = None
+    num_BTSP = len(NeuronLayer.get_BTSP_steps())
+    for BTSP_idx in range(num_BTSP):
+        BTSP_t_start, BTSP_t_end, cmap = get_BTSP_times_and_cmap(
+            NeuronLayer, chosen_neuron, BTSP_idx=BTSP_idx
+        )
+        if num_lines is None:
+            num_lines = int((BTSP_t_end - BTSP_t_start) / NeuronLayer.Agent.dt)
+
+        times = np.linspace(BTSP_t_start, BTSP_t_end, num_lines)
+        mask = np.ones_like(times).astype(bool)
+        if t_start is not None:
+            mask[times < t_start] = False
+        if t_end is not None:
+            mask[times > t_end] = False
+
+        times = times[mask]
+        colors = cmap(np.linspace(0, 1, num_lines))[mask]
+
+        sub_ax.scatter(
+            times / 60,
+            [y] * mask.sum(),
+            color=colors,
+            marker="|",
+            s=BTSP_kernel_s,
+            lw=BTSP_kernel_lw,
+        )
+
+    if plot_colorbar and num_BTSP:
+        cmap, vmin, vmax = NeuronLayer.get_BTSP_kernel_based_cmap(for_colorbar=True)
+        norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
+        cbar = mpl_cm.ScalarMappable(norm=norm, cmap=cmap)
+        plot_util.add_colorbars(
+            sub_ax,
+            cbar,
+            vmin=vmin,
+            vmax=vmax,
+            label="BTSP kernel\nstrength",
+            outline=True,
+            size="1.5%",
+            pad=0.2,
+        )
+
+
 def plot_single_neuron_rate_timeseries(
     NeuronLayer,
     chosen_neuron=0,
@@ -461,11 +547,9 @@ def plot_single_neuron_rate_timeseries(
     mark_traj_idxs=None,
     plot_BTSP_kernel=True,
     BTSP_s=BTSP_S,
-    BTSP_kernel_s=60,
-    BTSP_kernel_lw=1,
-    plot_colorbar=True,
     plot_teleportation=True,
     plot_reward=True,
+    **kwargs,
 ):
     """
     plot_single_neuron_rate_timeseries(NeuronLayer)
@@ -489,15 +573,14 @@ def plot_single_neuron_rate_timeseries(
     - plot_BTSP_kernel (bool, optional): Whether to mark the BTSP kernel on the plot.
         Default is True.
     - BTSP_s (int, optional): Size of the BTSP markers. Default is BTSP_S.
-    - BTSP_kernel_s (int, optional): Size of the BTSP kernel markers. Default is 60.
-    - BTSP_kernel_lw (float, optional): Line width of the BTSP kernel markers.
-        Default is 1.
-    - plot_colorbar (bool, optional): Whether to plot a colorbar for the BTSP kernel.
-        Default is True.
     - plot_teleportation (bool, optional): Whether to plot teleportation markers.
         Default is True.
     - plot_reward (bool, optional): Whether to plot reward position markers.
         Default is True.
+
+    Keyword args:
+    - **kwargs: Additional keyword arguments passed to
+        add_BTSP_kernel_to_timeseries().
 
     Returns:
     - sub_ax (plt.Axes): The axes with the plotted neuron activity.
@@ -583,54 +666,23 @@ def plot_single_neuron_rate_timeseries(
             ax=sub_ax,
             timeseries=True,
             plot_lines=True,
+            t_start=t_start,
+            t_end=t_end,
             y_prop=0.96,
             lw=LW,
             no_legend=True,
         )
 
     if plot_BTSP_kernel:
-        num_lines = None
-        num_BTSP = len(NeuronLayer.get_BTSP_steps())
-        for BTSP_idx in range(num_BTSP):
-            BTSP_t_start, BTSP_t_end, cmap = get_BTSP_times_and_cmap(
-                NeuronLayer, BTSP_idx
-            )
-            if num_lines is None:
-                num_lines = int((BTSP_t_end - BTSP_t_start) / NeuronLayer.Agent.dt)
-
-            times = np.linspace(BTSP_t_start, BTSP_t_end, num_lines)
-            mask = np.ones_like(times).astype(bool)
-            if t_start is not None:
-                mask[times < t_start] = False
-            if t_end is not None:
-                mask[times > t_end] = False
-
-            times = times[mask]
-            colors = cmap(np.linspace(0, 1, num_lines))[mask]
-
-            sub_ax.scatter(
-                times / 60,
-                [ymin / 2] * mask.sum(),
-                color=colors,
-                marker="|",
-                s=BTSP_kernel_s,
-                lw=BTSP_kernel_lw,
-            )
-
-        if plot_colorbar and num_BTSP:
-            cmap, vmin, vmax = NeuronLayer.get_BTSP_kernel_based_cmap(for_colorbar=True)
-            norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
-            cbar = mpl_cm.ScalarMappable(norm=norm, cmap=cmap)
-            plot_util.add_colorbars(
-                sub_ax,
-                cbar,
-                vmin=vmin,
-                vmax=vmax,
-                label="BTSP kernel\nstrength",
-                outline=True,
-                size="1.5%",
-                pad=0.2,
-            )
+        add_BTSP_kernel_to_timeseries(
+            NeuronLayer,
+            sub_ax,
+            chosen_neuron=chosen_neuron,
+            t_start=t_start,
+            t_end=t_end,
+            y=ymin / 2,
+            **kwargs,
+        )
 
     return sub_ax
 
@@ -705,7 +757,9 @@ def plot_BTSP_kernel(Pyrs, xlims=None):
     return sub_ax
 
 
-def plot_normalization_values(Pyrs, sub_ax=None, skip_initial=False, fig_width=6):
+def plot_normalization_values(
+    Pyrs, sub_ax=None, skip_initial=False, fig_width=6, shift_time=None
+):
     """
     plot_normalization_values(Pyrs)
 
@@ -718,6 +772,8 @@ def plot_normalization_values(Pyrs, sub_ax=None, skip_initial=False, fig_width=6
     - skip_initial (bool, optional): Whether to skip initial normalization values.
         Default is False.
     - fig_width (float, optional): Width of the figure if sub_ax is None. Default is 6.
+    - shift_time (float, optional): Time as of which to shift the normalization values.
+        Default is None.
     """
 
     if sub_ax is None:
@@ -735,11 +791,23 @@ def plot_normalization_values(Pyrs, sub_ax=None, skip_initial=False, fig_width=6
     Pyrs.plot_normalization_values(
         "PCs",
         skip_initial=skip_initial,
+        shift_time=shift_time,
         by_neuron=by_neuron,
         plot_BTSP_events=plot_BTSP_events,
         sub_ax=sub_ax,
     )
-    sub_ax.set_xlabel("Pyramidal neuron index")
+
+    # hacky: shift from neuron indices to neuron number
+    xticks, xtick_labels = list(), list()
+    for xtick, xtick_label in zip(sub_ax.get_xticks(), sub_ax.get_xticklabels()):
+        if xtick >= sub_ax.get_xlim()[0] and xtick <= sub_ax.get_xlim()[1] + 1:
+            xticks.append(xtick - 1)
+            xtick_labels.append(xtick_label.get_text())
+
+    sub_ax.set_xticks(xticks)
+    sub_ax.set_xticklabels(xtick_labels)
+
+    sub_ax.set_xlabel("Pyramidal neuron number")
     sub_ax.set_ylabel("Norm. value")
     sub_ax.set_title("")
 
@@ -829,7 +897,7 @@ def plot_BTSP_responses(Pyrs, sub_ax=None, **kwargs):
 
 
 def plot_BTSP_counts_vs_target_visits(
-    Pyrs, hline=None, xmin=None, plot_regression=False
+    Pyrs, t_start=0, hline=None, xmin=None, plot_regression=False, height=1.8
 ):
     """
     plot_BTSP_counts_vs_target_visits(Pyrs)
@@ -838,24 +906,32 @@ def plot_BTSP_counts_vs_target_visits(
 
     Args:
     - Pyrs (Pyr): Pyr object.
+    - t_start (float, optional): Start time for the plot. Default is 0.
     - hline (float, optional): Y-value at which to draw a horizontal line.
         Default is None.
     - xmin (float, optional): Minimum x-value for the plot. Default is None.
     - plot_regression (bool, optional): Whether to plot a regression line.
         Default is False.
+    - height (float, optional): Height of the figure. Default is 1.8.
 
     Returns:
     - sub_ax (plt.Axes): Subplot with the plotted BTSP counts versus target visits.
     """
 
-    _, sub_ax = plt.subplots(figsize=(2.5, 1.8))
+    _, sub_ax = plt.subplots(figsize=(2.5, height))
 
-    num_BTSP = Pyrs.SomaticCompartment.get_BTSP_counts().max()
+    num_BTSP = Pyrs.SomaticCompartment.get_BTSP_counts(t_start=t_start).max()
 
-    max_spread = max(0.1, min(0.5, 0.1 * num_BTSP))
+    max_spread = max(0.1, min(0.3, 0.05 * num_BTSP))
 
     Pyrs.plot_BTSP_counts_vs_target_visits(
-        sub_ax=sub_ax, alpha=0.8, max_spread=max_spread, hline=hline, xmin=xmin
+        sub_ax=sub_ax,
+        t_start=t_start,
+        alpha=0.8,
+        max_spread=max_spread,
+        spread_bin_width_prop=0.1,
+        hline=hline,
+        xmin=xmin,
     )
     sub_ax.set_title("")
     sub_ax.set_xlabel("Object visits")
@@ -863,7 +939,7 @@ def plot_BTSP_counts_vs_target_visits(
 
     if plot_regression:
         nbr_visits = Pyrs.get_nbr_visits_per_target()
-        BTSP_counts = Pyrs.SomaticCompartment.get_BTSP_counts()
+        BTSP_counts = Pyrs.SomaticCompartment.get_BTSP_counts(t_start=t_start)
         add_regression_line(sub_ax, nbr_visits, BTSP_counts, prop_x=0.1, prop_y=0.8)
 
     return sub_ax
@@ -2676,7 +2752,7 @@ def plot_openfield_corridor_timelines(
     return sub_ax
 
 
-def plot_openfield_teleportation_summary(learner, num_sec=6, width_per=1.875):
+def plot_openfield_teleportation_summary(learner, num_sec=4, width_per=1.875):
     """
     plot_openfield_teleportation_summary(learner)
 
@@ -2752,7 +2828,7 @@ def plot_openfield_teleportation_summary(learner, num_sec=6, width_per=1.875):
     for i, time in enumerate(learner.Agent.teleportation_df["time"]):
         # second row: trajectories around teleportation
         sub_ax = axes[1, i]
-        t_start = np.around(max(0, time - num_sec) / 60, 1) * 60
+        t_start = np.around(time, 0) - num_sec
         t_end = t_start + num_sec * 2
         learner.Agent.plot_trajectories(
             t_start=t_start,
@@ -2766,6 +2842,10 @@ def plot_openfield_teleportation_summary(learner, num_sec=6, width_per=1.875):
             framerate=framerate,
         )
 
+        xticks = np.linspace(t_start, t_end, 5)
+        xtick_labels = [
+            str(int(xtick)) if i % 2 == 0 else "" for i, xtick in enumerate(xticks)
+        ]
         for j, comp in enumerate(comps):
             sub_ax = axes[3 + j, i]
             # bottom rows: trajectories around teleportation
@@ -2782,6 +2862,13 @@ def plot_openfield_teleportation_summary(learner, num_sec=6, width_per=1.875):
                 in_min=False,
                 lw=LW * 0.8,
             )
+
+            # axis is in min
+            sub_ax.set_xlim(t_start / 60, t_end / 60)
+            sub_ax.spines["bottom"].set_bounds(t_start / 60, t_end / 60)
+            sub_ax.set_xticks(xticks / 60)
+            sub_ax.set_xticklabels(xtick_labels)  # label in seconds
+
             if j != 0:
                 learner.Agent.add_teleportation_markers_to_plots(
                     sub_ax,
@@ -2796,7 +2883,9 @@ def plot_openfield_teleportation_summary(learner, num_sec=6, width_per=1.875):
                 plot_util.clear_bottom(sub_ax)
                 sub_ax.set_ylabel("")
 
-            if i != 0:
+            if i == 0:
+                sub_ax.spines["left"].set_position(("outward", 4))
+            else:
                 sub_ax.spines["left"].set_visible(False)
                 sub_ax.tick_params(axis="y", left=False)
                 sub_ax.set_ylabel("")
@@ -2890,7 +2979,7 @@ def plot_openfield_multitarget_summary(learner, PF_type="history", after_remap=F
     learner.Agent.plot_trajectories(
         ax=ax1D[0],
         t_start=t_start,
-        t_end=t_start + 100,
+        t_end=t_start + 120,
         framerate=1 / learner.Agent.dt,
         alpha=0.4,
         s_2D=3,
@@ -2909,6 +2998,7 @@ def plot_openfield_multitarget_summary(learner, PF_type="history", after_remap=F
         max_alpha=0.8,
         marker=BTSP_ASTERISK,
         plot_objects=False,
+        plot_before=False,
         no_legend=True,
     )
 
@@ -3190,7 +3280,7 @@ def plot_remapping_correlation_matrices(learner, num_periods=40, approximate=Tru
         num_periods = num_periods_approx
 
     _, axes = plt.subplots(
-        1, len(num_periods), figsize=(len(num_periods) * 3.3, 2.3), squeeze=False
+        1, len(num_periods), figsize=(len(num_periods) * 3.6, 2.5), squeeze=False
     )
     ax1D = axes.ravel()
     for i, num in enumerate(num_periods):
@@ -3202,10 +3292,23 @@ def plot_remapping_correlation_matrices(learner, num_periods=40, approximate=Tru
         ax1D[i].set_xlabel(label)
         ax1D[i].set_ylabel(label)
         ax1D[i].set_title("")
-        for j, step in enumerate([pre_remap_step, remap_step, post_remap_step]):
-            line = step / num_steps * num - 0.5
-            ls = "solid" if j == 1 else "dashed"
-            ax1D[i].axhline(line, color="k", lw=0.7, ls=ls)
-            ax1D[i].axvline(line, color="k", lw=0.7, ls=ls)
+
+        # plot remap step
+        for axline in [ax1D[i].axhline, ax1D[i].axvline]:
+            axline(remap_step / num_steps * num - 0.5, color="k", lw=0.7)
+
+        # mark time span after last BTSP (pre/post remapping)
+        for start, end in [(pre_remap_step, remap_step), (post_remap_step, num_steps)]:
+            x = start / num_steps * num - 0.5
+            y = end / num_steps * num - 0.5
+            rect = mpl_patches.Rectangle(
+                (x, num_periods[i] / 30),
+                y - x,
+                num_periods[i] / 30,
+                color="k",
+                alpha=0.5,
+                lw=0,
+            )
+            ax1D[i].add_patch(rect)
 
     return ax1D

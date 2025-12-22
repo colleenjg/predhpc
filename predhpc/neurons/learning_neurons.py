@@ -1622,6 +1622,7 @@ class HebbianLayer(LearnLayer):
         bias_norms: bool = False,
         skip_initial: bool = False,
         by_neuron: bool = False,
+        shift_time: float | None = None,
         in_min: bool = True,
         lw: float = 1,
         autosave: bool | None = None,
@@ -1645,6 +1646,8 @@ class HebbianLayer(LearnLayer):
             value at time 0. Default is False.
         - by_neuron (bool, optional): Whether to plot normalization values by neuron
             instead of by time. Default is False.
+        - shift_time (float, optional): Time point at which to shift normalization
+            values over if plotting by neuron. Default is None.
         - in_min (bool, optional): Whether to plot the time in minutes. Default is True.
         - lw (float, optional): Line width of the plot. Default is 1.
         - autosave (bool, optional): Whether to save the figure. Default is None.
@@ -1677,6 +1680,10 @@ class HebbianLayer(LearnLayer):
         )
 
         if not by_neuron:
+            if shift_time is not None:
+                raise ValueError(
+                    "Shifting time applies to plotting by neuron, not over time."
+                )
             full_t = self.get_plotting_times(t_start=t_start, t_end=t_end)[0]
             if in_min:
                 full_t = full_t / 60
@@ -1688,10 +1695,9 @@ class HebbianLayer(LearnLayer):
             _, sub_ax = plt.subplots(figsize=(6, 3))
 
         if len(steps):
-            if not by_neuron:
-                t = np.asarray(self.history["t"])[steps - 1]
-                if in_min:
-                    t = t / 60
+            t = np.asarray(self.history["t"])[np.maximum(0, steps - 1)]
+            if not by_neuron and in_min:
+                t = t / 60
 
             color = self.inputs[input_layer]["layer"].color
 
@@ -1700,7 +1706,11 @@ class HebbianLayer(LearnLayer):
                 if not skip_initial:
                     keep_idx = np.concatenate([[0], keep_idx])
                 if by_neuron:
-                    x_vals = np.full(len(keep_idx), use_chosen_neurons[i])
+                    neuron_idx = np.full(len(data), use_chosen_neurons[i])
+                    if shift_time is not None:
+                        neuron_idx = neuron_idx.astype(np.float64)
+                        neuron_idx[t >= shift_time] += 0.25
+                    x_vals = neuron_idx[keep_idx]
                 else:
                     x_vals = t[keep_idx]
                 if lw > 0 and len(keep_idx) > 1:
@@ -4120,6 +4130,7 @@ class BTSPLayer(HebbianLayer):
         max_alpha: float = 1.0,
         env_alpha: float = 0.6,
         obj_s: int = 10,
+        plot_before: bool = True,
         autosave: bool | None = None,
         **kwargs,
     ):
@@ -4143,6 +4154,8 @@ class BTSPLayer(HebbianLayer):
         - env_alpha (float, optional): Alpha value for the environment plot. Default is
             0.6.
         - obj_s (int, optional): Size of the environment objects. Default is 10.
+        - plot_before (bool, optional): Whether to plot BTSP events that occurred
+            before t_start with reduced alpha. Default is True.
         - autosave (bool, optional): Whether to autosave the figure. Default is None.
 
         Keyword args:
@@ -4174,6 +4187,8 @@ class BTSPLayer(HebbianLayer):
         for target, steps in BTSP_step_dict.items():
             for step in steps:
                 if step < startid:
+                    if not plot_before:
+                        continue
                     alpha = 0.6 * max_alpha  # happened before
                 elif step >= min_not_yet:
                     alpha = 0.3 * max_alpha  # not yet applied
@@ -4653,6 +4668,7 @@ class BTSPLayer(HebbianLayer):
         bias_norms: bool = False,
         skip_initial: bool = False,
         by_neuron: bool = False,
+        shift_time: float | None = None,
         in_min: bool = True,
         plot_BTSP_events: bool = True,
         lw: float = 1,
@@ -4677,6 +4693,8 @@ class BTSPLayer(HebbianLayer):
             values. Default is False.
         - by_neuron (bool, optional): Whether to plot by neuron instead of over time.
             Default is False.
+        - shift_time (float, optional): Time point at which to shift normalization
+            values over if plotting by neuron. Default is None.
         - in_min (bool, optional): Whether to plot the time in minutes. Default is True.
         - plot_BTSP_events (bool, optional): Whether to mark the BTSP. Default is True.
         - lw (float, optional): Line width of the plot. Default is 1.
@@ -4695,6 +4713,7 @@ class BTSPLayer(HebbianLayer):
             chosen_neurons=chosen_neurons,
             bias_norms=bias_norms,
             by_neuron=by_neuron,
+            shift_time=shift_time,
             in_min=in_min,
             skip_initial=skip_initial,
             lw=lw,

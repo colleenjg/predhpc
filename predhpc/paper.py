@@ -353,7 +353,7 @@ def log_num_teleportations(num_teleportations):
 def get_linear_Pyrs(
     scale=params_util.SCALE_LINEAR,
     speed_mean=params_util.SPEED_MEAN_LINEAR,
-    speed_std=params_util.SPEED_STD,
+    speed_std=params_util.SPEED_STD_LINEAR,
     wait_after_trajectory=0,
     log_BTSP=True,
     seed=True,
@@ -369,7 +369,7 @@ def get_linear_Pyrs(
     - speed_mean (float): Mean speed of the agent. Default is
         params_util.SPEED_MEAN_LINEAR.
     - speed_std (float): Standard deviation of the agent's speed. Default is
-        params_util.SPEED_STD.
+        params_util.SPEED_STD_LINEAR.
     - wait_after_trajectory (int): Number of steps to wait after completing a
         trajectory. Default is 0.
     - log_BTSP (bool): Whether to log BTSP events. Default is True.
@@ -588,7 +588,7 @@ def plot_linear(
 
 def run_linear_speed(
     speed_mean=params_util.SPEED_MEAN_LINEAR,
-    speed_std=params_util.SPEED_STD,
+    speed_std=params_util.SPEED_STD_LINEAR,
     test_speed_mean=None,
     test_speed_std=None,
     time_in_min_can_stop=NUM_TRAJ_SPEED,
@@ -2149,6 +2149,11 @@ def plot_openfield_multitarget_remapping(learner=None, plot_type="summary", **kw
             time_in_min_can_stop=OPENFIELD_TIME_IN_MIN,
         )
 
+    remap_time = (
+        paper_plot_fcts.get_learner_remap_step(learner, idx=0, num_total=1)
+        * learner.Agent.dt
+    )
+
     if plot_type == "pre_post_weights":
         ax = paper_plot_fcts.plot_openfield_remapping_pre_post_weights(
             learner, **kwargs
@@ -2161,10 +2166,11 @@ def plot_openfield_multitarget_remapping(learner=None, plot_type="summary", **kw
         if plot_type == "summary":
             kwargs["after_remap"] = True
         elif plot_type == "PFs":
-            kwargs["split_time"] = (
-                paper_plot_fcts.get_learner_remap_step(learner, idx=0, num_total=1)
-                * learner.Agent.dt
-            )
+            kwargs["split_time"] = remap_time
+        elif plot_type == "counts":
+            kwargs["t_start"] = remap_time
+        elif plot_type == "normalization":
+            kwargs["shift_time"] = remap_time
         ax = plot_openfield_multitarget(learner, plot_type=plot_type, **kwargs)
 
     return ax
@@ -2361,7 +2367,11 @@ def get_fig_dict():
                 "plot_type": "PFs",
                 "n": 9,
             },
-            "F": {"fct": plot_openfield_multitarget_remapping, "plot_type": "counts"},
+            "F": {
+                "fct": plot_openfield_multitarget_remapping,
+                "plot_type": "counts",
+                "height": 2.3,
+            },
             "G": {
                 "fct": plot_openfield_multitarget_remapping,
                 "plot_type": "correlations",

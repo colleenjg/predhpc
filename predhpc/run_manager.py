@@ -647,6 +647,8 @@ class Learner:
         Log information about the learning process.
         """
 
+        self.Agent.log_speed_stats(ignore_near_zero=True)
+
         act_target_reaches = (
             len(self.Agent.get_reached_target_df()) - self.num_prev_target_reaches
         )

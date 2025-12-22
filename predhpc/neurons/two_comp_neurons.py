@@ -1842,7 +1842,8 @@ class TwoCompLayer(object):
         applied_only=False,
         t_start=None,
         t_end=None,
-        max_spread=0.1,
+        max_spread=0.3,
+        spread_bin_width_prop=0.1,
         hline=1,
         xmin=0,
         alpha=0.5,
@@ -1866,7 +1867,9 @@ class TwoCompLayer(object):
         - t_start (float, optional): Start time of the plot. Default is None.
         - t_end (float, optional): End time of the plot. Default is None.
         - max_spread (float, optional): Max spread to apply to duplicate data over y
-            axis. Default is True.
+            axis. Default is 0.3.
+        - spread_bin_width_prop (float, optional): Proportion of x axis range to bin
+            together when spreading data. Default is 0.1.
         - hline (float, optional): Y value at which to draw a horizontal line.
             Default is 1.
         - xmin (float, optional): Minimum x value to display. Default is 0.
@@ -1893,8 +1896,14 @@ class TwoCompLayer(object):
         )
 
         if max_spread:
+            spread_bin_width = spread_bin_width_prop * (
+                nbr_visits_per_target.max() - nbr_visits_per_target.min()
+            )
             BTSP_counts = gen_util.spread_data(
-                nbr_visits_per_target, BTSP_counts, max_spread=max_spread
+                nbr_visits_per_target,
+                BTSP_counts,
+                max_spread=max_spread,
+                spread_bin_width=spread_bin_width,
             )
 
         if sub_ax is None:

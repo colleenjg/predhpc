@@ -134,7 +134,7 @@ def get_param_str(experiment="speed_PF", speed_std=0, log=False):
 def get_Pyrs(
     scale=params_util.SCALE_LINEAR,
     speed_mean=params_util.SPEED_MEAN_LINEAR,
-    speed_std=params_util.SPEED_STD,
+    speed_std=params_util.SPEED_STD_LINEAR,
     wait_after_trajectory=params_util.WAIT_LINEAR,
     **Pyr_kwargs,
 ):
@@ -148,7 +148,7 @@ def get_Pyrs(
         params_util.SPEED_MEAN_LINEAR.
     - speed_std (float or str, optional): Standard deviation of the agent's speed.
         If a float, it is used as the standard deviation. If a string, it must be
-        either "high" or "low". Default is params_util.SPEED_STD.
+        either "high" or "low". Default is params_util.SPEED_STD_LINEAR.
     - wait_after_trajectory (float, optional): Number of steps to wait after completing
         a trajectory. Default is params_util.WAIT_LINEAR.
 
@@ -206,7 +206,7 @@ def run_linear_track(
     num_steps_can_stop=5000,
     wait_after_trajectory=params_util.WAIT_LINEAR,
     speed_mean=params_util.SPEED_MEAN_LINEAR,
-    speed_std=params_util.SPEED_STD,
+    speed_std=params_util.SPEED_STD_LINEAR,
     target_shift=0,
     disable_tqdm=False,
     plot=True,
@@ -236,7 +236,7 @@ def run_linear_track(
     - speed_mean (float, optional): Mean speed of the agent. Default is
         params_util.SPEED_MEAN_LINEAR.
     - speed_std (float, optional): Standard deviation of the agent's speed.
-        Default is params_util.SPEED_STD.
+        Default is params_util.SPEED_STD_LINEAR.
     - target_shift (float, optional): Amount to shift the target position after the
         first set of trajectories or steps. If 0, no shift is done.
         Default is 0.

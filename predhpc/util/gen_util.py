@@ -1,3 +1,4 @@
+from collections import deque
 import copy
 from datetime import datetime
 from fractions import Fraction
@@ -716,38 +717,191 @@ def sample_gaussian_clipped(n, seed=None, max_abs=2.3):
     return noise
 
 
-def spread_data(x, y, max_spread=0.5):
+def get_density_spread_values(x, max_spread=0.3, spread_bin_width=0.05):
+    """
+    get_density_spread_values(x)
+
+    Obtain values to spread data in y based on data density in x in a smooth and
+    deterministic, envelope-like way. Probably very over-engineered!
+
+    Args:
+    - x (1D np.ndarray): Array of x values.
+    - max_spread (float, optional): Maximum spread of the values. Default is 0.3.
+    - spread_bin_width (float, optional): Width of the density bins to consider
+        for identifying datapoints to be spread with respect to one another.
+        Default is 0.05.
+
+    Returns:
+    - spread_vals (1D np.ndarray): Array of spread values corresponding to x.
+    """
+
+    if len(x) == 1:
+        spread_vals = np.zeros_like(x)
+        return spread_vals
+
+    sorter = np.argsort(x)
+
+    x = x[sorter]
+    unique_x, x_counts = np.unique(x, return_counts=True)
+    min_diff = np.min(np.diff(unique_x))
+
+    if min_diff >= spread_bin_width:
+        spread_vals = np.zeros_like(x)
+        return spread_vals
+
+    # compute data density
+    full_x = np.arange(unique_x.min(), unique_x.max() + min_diff, min_diff)
+    num_each = np.zeros(len(full_x), dtype=int)
+    for i, x_val in enumerate(unique_x):
+        idx = np.argmin(np.abs(full_x - x_val))
+        num_each[idx] = x_counts[i]
+
+    num_bins = int(np.ceil(spread_bin_width / min_diff))
+    num_each_conv = np.convolve(num_each, np.ones(num_bins), mode="same")
+
+    # get spread values to use
+    num_spread_vals = int(num_each_conv.max() // 2 * 2 + 1)
+    spread_vals = np.zeros(num_spread_vals)
+    spread_vals[1::2] = np.linspace(0, 1, num_spread_vals // 2 + 1)[1:]
+    spread_vals[2::2] = -spread_vals[1::2]
+
+    # choose spread values
+    not_spread = num_each.copy()
+    all_spread_idxs = [list() for _ in range(len(num_each))]
+    reverse = False
+    while not_spread.sum():
+        for orig_x_i in range(len(num_each)):
+            x_i = orig_x_i
+            if reverse:
+                x_i = len(num_each) - 1 - orig_x_i
+            if num_each[x_i] == 0 or not_spread[x_i] == 0:
+                continue
+
+            # get previous value
+            if x_i == 0:
+                prev = 0
+            elif reverse:
+                prev = not_spread[orig_x_i + 1]
+            else:
+                prev = not_spread[orig_x_i - 1]
+
+            if prev != 0:
+                continue
+
+            # identify possible spread indices
+            start = max(0, x_i - num_bins // 2)
+            end = x_i + num_bins // 2 + 1
+            spread_idxs_used = np.concatenate(all_spread_idxs[start:end])
+
+            spread_idxs_rem = list()
+            for j in range(len(spread_vals)):
+                if len(spread_idxs_rem) >= num_each[x_i] and j >= num_each_conv[x_i]:
+                    if np.absolute(spread_vals[j]) > np.absolute(
+                        spread_vals[spread_idxs_rem[-1]]
+                    ):
+                        break
+                if j not in spread_idxs_used:
+                    spread_idxs_rem.append(j)
+            spread_idxs_rem = np.asarray(spread_idxs_rem)
+
+            # select spread indices
+            if len(spread_idxs_rem) == num_each[x_i]:
+                spread_idxs = spread_idxs_rem
+            else:
+                num_choose = num_each[x_i]
+                spread_idxs = np.asarray([], dtype=int)
+
+                # keep or remove 0
+                if spread_vals[spread_idxs_rem[0]] == 0:
+                    if num_each[x_i] % 2:
+                        spread_idxs = np.asarray([spread_idxs_rem[0]])
+                        num_choose -= 1
+                    spread_idxs_rem = spread_idxs_rem[1:]
+
+                # choose rest uniformly
+                if num_choose:
+                    if num_choose == 1:
+                        vals = spread_vals[spread_idxs_rem]
+                        near_zero = np.where(np.abs(vals) == np.abs(vals).min())[0]
+                        if len(near_zero) == 1:
+                            choose_idx = near_zero[0]
+                        else:
+                            choose_idx = np.where(vals == np.abs(vals).min())[0][0]
+                        choose_idxs = np.asarray([choose_idx])
+                    else:
+                        choose_idxs = np.linspace(
+                            0, len(spread_idxs_rem) - 1, num_choose
+                        )
+                        choose_idxs = np.around(choose_idxs).astype(int)
+                        spread_idxs_rem = spread_idxs_rem[
+                            np.argsort(spread_vals[spread_idxs_rem])
+                        ]
+
+                    spread_idxs = np.concatenate(
+                        [spread_idxs, spread_idxs_rem[choose_idxs]]
+                    )
+
+            all_spread_idxs[x_i] = spread_idxs.astype(int)
+            not_spread[x_i] = 0
+
+    spread_vals = np.concatenate([spread_vals[idxs] for idxs in all_spread_idxs])
+
+    # reorder
+    spread_vals = spread_vals[np.argsort(sorter)]
+
+    # normalize
+    max_val = np.absolute(spread_vals).max()
+    if max_val > 0:
+        spread_vals = spread_vals / max_val * max_spread
+
+    return spread_vals
+
+
+def spread_data(x, y, max_spread=0.3, spread_bin_width=None):
     """
     spread_data(x, y)
 
-    Spread the data in y based on the duplicated values of x and y.
+    Spread the data in y based on the duplicated values of y along x.
 
     Args:
     - x (1D np.ndarray): Array of x values.
     - y (1D np.ndarray): Array of y values.
-    - max_spread (float, optional): Maximum spread of the y values. Default is 0.5.
+    - max_spread (float, optional): Maximum spread of the y values. Default is 0.3.
+    - spread_bin_width (float, optional): Width of the bins to consider together for
+        spreading. If None, no binning is done and only exact duplicates are spread.
+        Default is None.
 
     Returns:
     - y (1D np.ndarray): Array of y values with spread applied.
     """
 
     spread_y = np.zeros_like(y)
-    for n in np.unique(x):
-        x_mask = x == n
-        if x_mask.sum() == 1:
-            continue
-        for y_val in np.unique(y[x_mask]):
-            mask = (y == y_val) & x_mask
-            if mask.sum() == 1:
+
+    if spread_bin_width is None:
+        for n in np.unique(x):
+            x_mask = x == n
+            if x_mask.sum() == 1:
                 continue
-            vals = np.arange(mask.sum()) - (mask.sum() - 1) / 2
-            spread_y[mask] = vals
+            for y_val in np.unique(y[x_mask]):
+                mask = (y == y_val) & x_mask
+                if mask.sum() == 1:
+                    continue
+                vals = np.arange(mask.sum()) - (mask.sum() - 1) / 2
+                spread_y[mask] = vals
+
+    else:
+        for y_val in np.unique(y):
+            idxs = np.where(y == y_val)[0]
+            density_spread = get_density_spread_values(
+                x[idxs], max_spread=max_spread, spread_bin_width=spread_bin_width
+            )
+            spread_y[idxs] = density_spread
 
     max_val = np.absolute(spread_y).max()
     if max_val > 0:
         spread_y = spread_y / max_val * max_spread
 
-    y = y + spread_y
+    y = y.astype(float) + spread_y
 
     return y
 

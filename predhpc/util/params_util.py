@@ -28,7 +28,7 @@ WAIT_LINEAR = int(WAIT_LINEAR_SEC / DT)
 
 # Speed parameters
 SPEED_MEAN_LINEAR = 0.25  # m/s
-SPEED_STD = 0.05  # m/s
+SPEED_STD_LINEAR = 0.05  # m/s
 SPEED_MEAN_2D = 0.28  # m/s (mean tends to be undershot in practice)
 
 # Place cell parameter
@@ -319,7 +319,7 @@ def get_agent_params(dt=DT, scale=None, environment="linear", **kwargs):
         scale = scale or SCALE_LINEAR
 
         agent_params["speed_mean"] = SPEED_MEAN_LINEAR
-        agent_params["speed_std"] = SPEED_STD
+        agent_params["speed_std"] = SPEED_STD_LINEAR
         agent_params["start_position"] = 0 + dt
         agent_params["reset_position"] = scale - dt
         agent_params["target_position"] = scale - dt * 8
