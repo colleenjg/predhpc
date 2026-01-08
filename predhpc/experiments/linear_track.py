@@ -227,10 +227,11 @@ def run_linear_track(
     - num_target_reaches_can_stop (int or None, optional): Number of target
         reaches after which early stopping may be triggered. Default is None.
     - num_steps_can_stop (int or None, optional): Number of steps after which early
-        stopping can occur. Will override the learner object's other stopping conditions
-        (number of target reaches or trajectories). Pass None to avoid constraining
-        these by number of steps, and early stopping will only be triggered when one
-        (either) of those conditions is reached, if provided. Default is 5000.
+        stopping can occur. May prevent the learner object from reaching its other
+        stopping conditions (number of target reaches or trajectories). Pass None to
+        avoid constraining these by number of steps, and early stopping will only be
+        triggered when one (either) of those conditions is reached, if provided.
+        Default is 5000.
     - wait_after_trajectory (float, optional): Number of steps to wait after completing
         a trajectory. Default is params_util.WAIT_LINEAR.
     - speed_mean (float, optional): Mean speed of the agent. Default is
@@ -346,10 +347,11 @@ def run_linear_experiment_grid(
     - num_target_reaches_can_stop (int or None, optional): Number of target
         reaches after which early stopping may be triggered. Default is None.
     - num_steps_can_stop (int or None, optional): Number of steps after which early
-        stopping can occur. Will override the learner object's other stopping conditions
-        (number of target reaches or trajectories). Pass None to avoid constraining
-        these by number of steps, and early stopping will only be triggered when one
-        (either) of those conditions is reached, if provided. Default is 5000.
+        stopping can occur. May prevent the learner object from reaching its other
+        stopping conditions (number of target reaches or trajectories). Pass None to
+        avoid constraining these by number of steps, and early stopping will only be
+        triggered when one (either) of those conditions is reached, if provided.
+        Default is 5000.
     - direc (str, optional): Directory to save results in. If None, a default
         directory is used (see hyper_util.get_save_directory()). Default is None.
     - num_CPUs (int, optional): Number of CPUs to run search across. Default is 4.

@@ -1188,7 +1188,7 @@ def plot_linear_binned_rates(learner, num_bins=150):
 
     Args:
     - learner (Learner): Learner object.
-    - num_bins (int, optional): Number of bins to use for the histogram. Default is 100.
+    - num_bins (int, optional): Number of bins to use for the histogram. Default is 150.
 
     Returns:
     - ax1D (1D np.ndarray of plt.Axes): Subplots with linear binned rates plotted.

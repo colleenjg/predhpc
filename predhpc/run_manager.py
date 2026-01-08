@@ -19,6 +19,13 @@ from predhpc.util import ext_util, gen_util, plot_util, params_util
 
 
 class AdjustNumTrajCanStop:
+    """
+    AdjustNumTrajCanStop
+
+    Adjust the number of trajectories that can trigger early stopping in a Learner to
+    avoid overshooting the target by one.
+    """
+
     def __init__(self, learner, complete_trajectory=True):
         self.learner = learner
         self.complete_trajectory = complete_trajectory
@@ -1041,11 +1048,11 @@ class Learner:
         - updater (object or dict, optional): Object or dictionary for updating
             agent position. Default is dict().
         - num_steps_can_stop (int or None, optional): Number of steps after which
-            early stopping can occur. Will override the learner object's other stopping
-            conditions (number of target reaches or trajectories). Pass None to avoid
-            constraining these by number of steps, and early stopping will only be
-            triggered when one (either) of those conditions is reached, if provided.
-            Default is 10000.
+            early stopping can occur. May prevent the learner object's other stopping
+            conditions (number of target reaches or trajectories) from being reached.
+            Pass None to avoid constraining these by number of steps, and early
+            stopping will only be triggered when one (either) of those conditions is
+            reached, if provided. Default is 10000.
         - min_steps_after_BTSP (int, optional): Minimum number of steps to continue
             learning after the last BTSP event was applied. Default is 0.
         - min_num_teleports (int, optional): Minimum number of teleportation events to
@@ -1318,10 +1325,11 @@ def learn(
     - num_traj_can_stop (int or None, optional): Number of trajectories after which
         early stopping may be triggered. Default is None.
     - num_steps_can_stop (int or None, optional): Number of steps after which early
-        stopping can occur. Will override the learner object's other stopping conditions
-        (number of target reaches or trajectories). Pass None to avoid constraining
-        these by number of steps, and early stopping will only be triggered when one
-        (either) of those conditions is reached, if provided. Default is 10000.
+        stopping can occur. May prevent the learner object's other stopping
+        conditions (number of target reaches or trajectories) from being reached.
+        Pass None to avoid constraining these by number of steps, and early stopping
+        will only be triggered when one (either) of those conditions is reached, if
+        provided. Default is 10000.
     - time_in_min_can_stop (float or None, optional): Time in minutes after which
         early stopping can occur. Will be converted to number of steps based on Agent
         dt. Overrides num_steps_can_stop if provided. Pass None to avoid constraining
@@ -1678,10 +1686,11 @@ def learn_1D_BTSP(
     - num_target_reaches_can_stop (int or None, optional): Number of targets after
         which early stopping may be triggered. Default is 10.
     - num_steps_can_stop (int or None, optional): Number of steps after which early
-        stopping can occur. Will override the learner object's other stopping conditions
-        (number of target reaches or trajectories). Pass None to avoid constraining
-        these by number of steps, and early stopping will only be triggered when one
-        (either) of those conditions is reached, if provided. Default is 5000.
+        stopping can occur. May prevent the learner object's other stopping
+        conditions (number of target reaches or trajectories) from being reached.
+        Pass None to avoid constraining these by number of steps, and early stopping
+        will only be triggered when one (either) of those conditions is reached, if
+        provided. Default is 5000.
     - complete_trajectory (bool, optional): Whether to complete the last trajectory.
         Default is True.
     - plot (bool, optional): Whether to plot the environment and neurons. Default is

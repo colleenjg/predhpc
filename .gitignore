@@ -2,6 +2,9 @@
 .vscode
 *__pycache__
 *.ipynb_checkpoints
+*.svg
 *.gif
+to_do.md
 data
 !scripts/data
+*other/

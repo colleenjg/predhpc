@@ -450,10 +450,11 @@ def run_linear(
     - Pyrs (Pyr, optional): Pyr object with initialized parameters. If None,
         a new Pyr object is created with default parameters.
     - num_steps_can_stop (int or None, optional): Number of steps after which early
-        stopping can occur. Will override the learner object's other stopping conditions
-        (number of target reaches or trajectories). Pass None to avoid constraining
-        these by number of steps, and early stopping will only be triggered when one
-        (either) of those conditions is reached, if provided. Default is 5000.
+        stopping can occur. May prevent the learner object's other stopping conditions
+        (number of target reaches or trajectories) from being reached. Pass None to
+        avoid constraining these by number of steps, and early stopping will only be
+        triggered when one (either) of those conditions is reached, if provided.
+        Default is 5000.
     - time_in_min_can_stop (float, optional): Time in minutes after which learning can
         stop. If specified, it overrides num_steps_can_stop. Note that additional
         criteria (trajectory completion, minimum number of BTSP events, etc.) may
@@ -1351,10 +1352,11 @@ def run_openfield_corridor(
     - Pyrs (Pyr, optional): Pyr object with initialized parameters. If None,
         a new Pyr object is created with default parameters.
     - num_steps_can_stop (int or None, optional): Number of steps after which early
-        stopping can occur. Will override the learner object's other stopping conditions
-        (number of target reaches or trajectories). Pass None to avoid constraining
-        these by number of steps, and early stopping will only be triggered when one
-        (either) of those conditions is reached, if provided. Default is None.
+        stopping can occur. May prevent the learner object's other stopping conditions
+        (number of target reaches or trajectories) from being reached. Pass None to
+        avoid constraining these by number of steps, and early stopping will only be
+        triggered when one (either) of those conditions is reached, if provided.
+        Default is None.
     - time_in_min_can_stop (float, optional): Time in minutes after which learning can
         stop. If specified, it overrides num_steps_can_stop. Note that additional
         criteria (trajectory completion, minimum number of BTSP events, etc.) may
@@ -1695,10 +1697,11 @@ def run_openfield_corridor_teleport(
     - seed (bool or int): Whether to seed the random number generator with the paper
         seed or seed to use. If False, experiment is not seeded. Default is True.
     - num_steps_can_stop (int or None, optional): Number of steps after which early
-        stopping can occur. Will override the learner object's other stopping conditions
-        (number of target reaches or trajectories). Pass None to avoid constraining
-        these by number of steps, and early stopping will only be triggered when one
-        (either) of those conditions is reached, if provided. Default is None.
+        stopping can occur. May prevent the learner object's other stopping conditions
+        (number of target reaches or trajectories) from being reached. Pass None to
+        avoid constraining these by number of steps, and early stopping will only be
+        triggered when one (either) of those conditions is reached, if provided.
+        Default is None.
     - time_in_min_can_stop (float, optional): Time in minutes after which learning can
         stop. If specified, it overrides num_steps_can_stop. Note that additional
         criteria (trajectory completion, minimum number of BTSP events, etc.) may
@@ -1951,10 +1954,11 @@ def run_openfield_multitarget(
     - Pyrs (Pyr, optional): Pyr object with initialized parameters. If None,
         a new Pyr object is created with default parameters.
     - num_steps_can_stop (int or None, optional): Number of steps after which early
-        stopping can occur. Will override the learner object's other stopping conditions
-        (number of target reaches or trajectories). Pass None to avoid constraining
-        these by number of steps, and early stopping will only be triggered when one
-        (either) of those conditions is reached, if provided. Default is None.
+        stopping can occur. May prevent the learner object's other stopping conditions
+        (number of target reaches or trajectories) from being reached. Pass None to
+        avoid constraining these by number of steps, and early stopping will only be
+        triggered when one (either) of those conditions is reached, if provided.
+        Default is None.
     - time_in_min_can_stop (float, optional): Time in minutes after which learning can
         stop. If specified, it overrides num_steps_can_stop. Note that additional
         criteria (trajectory completion, minimum number of BTSP events, etc.) may
@@ -2067,10 +2071,11 @@ def run_openfield_multitarget_remapping(
     - Pyrs (Pyr, optional): Pyr object with initialized parameters. If None,
         a new Pyr object is created with default parameters.
     - num_steps_can_stop (int or None, optional): Number of steps after which early
-        stopping can occur. Will override the learner object's other stopping conditions
-        (number of target reaches or trajectories). Pass None to avoid constraining
-        these by number of steps, and early stopping will only be triggered when one
-        (either) of those conditions is reached, if provided. Default is None.
+        stopping can occur. May prevent the learner object's other stopping conditions
+        (number of target reaches or trajectories) from being reached. Pass None to
+        avoid constraining these by number of steps, and early stopping will only be
+        triggered when one (either) of those conditions is reached, if provided.
+        Default is None.
     - time_in_min_can_stop (float, optional): Time in minutes after which learning can
         stop. If specified, it overrides num_steps_can_stop. Note that additional
         criteria (trajectory completion, minimum number of BTSP events, etc.) may

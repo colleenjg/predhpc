@@ -1,20 +1,35 @@
-# Predictive learning in the hippocampus with apical dendrites
+# Few-shot learning of predictive features with apical dendrites in the hippocampus
 
 ## 1. Description
 
-Description here
+This repository contains code to simulate few-shot learning of predictive features with BTSP in a hippocampal circuit.  
+
+Neural activity is simulated in a circuit composed of place cells, object cells, two-compartment pyramidal neurons and inhibitory interneurons while an agent visits target objects in a continuous linear track or open field environment.  
+
+The simulations were developed using the [`RatInABox`](https://github.com/RatInABox-Lab/RatInABox) package.
 
 ## 2. Installation
 
-Installation instructions here
+This package can be installed, optionally in a virtual environment, using `pip install git+https://github.com/colleenjg/predhpc` and imported with `import predhpc`.
 
-## 3. Use
+This code has been tested with `Python 3.11`. For package dependencies, see `requirements.txt`.
 
-Basic use / structure here
+## 3. Scripts and modules
 
-## 4. Scripts
+- **`predhpc/`**:
+    - `env`: Custom `RatInABox` environments (e.g., `TEnv`, `OpenField`).
+    - `agent`: Custom `RatInABox` agents (e.g., `ResetableAgent`, `TAgent`, `OpenFieldAgent`).
+    - **`neurons/`**: Custom `RatInABox` neuron layers (e.g., `ObjectCells`, `BTSPLayer`, `NMDALayer`, `TwoCompLayer`).
+    - **`experiments/`**: Linear track analyses and metrics.
+    - **`util/`**: Custom utilities.
+    - `run_manager`: Tools for running simulations in various environments.
+- **`scripts/`**: Examples of simulations and analyses.
+- **`results/`**: Results from script, paper and experiment analyses.
 
-Description of notebooks here
+## 4. Paper
+
+The code for running the analyses reported in the paper, and for reproducing the figures can be found under `predhpc/paper`.   
+Paper figures are also reproduced in `predhpc/scripts/paper.ipynb`.
 
 ## 5. Author
 
