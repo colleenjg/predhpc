@@ -930,7 +930,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         Attributes:
         - _target_object_idx (int): Index of target object in environment objects.
         - steps_before_checking_for_target (int): Number of steps to wait before
-            checking for the same target again.
+            checking for the same target again within the same trajectory.
         - target_position (1D np.ndarray or None): Target position.
 
         Args:
@@ -1194,9 +1194,9 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         return new_position
 
-    def get_completed_trajectories_df(self):
+    def get_completed_trajectory_df(self):
         """
-        self.get_completed_trajectories_df()
+        self.get_completed_trajectory_df()
 
         Obtain the dataframe of all completed trajectories.
 
@@ -1220,7 +1220,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         - num_completed_trajectories (int): Number of trajectories completed.
         """
 
-        num_completed_trajectories = len(self.get_completed_trajectories_df())
+        num_completed_trajectories = len(self.get_completed_trajectory_df())
 
         return num_completed_trajectories
 
@@ -1454,7 +1454,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
 
         Attributes:
         - steps_before_checking_for_target (int): Number of steps to wait before
-            checking for the target again.
+            checking for the target again within the same trajectory.
 
         Returns:
         - target_reached (bool): Whether the agent has reached the target position,
@@ -1597,7 +1597,7 @@ class ResetableAgent(riabAgent, ext_util.ParamsManagerMixin):
         if position_name == "start":
             reached_position_steps = self.trajectory_df["start_step"].to_numpy()
         elif position_name == "reset":
-            completed_traj_df = self.get_completed_trajectories_df()
+            completed_traj_df = self.get_completed_trajectory_df()
             reached_position_steps = completed_traj_df["end_step"].to_numpy()
         elif position_name == "target":
             reached_target_df = self.get_reached_target_df()
@@ -3261,7 +3261,7 @@ class TAgent(ResetableAgent):
         - right_reset_position (1D np.ndarray): Right arm reset position for the agent.
         - start_position (1D np.ndarray): Start position of the agent.
         - steps_before_checking_for_target (int): Number of steps to wait before
-            checking for the target again.
+            checking for the target again within the same trajectory.
         - target_position (1D np.ndarray): Target position of the agent.
         """
 
@@ -3916,7 +3916,7 @@ class OpenFieldAgent(ResetableAgent):
 
         Attributes:
         - steps_before_checking_for_target (int): Number of steps to wait before
-            checking for the target.
+            checking for the target within the same trajectory.
         - target_position (1D np.ndarray): Current target position for the agent.
 
         Args:
@@ -4049,7 +4049,7 @@ class OpenFieldAgent(ResetableAgent):
         - manual_pos (bool): Whether the agent's position was set manually.
         - start_position (1D np.ndarray): Start position of the agent.
         - steps_before_checking_for_target (int): Number of steps to wait before
-            checking for the target again.
+            checking for the target again within the same trajectory.
         - target_position (1D np.ndarray): Target position of the agent.
 
         Args:

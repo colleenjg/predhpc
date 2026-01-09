@@ -1180,7 +1180,7 @@ def plot_linear_place_fields(learner):
     return ax1D
 
 
-def plot_linear_binned_rates(learner, num_bins=150):
+def plot_linear_binned_rates(learner, num_bins=120):
     """position
     plot_linear_binned_rates(learner)
 
@@ -1374,7 +1374,7 @@ def plot_linear_speed_PF_examples(
         sub_ax.add_patch(rect)
 
         width = np.around(PF_widths[i], 2)
-        sub_ax.text(5, ymax * 0.62, f"{width} m", ha="center", fontsize=12)
+        sub_ax.text(5, ymax * 0.62, f"{width:.2f} m", ha="center", fontsize=12)
 
     for i, sub_ax in enumerate(ax1D):
         sub_ax.set_ylim([0, ymax])

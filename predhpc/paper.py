@@ -24,7 +24,7 @@ SPEED_EXAMPLES = [0.15, 0.25, 0.35]
 TARGET_SHIFTS = gen_util.get_rounded_linspace(-3.6, 2.4, 61)
 SHIFT_EXAMPLES = [1.0, 0, -0.4, -3.0]
 
-NUM_TRAJ_SPEED = 20
+NUM_TRAJ_SPEED = 15
 OPENFIELD_TIME_IN_MIN = 10
 EX_TRAJ_IDX = 8
 
@@ -665,8 +665,8 @@ def run_linear_speed(
         learner = run_linear(
             Pyrs,
             time_in_min_can_stop=time_in_min_can_stop,
-            num_traj_can_stop=2,
-            num_target_reaches_can_stop=2,
+            num_traj_can_stop=4,
+            num_target_reaches_can_stop=4,
             no_logs=no_logs,
             seed=False,
         )
@@ -940,6 +940,7 @@ def run_linear_shift(
             speed_mean=params_util.SPEED_MEAN_LINEAR,
             speed_std=speed_std,
             time_in_min_can_stop=time_in_min_can_stop,
+            num_traj_can_stop=time_in_min_can_stop,
             k=k,
             no_logs=no_logs,
             seed=False,
@@ -1088,6 +1089,7 @@ def run_linear_shifts(
 
     kwargs = {
         "time_in_min_can_stop": time_in_min_can_stop,
+        "num_traj_can_stop": time_in_min_can_stop,
         "k": k,
         "no_logs": True,
     }
@@ -1236,7 +1238,9 @@ def run_linear_fct(fct_name="speeds", overwrite=False, seed=True, num_jobs=1):
         gen_util.save_np_dict(save_path, data_dict)
         gen_util.get_duration_str(start_time, log=True)
 
-    traj_idxs = data_dict["BTSP_traj_idxs"][:, 1:] - data_dict["end_traj_idxs_initial"]
+    traj_idxs = data_dict["BTSP_traj_idxs"][:, 1:] - data_dict[
+        "end_traj_idxs_initial"
+    ].reshape(-1, 1)
     log_num_BTSP_if_above(data_dict["num_BTSP"], above=above, traj_idxs=traj_idxs)
     if "norm_values" in data_dict.keys():
         log_max_normalization_value(data_dict["norm_values"])
