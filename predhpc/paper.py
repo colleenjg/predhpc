@@ -8,12 +8,13 @@ import warnings
 
 import itertools
 from joblib import Parallel, delayed
+from matplotlib import pyplot as plt
 import numpy as np
 import ratinabox
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from predhpc import run_manager, paper_plot_fcts
-from predhpc.util import gen_util, params_util, ext_util, plot_util
+from predhpc.util import gen_util, params_util, ext_util, plot_util, hyper_util
 from predhpc.experiments import metrics
 
 PAPER_SEED = 18
@@ -23,6 +24,13 @@ SPEED_EXAMPLES = [0.15, 0.25, 0.35]
 
 TARGET_SHIFTS = gen_util.get_rounded_linspace(-3.6, 2.4, 61)
 SHIFT_EXAMPLES = [1.0, 0, -0.4, -3.0]
+
+COMPARISON_KWARGS = {
+    "somatic_BTSP_lr": [0.10, 0.30, 5],
+    "inhibitory_input_filter_tau": [0.2, 0.4, 5],
+    "inhibitory_weight": [0.5, 2.0, 4],
+}
+
 
 NUM_TRAJ_SPEED = 15
 OPENFIELD_TIME_IN_MIN = 10
@@ -597,6 +605,7 @@ def run_linear_speed(
     k=metrics.SMOOTH_K,
     no_logs=True,
     seed=True,
+    **Pyrs_kwargs,
 ):
     """
     run_linear_speed()
@@ -619,6 +628,9 @@ def run_linear_speed(
     - no_logs (bool): Whether to disable logging. Default is True.
     - seed (bool or int): Whether to seed the random number generator with the paper
         seed or seed to use. If False, experiment is not seeded. Default is True.
+
+    Keyword Args:
+    - **Pyrs_kwargs: Additional keyword arguments passed to get_linear_Pyrs().
 
     Returns:
     - learner (Learner): The learner object after running the experiment.
@@ -659,6 +671,7 @@ def run_linear_speed(
         log_BTSP=False,
         wait_after_trajectory=0,
         seed=False,
+        **Pyrs_kwargs,
     )
 
     for _ in range(5):
@@ -1228,7 +1241,7 @@ def run_linear_fct(fct_name="speeds", overwrite=False, seed=True, num_jobs=1):
 
     save_path = Path(get_fig_directory(), f"{data_name}{seed_str}.npz")
     if overwrite:
-        gen_util.delete_np_dict(save_path)
+        gen_util.delete_file(save_path)
     data_dict = gen_util.load_np_dict(save_path)
 
     if data_dict is None:
@@ -1246,6 +1259,143 @@ def run_linear_fct(fct_name="speeds", overwrite=False, seed=True, num_jobs=1):
         log_max_normalization_value(data_dict["norm_values"])
 
     return data_dict
+
+
+def run_linear_hyperparameter_comparison(
+    num_repeats=4, num_jobs=1, overwrite=False, seed=True, **kwargs
+):
+    """
+    run_linear_hyperparameter_comparison()
+
+    Runs a hyperparameter comparison for the linear environment, collecting BTSP-related
+    metrics for each run.
+
+    Args:
+    - num_repeats (int): Number of repeats for each hyperparameter configuration.
+        Default is 4.
+    - num_jobs (int): Number of parallel jobs to run. Default is 1.
+    - overwrite (bool): Whether to overwrite existing data. Default is False.
+    - seed (bool or int): Whether to seed the random number generator with the paper
+        seed or seed to use. If False, experiment is not seeded. Default is True.
+
+    Keyword args:
+    - **kwargs: Additional keyword arguments passed to the run_linear_speed function for
+        each run.
+
+    Returns:
+    - data_df (pd.DataFrame): Dataframe containing the results of the hyperparameter
+        comparison.
+    """
+
+    def objective(config):
+        """
+        objective(config)
+
+        Objective function for a hyperparameter comparison run.
+
+        Args:
+        - config (dict): Configuration dictionary, specifying parameters for a specific
+            run.
+
+        Returns:
+        - output_dict (dict): Output dictionary, with metrics for the run.
+        """
+
+        kwargs_use = kwargs.copy()
+
+        seed = False
+        if "seed" in config.keys():
+            seed = config.pop("seed")
+
+        kwargs_use.update(config)
+
+        Pyrs = get_linear_Pyrs(
+            speed_mean=params_util.SPEED_MEAN_LINEAR,
+            speed_std=params_util.SPEED_MEAN_LINEAR,
+            log_BTSP=False,
+            wait_after_trajectory=0,
+            seed=seed,
+            **kwargs_use,
+        )
+
+        run_linear(Pyrs, no_logs=True, seed=False)
+
+        output_dict = metrics.compute_BTSP_metrics(Pyrs, k=metrics.SMOOTH_K, bins=31)
+
+        return output_dict
+
+    data_name = "hyperparameters"
+    if seed:
+        seed = PAPER_SEED if isinstance(seed, bool) else seed
+        data_name = f"{data_name}_{seed}"
+
+    save_path = Path(get_fig_directory(), f"{data_name}.csv")
+    if overwrite:
+        gen_util.delete_file(save_path)
+    data_df = gen_util.load_df(save_path)
+
+    if data_df is None:
+
+        print("Running...")
+        start_time = time.perf_counter()
+
+        if seed:
+            seeds = np.arange(seed, seed + num_repeats)
+        else:
+            seeds = np.sort(np.random.choice(10000, size=num_repeats, replace=False))
+
+        comparison_space = hyper_util.get_search_space(**COMPARISON_KWARGS, seed=seeds)
+
+        hyper_util.run_hyperparameter_search(
+            objective,
+            comparison_space,
+            direc=get_fig_directory(),
+            save_name=data_name,
+            num_CPUs=num_jobs,
+            num_repeats=1,
+            use_date_time=False,
+            plot=False,
+        )
+
+        data_df = gen_util.load_df(save_path)
+
+        gen_util.get_duration_str(start_time, log=True)
+
+    return data_df
+
+
+def plot_linear_hyperparameter_comparison(data_df=None, **kwargs):
+    """
+    plot_linear_hyperparameter_comparison()
+
+    Plots the results of a hyperparameter comparison.
+
+    Args:
+    - data_df (pd.DataFrame, optional): Dataframe containing the results of the
+        hyperparameter comparison. If None, data is loaded from file. Default is None.
+    - overwrite (bool): Whether to overwrite existing data. Default is False.
+    - seed (bool or int): Whether to seed the random number generator with the paper
+        seed or seed to use. If False, experiment is not seeded. Default is True.
+
+    Returns:
+    - ax1D (1D array of matplotlib axes): Axes with hyperparameter comparison results
+        plotted.
+    """
+
+    if data_df is None:
+        data_df = run_linear_hyperparameter_comparison(**kwargs)
+
+    Pyrs = get_linear_Pyrs()
+
+    mark = (
+        Pyrs.SomaticCompartment.BTSP_lr,
+        Pyrs.inhibitory_input_filter_tau,
+        Pyrs.inhibitory_weight,
+    )
+
+    ax1D = paper_plot_fcts.plot_linear_hyperparameter_comparison(data_df, mark=mark)
+
+    return ax1D
 
 
 def get_openfield_Pyrs(
@@ -2226,7 +2376,7 @@ def run_openfield_fct(
 
     save_path = Path(get_fig_directory(), f"{data_name}{seed_str}.npz")
     if overwrite:
-        gen_util.delete_np_dict(save_path)
+        gen_util.delete_file(save_path)
     data_dict = gen_util.load_np_dict(save_path)
 
     if data_dict is None:
@@ -2268,6 +2418,12 @@ def get_fig_dict():
             "A": {"fct": plot_linear, "plot_type": "summary"},
             "B": {"fct": plot_linear, "plot_type": "place_fields"},
             "C": {"fct": plot_linear, "plot_type": "binned_rates"},
+        },
+        "1S": {
+            "A-E": {
+                "fct": plot_linear_hyperparameter_comparison,
+                "plot_type": "hyperparameters",
+            },
         },
         "2S": {
             "A": {
@@ -2362,43 +2518,43 @@ def get_fig_dict():
             "B": {"fct": plot_openfield_multitarget, "plot_type": "BTSP_responses"},
             "C": {"fct": plot_openfield_multitarget, "plot_type": "normalization"},
         },
-        8: {
-            "A": {
-                "fct": plot_openfield_multitarget_remapping,
-                "plot_type": "pre_post_weights",
-            },
-            "B-D": {
-                "fct": plot_openfield_multitarget_remapping,
-                "plot_type": "summary",
-            },
-            "E": {
-                "fct": plot_openfield_multitarget_remapping,
-                "plot_type": "PFs",
-                "n": 9,
-            },
-            "F": {
-                "fct": plot_openfield_multitarget_remapping,
-                "plot_type": "counts",
-                "height": 2.3,
-            },
-            "G": {
-                "fct": plot_openfield_multitarget_remapping,
-                "plot_type": "correlations",
-            },
-        },
-        "8S": {
-            "A": {
-                "fct": plot_openfield_multitarget_remapping,
-                "plot_type": "PFs",
-                "n": "all",
-                "width_per": 0.76,
-            },
-            "B": {
-                "fct": plot_openfield_multitarget_remapping,
-                "plot_type": "normalization",
-                "fig_width": 10,
-            },
-        },
+        # 8: {
+        #     "A": {
+        #         "fct": plot_openfield_multitarget_remapping,
+        #         "plot_type": "pre_post_weights",
+        #     },
+        #     "B-D": {
+        #         "fct": plot_openfield_multitarget_remapping,
+        #         "plot_type": "summary",
+        #     },
+        #     "E": {
+        #         "fct": plot_openfield_multitarget_remapping,
+        #         "plot_type": "PFs",
+        #         "n": 9,
+        #     },
+        #     "F": {
+        #         "fct": plot_openfield_multitarget_remapping,
+        #         "plot_type": "counts",
+        #         "height": 2.3,
+        #     },
+        #     "G": {
+        #         "fct": plot_openfield_multitarget_remapping,
+        #         "plot_type": "correlations",
+        #     },
+        # },
+        # "8S": {
+        #     "A": {
+        #         "fct": plot_openfield_multitarget_remapping,
+        #         "plot_type": "PFs",
+        #         "n": "all",
+        #         "width_per": 0.76,
+        #     },
+        #     "B": {
+        #         "fct": plot_openfield_multitarget_remapping,
+        #         "plot_type": "normalization",
+        #         "fig_width": 10,
+        #     },
+        # },
     }
 
     return fig_dict

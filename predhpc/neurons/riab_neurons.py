@@ -152,6 +152,81 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
 
         return min_firingrate, max_firingrate
 
+    def get_mean_median_firingrates(
+        self,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        chosen_neurons: str | int | list | np.ndarray = "all",
+    ):
+        """
+        self.get_mean_median_firingrates()
+
+        Obtain the mean and median firing rates of the layer.
+
+        Args:
+        - t_start (float, optional): Start time for obtaining firingrate mean.
+            Default is None.
+        - t_end (float, optional): End time for obtaining firingrate mean.
+            Default is None.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
+            Default is "all".
+
+        Returns:
+        - mean_firingrate (float): Mean firing rate.
+        - median_firingrate (float): Median firing rate.
+        """
+
+        _, startid, endid = self.get_plotting_times(t_start, t_end)
+        firingrates = np.asarray(self.history["firingrate"])[startid : endid + 1]
+
+        chosen_neurons = self.get_chosen_neurons(chosen_neurons)
+
+        mean_firingrate = np.mean(firingrates[:, chosen_neurons])
+        median_firingrate = np.median(firingrates[:, chosen_neurons])
+
+        return mean_firingrate, median_firingrate
+
+    def get_percentile_firingrates(
+        self,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        chosen_neurons: str | int | list | np.ndarray = "all",
+        percentiles: list | np.ndarray = [25, 75],
+    ):
+        """
+        self.get_percentile_firingrates()
+
+        Obtain the firing rate percentiles of the layer.
+
+        Args:
+        - t_start (float, optional): Start time for obtaining firingrate mean.
+            Default is None.
+        - t_end (float, optional): End time for obtaining firingrate mean.
+            Default is None.
+        - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
+            Default is "all".
+        - percentiles (list or 1D np.ndarray, optional): Percentiles to obtain.
+            Default is [25, 75].
+
+        Returns:
+        - percentiles (list or 1D np.ndarray): Percentiles of the firing rates.
+        """
+
+        if isinstance(percentiles, (int, float)):
+            percentiles = [percentiles]
+        percentiles = np.asarray(percentiles)
+
+        _, startid, endid = self.get_plotting_times(t_start, t_end)
+        firingrates = np.asarray(self.history["firingrate"])[startid : endid + 1]
+
+        chosen_neurons = self.get_chosen_neurons(chosen_neurons)
+
+        percentile_firingrates = np.percentile(
+            firingrates[:, chosen_neurons], percentiles
+        )
+
+        return percentile_firingrates
+
     def get_history_ratemap(
         self,
         t_start: float | None = None,

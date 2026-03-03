@@ -5,7 +5,7 @@ import warnings
 
 from matplotlib import pyplot as plt  # type: ignore[import]
 import numpy as np
-from tqdm import tqdm  # type: ignore[import]
+from tqdm.auto import tqdm  # type: ignore[import]
 
 from predhpc import agent, env, plot_fcts
 from predhpc.neurons import (

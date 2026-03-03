@@ -2565,7 +2565,9 @@ class BTSPLayer(HebbianLayer):
 
             if len(apply_steps) > BTSP_idx and np.isfinite(apply_steps[BTSP_idx]):
                 BTSP_info["applied_step"] = apply_steps[BTSP_idx]
-                BTSP_info["applied_time"] = self.history["t"][BTSP_info["applied_step"]]
+                BTSP_info["applied_time"] = self.history["t"][
+                    int(BTSP_info["applied_step"])
+                ]
 
         return BTSP_info
 
@@ -2703,7 +2705,7 @@ class BTSPLayer(HebbianLayer):
 
         return ramp_peak_dict
 
-    def get_nbr_BTSP_position_bins(self, t_start=None, t_end=None, bins=21):
+    def get_nbr_BTSP_position_bins(self, t_start=None, t_end=None, bins=31):
         """
         self.get_nbr_BTSP_position_bins()
 
@@ -2734,7 +2736,7 @@ class BTSPLayer(HebbianLayer):
             if len(steps) == 0:
                 continue
 
-            all_BTSP_positions = pos[steps - 1]
+            all_BTSP_positions = pos[np.asarray(steps) - 1]
             pos_counts, _ = np.histogram(all_BTSP_positions, bins=bins)
             nbr_BTSP_position_bins[i] = len(np.where(pos_counts)[0])
 

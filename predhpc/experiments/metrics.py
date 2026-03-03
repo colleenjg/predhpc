@@ -311,7 +311,7 @@ def compute_PF_width(Pyrs, k=1, prop_peak=signal_util.DFT_PROP_PEAK, **kwargs):
     return width
 
 
-def compute_BTSP_metrics(Pyrs, t_start=0, bins=21, width=WIDTH, k=1, **kwargs):
+def compute_BTSP_metrics(Pyrs, t_start=0, bins=31, width=WIDTH, k=1, **kwargs):
     """
     compute_BTSP_metrics(Pyrs)
 
@@ -321,7 +321,7 @@ def compute_BTSP_metrics(Pyrs, t_start=0, bins=21, width=WIDTH, k=1, **kwargs):
     - Pyrs (two_comp_neurons.TwoCompLayer): Pyr. layer.
     - t_start (int, optional): Time from which to gather metrics. Default is 0.
     - bins (int, optional): Number of bins to use for binning positions on linear
-        track and counting number of positions a BTSP event occurred in. Default is 21.
+        track and counting number of positions a BTSP event occurred in. Default is 31.
     - width (float, optional): Width (m) around PC peak to use for pre/post weight
         ratio. Default is WIDTH.
     - k (int, optional): Kernel size for circular smoothing when computing width.
@@ -366,6 +366,14 @@ def compute_BTSP_metrics(Pyrs, t_start=0, bins=21, width=WIDTH, k=1, **kwargs):
 
     PC_weight_width = compute_PF_width(Pyrs, k=k, **kwargs)
 
+    max_norm = Pyrs.SomaticCompartment.get_normalization_values("PCs", t_start=t_start)[
+        -1
+    ].max()
+
+    activity_98p = Pyrs.SomaticCompartment.get_percentile_firingrates(
+        t_start=t_start, percentiles=98
+    )[0]
+
     BTSP_metrics = {
         "metric/num_BTSP_events": num_BTSP_events,
         "metric/num_BTSP_positions": num_BTSP_positions,
@@ -375,6 +383,8 @@ def compute_BTSP_metrics(Pyrs, t_start=0, bins=21, width=WIDTH, k=1, **kwargs):
         "metric/PC_weight_peak_relative_position": PC_weight_peak_relative_position,
         "metric/PC_weight_width": PC_weight_width,
         "metric/PC_weight_ratio_pre_post": PC_weight_ratio_pre_post,
+        "metric/max_normalization": max_norm,
+        "metric/98th_percentile_firingrate": activity_98p,
     }
 
     return BTSP_metrics

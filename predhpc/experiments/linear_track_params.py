@@ -126,10 +126,10 @@ def get_search_space(search_space="full"):
         if search_space == "full":
             # in to out, col to row
             search_kwargs = {
-                # "somatic_regularization_alpha": [2, 5, 5],
-                "somatic_BTSP_lr": [0.12, 0.24, 5],
+                # "somatic_regularization_alpha": [2, 4, 5],
+                "somatic_BTSP_lr": [0.10, 0.30, 5],
                 "inhibitory_input_filter_tau": [0.2, 0.4, 5],
-                "inhibitory_weight": [0.8, 1.2, 5],
+                "inhibitory_weight": [0.5, 2.0, 5],
             }
         else:
             raise ValueError(f"search_space must be 'full', but is {search_space}")
@@ -142,7 +142,7 @@ def get_search_space(search_space="full"):
 
 
 def run_linear_track(
-    num_steps=8000,
+    num_steps_can_stop=8000,
     skip_runs=1,
     speed_std="high",
     complex_track=False,
@@ -159,7 +159,7 @@ def run_linear_track(
     (consecutively).
 
     Args:
-    - num_steps (int, optional): Number of steps total to run, for each mode.
+    - num_steps_can_stop (int, optional): Number of steps total to run, for each mode.
         Default is 8000.
     - skip_runs (int, optional): Number of track runs to skip before enabling BTSP.
         Default is 1.
@@ -205,7 +205,9 @@ def run_linear_track(
             Pyrs_or_learner=Pyrs,
             use_Hebbian=False,
             BTSP_on=skip_runs + 1,
-            num_steps_can_stop=num_steps,
+            num_steps_can_stop=num_steps_can_stop,
+            time_in_min_can_stop=None,
+            num_target_reaches_can_stop=None,
             record_weights_at_BTSP=False,
             no_logs=disable_tqdm,
             plot=plot,
@@ -247,6 +249,7 @@ def run_hyperparameter_search(
     disable_tqdm=True,
     plot=False,
     debug=False,
+    plot_metrics=True,
     **kwargs,
 ):
     """
@@ -269,6 +272,8 @@ def run_hyperparameter_search(
     - disable_tqdm (bool, optional): Whether to disable tqdm. Default is True.
     - plot (bool, optional): Whether to generate plots. Default is False.
     - debug (bool, optional): Whether to run in debug mode. Default is False.
+    - plot_metrics (bool, optional): Whether to plot the metrics after the search is
+        complete. Default is True.
 
     Keyword args:
     - **kwargs (dict): Keyword arguments passed to linear_track.get_Pyrs().
@@ -316,6 +321,7 @@ def run_hyperparameter_search(
         num_CPUs=num_CPUs,
         num_repeats=num_repeats,
         debug=debug,
+        plot=plot_metrics,
     )
 
 
@@ -375,7 +381,7 @@ def get_args():
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--num_steps", type=int, default=8000)
+    parser.add_argument("--num_steps_can_stop", type=int, default=8000)
     parser.add_argument("--low_speed_std", action="store_true")
     parser.add_argument("--complex_track", action="store_true")
     parser.add_argument("--target_shift", type=int, default=0)
@@ -424,13 +430,13 @@ def main():
                     direc=args.direc,
                     num_CPUs=args.num_CPUs,
                     num_repeats=args.num_repeats,
-                    num_steps=args.num_steps,
+                    num_steps_can_stop=args.num_steps_can_stop,
                     debug=args.debug,
                     **run_kwargs,
                 )
             else:
                 BTSP_metrics = run_linear_track(
-                    num_steps=args.num_steps, plot=False, **run_kwargs
+                    num_steps_can_stop=args.num_steps_can_stop, plot=False, **run_kwargs
                 )
                 print("\nBTSP metrics:")
                 pprint(BTSP_metrics)

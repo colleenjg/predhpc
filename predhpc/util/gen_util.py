@@ -7,6 +7,7 @@ import random
 import time
 
 import numpy as np
+import pandas as pd
 
 import ratinabox
 
@@ -135,14 +136,15 @@ def get_integer_fraction(value, denom_min=None, denom_max=None, raise_error=True
     return numerator, denominator
 
 
-def delete_np_dict(filepath):
+def delete_file(filepath):
     """
-    delete_np_dict(filepath)
+    delete_file(filepath)
 
-    Delete a saved numpy dictionary file.
+    Delete a file.
+
 
     Args:
-    - filepath (str or Path): Path to the numpy dictionary file to delete.
+    - filepath (str or Path): Path to the file to delete.
     """
 
     filepath = Path(filepath)
@@ -170,6 +172,48 @@ def load_np_dict(filepath):
         print(f"Loading data from {filepath}.")
         data_dict = dict(np.load(filepath))
     return data_dict
+
+
+def save_df(filepath, data_df):
+    """
+    save_df(filepath, data_df)
+
+    Save a pandas DataFrame to a CSV file.
+
+    Args:
+    - filepath (str or Path): Path to the CSV file to save.
+    - data_df (pandas.DataFrame): DataFrame to save.
+    """
+
+    filepath = Path(filepath)
+    if filepath.is_file():
+        print(f"Overwriting {filepath}.")
+    else:
+        print(f"Saving dataframe to {filepath}.")
+
+    data_df.to_csv(filepath, index=False)
+
+
+def load_df(filepath):
+    """
+    load_df(filepath)
+
+    Load a pandas DataFrame from a CSV file.
+
+
+    Args:
+    - filepath (str or Path): Path to the CSV file to load.
+
+    Returns:
+    - data_df (pandas.DataFrame): Loaded DataFrame.
+    """
+
+    filepath = Path(filepath)
+    data_df = None
+    if filepath.is_file():
+        print(f"Loading dataframe from {filepath}.")
+        data_df = pd.read_csv(filepath)
+    return data_df
 
 
 def save_np_dict(filepath, data_dict):

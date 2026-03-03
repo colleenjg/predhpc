@@ -12,7 +12,7 @@ import ratinabox
 
 from predhpc import plot_fcts
 from predhpc.experiments import metrics
-from predhpc.util import gen_util, params_util, plot_util, ext_util
+from predhpc.util import gen_util, params_util, plot_util, ext_util, hyper_util
 
 LW = 1.6
 
@@ -2126,6 +2126,107 @@ def plot_target_shift_PFs(
     plot_util.pad_axis(ax1D[0], axis="y", pad_prop=0.05)
 
     return ax1D
+
+
+def plot_linear_hyperparameter_comparison(data_df, mark=None):
+    """
+    plot_linear_hyperparameter_comparison()
+
+    Args:
+    - data_df (pd.DataFrame, optional): Dataframe containing the results of the
+        hyperparameter comparison. If None, data is loaded from file. Default is None.
+    - mark (list of str, optional): List of parameter values to mark on the plot.
+        Default is None.
+
+    Returns:
+    - ax1D (1D array of matplotlib axes): Axes with hyperparameter comparison results
+        plotted.
+    """
+
+    metrics_dict = {
+        "num_BTSP_events": "Number of BTSP events",
+        "max_BTSP_ramp": "BTSP criterion proportion (max.)",
+        "max_normalization": "Weight normalisation (max.)",
+        "PC_weight_width": "Input place field width (m)",
+        "98th_percentile_firingrate": "Neural activity (98th perc.)",
+    }
+
+    metrics = list(metrics_dict.keys())
+
+    num_rows, num_cols = 2, 3
+    _, axes = plt.subplots(
+        num_rows,
+        num_cols,
+        figsize=[num_cols * 3.5, num_rows * 3],
+        squeeze=False,
+        gridspec_kw={"wspace": 0.065, "hspace": 0.4},
+    )
+
+    for a, sub_ax in enumerate(axes.flatten()):
+        if a >= len(metrics):
+            sub_ax.axis("off")
+            continue
+
+        hyper_util.plot_metric_by_parameters(data_df, sub_ax, metric=metrics[a])
+        sub_ax.set_title(metrics_dict[metrics[a]], y=1.03, fontsize=11)
+        if a % num_cols != 0:
+            sub_ax.set_ylabel("")
+            sub_ax.yaxis.set_ticklabels([])
+
+    parameters = hyper_util.get_parameters_from_df(data_df)
+    if mark is not None:
+        num_repeats = hyper_util.get_num_repeats_from_df(data_df)
+        for p, parameter in enumerate(parameters):
+            values = np.sort(np.unique(data_df[parameter]))
+            if mark[p] not in values:
+                raise RuntimeError(
+                    f"{mark[p]} value for {parameter} not found in data dataframe."
+                )
+            idx = np.where(values == mark[p])[0][0]
+            if p == 0:
+                y = idx
+                y_values = len(values)
+            elif p == 1:
+                x = idx * num_repeats
+            elif p == 2:
+                y += idx * y_values
+
+        for a, sub_ax in enumerate(axes.flatten()):
+            edgecolor = "black" if a > 1 else "white"
+            rect = mpl_patches.Rectangle(
+                (x - 0.5, y - 0.5),
+                num_repeats,
+                1,
+                facecolor="none",
+                edgecolor=edgecolor,
+                lw=1,
+                ls="dashed",
+                zorder=5,
+            )
+            sub_ax.add_patch(rect)
+
+    # change labels
+    xlabel = axes[0, 0].xaxis.get_label().get_text()
+    xlabel = axes[0, 0].xaxis.get_label().get_text()
+    xlabel = (
+        xlabel.replace("inhibitory", "Inhibitory")
+        .replace("tau", "time constant\n")
+        .replace("repeat", "repeats")
+        .replace("x\n", "x ")
+    )
+    for sub_ax in axes.flatten():
+        sub_ax.set_xlabel(xlabel, fontsize=8, labelpad=6)
+
+    ylabel = axes[0, 0].yaxis.get_label().get_text()
+    ylabel = (
+        ylabel.replace("inhibitory", "Inhibitory input")
+        .replace("somatic ", "")
+        .replace("lr", "learning rate")
+    )
+    for sub_ax in axes[:, 0]:
+        sub_ax.set_ylabel(ylabel, fontsize=8, labelpad=6)
+
+    return axes
 
 
 def plot_openfield_components(Pyrs, titles=False, traj_idx=8, PC_to_plot=206):

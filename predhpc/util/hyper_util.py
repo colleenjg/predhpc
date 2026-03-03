@@ -3,8 +3,11 @@
 import argparse
 from pathlib import Path
 import itertools
+import logging
 import multiprocessing
+import os
 import pickle as pkl
+import warnings
 from joblib import Parallel, delayed
 
 import numpy as np
@@ -12,7 +15,7 @@ from matplotlib import pyplot as plt
 import pandas as pd
 from scipy.optimize import brentq
 from scipy.interpolate import CubicSpline
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from predhpc.util import signal_util, ext_util, plot_util, params_util, gen_util
 
@@ -252,6 +255,12 @@ def get_parameters_from_df(df, parameters=None):
                 raise ValueError(f"{parameter} not in dataframe.")
             columns.append(parameter)
         parameters = columns
+
+    parameters = [
+        parameter
+        for parameter in parameters
+        if parameter.replace("config/", "") != "seed"
+    ]
 
     return parameters
 
@@ -558,6 +567,10 @@ def plot_metric_by_parameters(
         if metric.startswith("num"):
             zero_mask = metric_array == 0
             metric_array[zero_mask] = np.nan  # for plotting
+        elif "normalization" in metric:
+            under_1_mask = metric_array < 1
+            under_1_data = metric_array[under_1_mask]
+            metric_array[under_1_mask] = np.nan  # for plotting
 
         im = sub_ax.imshow(metric_array.T, cmap="viridis", vmin=vmin, vmax=vmax)
 
@@ -582,11 +595,15 @@ def plot_metric_by_parameters(
 
         if metric.startswith("num") and zero_mask.sum():
             metric_array[zero_mask] = 0
+        elif "normalization" in metric and under_1_mask.sum():
+            metric_array[under_1_mask] = under_1_data
 
     return metric_array, im
 
 
-def plot_metrics_by_parameters(df, parameters=None, direc=None, name_str=None):
+def plot_metrics_by_parameters(
+    df, parameters=None, direc=None, name_str=None, save_fig=True
+):
     """
     plot_metrics_by_parameters(df)
 
@@ -601,6 +618,7 @@ def plot_metrics_by_parameters(df, parameters=None, direc=None, name_str=None):
         the current working directory is used. Default is None.
     - name_str (str, optional): Name of the file in which to save the plot.
         Default is None.
+    - save_fig (bool, optional): Whether to save the figure. Default is True.
 
     Returns:
     - axes (2D np.ndarray): Array of axes to plot on. There is one subplot per metric.
@@ -609,8 +627,6 @@ def plot_metrics_by_parameters(df, parameters=None, direc=None, name_str=None):
     metrics = [
         col.replace("metric/", "") for col in df.columns if col.startswith("metric/")
     ]
-
-    direc = get_save_directory(direc)
 
     if name_str is None:
         name_str = "metrics"
@@ -637,9 +653,11 @@ def plot_metrics_by_parameters(df, parameters=None, direc=None, name_str=None):
         else:
             sub_ax.axis("off")
 
-    for suffix in ["png", "svg"]:
-        fig_path = Path(direc, f"{name_str}.{suffix}")
-        fig.savefig(fig_path, bbox_inches="tight", dpi=300)
+    if save_fig:
+        direc = get_save_directory(direc)
+        for suffix in ["png", "svg"]:
+            fig_path = Path(direc, f"{name_str}.{suffix}")
+            fig.savefig(fig_path, bbox_inches="tight", dpi=300)
 
     return axes
 
@@ -652,6 +670,8 @@ def run_hyperparameter_search(
     num_CPUs=4,
     num_repeats=4,
     debug=False,
+    use_date_time=True,
+    plot=True,
     **plot_kwargs,
 ):
     """
@@ -670,6 +690,10 @@ def run_hyperparameter_search(
     - num_repeats (int, optional): Number of repeats to use in grid search.
         Default is 4.
     - debug (bool, optional): Whether to log to Ray Tune driver. Default is False.
+    - use_date_time (bool, optional): Whether to add date and time to the save name.
+        Default is True.
+    - plot (bool, optional): Whether to plot the results after the search is complete.
+        Default is True.
 
     Keyword args:
     - **plot_kwargs: Keyword arguments passed to plotting passed to
@@ -679,10 +703,19 @@ def run_hyperparameter_search(
     - tuner (ray.tune.Tuner): Fitted Ray Tune tuner object.
     """
 
-    import ray
-    from ray import tune, air
+    os.environ["TUNE_WARN_EXCESSIVE_EXPERIMENT_CHECKPOINT_SYNC_THRESHOLD_S"] = "0"
+    os.environ["RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO"] = "0"
 
-    ray.init(num_cpus=num_CPUs, log_to_driver=debug)
+    import ray
+    from ray import tune
+
+    kwargs = dict()
+    if not debug:
+        logging_level = logging.ERROR
+        logging.getLogger("ray.tune.logger.tensorboardx").setLevel(logging_level)
+        kwargs["logging_level"] = logging_level
+
+    ray.init(num_cpus=num_CPUs, log_to_driver=debug, ignore_reinit_error=True, **kwargs)
 
     # calculate number of runs (for grid search)
     num_combs = 1
@@ -701,30 +734,33 @@ def run_hyperparameter_search(
         tune_config=tune.TuneConfig(
             num_samples=num_repeats,  # number of repeats, for grid searches
         ),
-        run_config=air.RunConfig(verbose=0),
+        run_config=tune.RunConfig(verbose=0),
         param_space=search_space,
     )
 
     results = tuner.fit()
+
     ray.shutdown()
 
     df = results.get_dataframe()
 
     direc = get_save_directory(direc)
-    date_time_str = gen_util.get_date_time_str()
 
-    save_name = f"{save_name}_{date_time_str}"
+    if use_date_time:
+        date_time_str = gen_util.get_date_time_str()
+        save_name = f"{save_name}_{date_time_str}"
     save_path = Path(direc, f"{save_name}.csv")
     df.to_csv(save_path)
 
-    parameters = list(search_space.keys())
-    plot_metrics_by_parameters(
-        df,
-        parameters,
-        direc=direc,
-        name_str=save_name,
-        **plot_kwargs,
-    )
+    if plot:
+        parameters = list(search_space.keys())
+        plot_metrics_by_parameters(
+            df,
+            parameters,
+            direc=direc,
+            name_str=save_name,
+            **plot_kwargs,
+        )
 
     return tuner
 

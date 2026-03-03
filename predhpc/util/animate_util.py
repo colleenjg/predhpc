@@ -5,12 +5,12 @@ import matplotlib
 from matplotlib import pyplot as plt
 from matplotlib import animation as mpl_animation
 import numpy as np
-import tqdm
+from tqdm.auto import tqdm
 
 from ratinabox import utils as rutils  # type: ignore[import]
 
 from predhpc import plot_fcts
-from predhpc.util import plot_util
+from predhpc.util import plot_util, gen_util
 
 
 class TemporarilyMoveTarget:
@@ -721,7 +721,7 @@ def animate(
 
     frames = int((t_end - t_start) / (dt * speed_up))
     if progress_bar:
-        frames = tqdm.tqdm(range(frames), position=0, leave=True)
+        frames = tqdm(range(frames), position=0, leave=True)
 
     anim = mpl_animation.FuncAnimation(
         fig,
