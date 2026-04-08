@@ -85,7 +85,7 @@ def evaluate_PFs(
     """
 
     if gen_util.attribute_type_checker(Pyrs, "TwoCompLayer"):
-        Pyrs = Pyrs.SomaticCompartment
+        Pyrs = Pyrs.ProximalCompartment
 
     if PC_name not in Pyrs.inputs.keys():
         raise KeyError(f"PC name '{PC_name}' not found in Pyrs inputs.")
@@ -107,9 +107,7 @@ def evaluate_PFs(
             f"Expected environment to be 1 or 2D, but found {Pyrs.Environment.D}."
         )
 
-    chosen_neurons = np.asarray(
-        Pyrs.return_list_of_neurons(chosen_neurons=chosen_neurons)
-    )
+    chosen_neurons = Pyrs.get_chosen_neurons(chosen_neurons=chosen_neurons)
 
     if method in ["weights", "applied_weights", "smoothed_weights"]:
         PFs = Pyrs.inputs["PCs"]["w"][chosen_neurons]
@@ -339,17 +337,17 @@ def compute_BTSP_metrics(Pyrs, t_start=0, bins=31, width=WIDTH, k=1, **kwargs):
     if Pyrs.Environment.D != 1:
         raise NotImplementedError("BTSP metrics only implemented for 1D environments.")
 
-    num_BTSP_events = Pyrs.SomaticCompartment.get_BTSP_counts(t_start=t_start)[0]
+    num_BTSP_events = Pyrs.ProximalCompartment.get_BTSP_counts(t_start=t_start)[0]
 
     if num_BTSP_events:
-        first_BTSP_info = Pyrs.SomaticCompartment.get_BTSP_info(
+        first_BTSP_info = Pyrs.ProximalCompartment.get_BTSP_info(
             t_start=t_start, neuron_idx=0
         )
         first_BTSP_time = first_BTSP_info["time"]
         first_BTSP_relative_position = (
             first_BTSP_info["position"][0] - Pyrs.Agent.target_position[0]
         )
-        num_BTSP_positions = Pyrs.SomaticCompartment.get_nbr_BTSP_position_bins(
+        num_BTSP_positions = Pyrs.ProximalCompartment.get_num_BTSP_position_bins(
             t_start=t_start, bins=bins
         )[0]
     else:
@@ -357,7 +355,7 @@ def compute_BTSP_metrics(Pyrs, t_start=0, bins=31, width=WIDTH, k=1, **kwargs):
         first_BTSP_relative_position = np.nan
         num_BTSP_positions = 0
 
-    BTSP_ramp_max = Pyrs.SomaticCompartment.get_BTSP_ramp_peaks(t_start=t_start)[0]
+    BTSP_ramp_max = Pyrs.ProximalCompartment.get_BTSP_ramp_peaks(t_start=t_start)[0]
 
     PC_weight_ratio_pre_post = get_PF_ratio(Pyrs, width=width, **kwargs)
     PC_weight_peak_relative_position = get_PF_weight_peak_relative_position(
@@ -366,11 +364,12 @@ def compute_BTSP_metrics(Pyrs, t_start=0, bins=31, width=WIDTH, k=1, **kwargs):
 
     PC_weight_width = compute_PF_width(Pyrs, k=k, **kwargs)
 
-    max_norm = Pyrs.SomaticCompartment.get_normalization_values("PCs", t_start=t_start)[
-        -1
-    ].max()
+    norm_values = Pyrs.ProximalCompartment.get_normalization_values(
+        "PCs", t_start=t_start
+    )[-1]
+    max_norm = np.nanmax(norm_values) if len(norm_values) > 0 else np.nan
 
-    activity_98p = Pyrs.SomaticCompartment.get_percentile_firingrates(
+    activity_98p = Pyrs.ProximalCompartment.get_percentile_firingrates(
         t_start=t_start, percentiles=98
     )[0]
 
@@ -478,7 +477,7 @@ def gather_PF_info(learner, k=SMOOTH_K, position_name=None, min_total=None):
     # BTSP steps
     for apply in [False, True]:
         apply_str = "_applied" if apply else ""
-        BTSP_steps = learner.Pyrs.SomaticCompartment.get_BTSP_steps(
+        BTSP_steps = learner.Pyrs.ProximalCompartment.get_BTSP_steps(
             applied_only=apply, apply_step=apply
         )
         PF_info[f"BTSP{apply_str}_times"] = BTSP_steps * learner.Pyrs.Agent.dt
@@ -522,7 +521,7 @@ def gather_PF_info(learner, k=SMOOTH_K, position_name=None, min_total=None):
     history_PFs = list()
     PF_shape = None
     PF_times = ext_util.get_times_for_each_BTSP_event(
-        learner.Pyrs.SomaticCompartment,
+        learner.Pyrs.ProximalCompartment,
         next_trajectory=next_trajectory,
         min_total=min_total,
         use_nans=True,

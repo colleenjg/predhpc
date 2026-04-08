@@ -11,8 +11,8 @@ SCALE_LINEAR = 6.0
 SCALE_TMAZE = 4.0
 SCALE = 2.0
 
-# Target parameters
-REL_TARGET_POS = 3 / 5
+# Object parameters (single object environments)
+REL_ENV_OBJECT_POS = 3 / 5
 SHIFT_CLOSE = 0.2
 SHIFT_MID = 0.7
 SHIFT_FAR = 2.0
@@ -51,20 +51,21 @@ TELEPORT_IN = [0.6, 0.6]  # before scaling
 TELEPORT_OUT = [0.2, 0.1]  # before scaling
 
 # Color parameters
-TARGET_COLOR = "#3C539B"  # blue
-NOVEL_COLOR = "#22772E"  # dark green
-
-OBJ_COLOR = TARGET_COLOR
+OBJ_COLOR = "#3C539B"  # blue
 PC_COLOR = "#99193A"  # dark red
-PYR_SOMATIC_COLOR = "#8787C9"  # light purple
-PYR_APICAL_COLOR = "#3D3D79"  # dark purple
+PYR_PROXIMAL_COLOR = "#8787C9"  # light purple
+PYR_DISTAL_COLOR = "#3D3D79"  # dark purple
+
+LANDMARK_COLOR = OBJ_COLOR
+REWARD_COLOR = "#FF4500"  # orange red
+NOVEL_COLOR = "#22772E"  # dark green
 
 # Activation function parameters
 LINEAR_SIGMOID_ACTIVATION_PARAMS = ext_util.get_standard_sigmoid_params(
     min_fr=0.0, max_fr=10.0, mid_x=6.0, width_x=8.0
 )
 
-APICAL_SIGMOID_ACTIVATION_PARAMS = ext_util.get_standard_sigmoid_params(
+DISTAL_SIGMOID_ACTIVATION_PARAMS = ext_util.get_standard_sigmoid_params(
     min_fr=0.0, max_fr=10.0, mid_x=5.0, width_x=6.0
 )
 
@@ -117,25 +118,6 @@ def get_teleportation_colors(num=1):
     teleport_colors = plt.get_cmap("Oranges")(teleport_vals)
 
     return teleport_colors
-
-
-def get_target_position(environment="linear", scale=SCALE_LINEAR):
-    """
-    get_target_position()
-
-    Get target position.
-
-    Returns:
-    - target_position (1D np.ndarray): Target position.
-    """
-
-    if environment == "linear":
-        target_position = np.asarray([scale * REL_TARGET_POS])
-    else:
-        raise NotImplementedError(
-            "Function only implemented for the linear environment."
-        )
-    return target_position
 
 
 def get_activation_function(activation_function=None):
@@ -234,22 +216,26 @@ def get_env_params(scale=None, environment="linear", **kwargs):
             "dimensionality": "1D",
             "scale": scale,
             "boundary_conditions": "periodic",
+            "start_prop": 0.005,
+            "reset_prop": 0.005,
+            "init_env_object_prop": REL_ENV_OBJECT_POS,
+            "dft_object_type_name": "landmark",
         }
 
     elif environment == "tmaze":
         scale = scale or SCALE_TMAZE
         env_params = {
-            "prop_env": 0.3 / scale,
+            "width_prop_env": 0.3 / scale,
             "scale_x": scale,
             "scale_y": scale,
+            "dft_object_type_name": "landmark",
         }
 
     elif environment == "openfield":
         scale = scale or SCALE
         env_params = {
             "init_random_walls": 5,
-            "init_random_reward_obj": 4,
-            "init_random_novel_obj": 4,
+            "init_random_objects": {"landmark": 4},
             "init_random_teleport_pairs": 6,
             "wall_lengths": [0.1 * SCALE, 0.2 * SCALE],
             "init_seed": 75,
@@ -261,19 +247,18 @@ def get_env_params(scale=None, environment="linear", **kwargs):
         scale = scale or SCALE
 
         locations = {
-            "reward": [0.25, 0.1],
+            "landmark": [0.25, 0.1],
             "teleport_in_out": [TELEPORT_IN, TELEPORT_OUT],
             "wall_coords": [[0, 0.2], [0.6, 0.2]],
         }
         locations = {key: np.asarray(data) * scale for key, data in locations.items()}
 
         env_params = {
-            "init_random_reward_obj": 0,
-            "init_random_novel_obj": 0,
+            "init_random_objects": {"landmark": 0},
             "init_random_walls": 0,
             "init_random_teleport_pairs": 0,
             "walls": [locations["wall_coords"]],
-            "init_reward_obj": [locations["reward"]],
+            "init_objects": {"landmark": [locations["landmark"]]},
             "init_teleport_pairs": [locations["teleport_in_out"]],
             "horizontal_in_from_left": True,
             "scale": scale,
@@ -320,9 +305,6 @@ def get_agent_params(dt=DT, scale=None, environment="linear", **kwargs):
 
         agent_params["speed_mean"] = SPEED_MEAN_LINEAR
         agent_params["speed_std"] = SPEED_STD_LINEAR
-        agent_params["start_position"] = 0 + dt
-        agent_params["reset_position"] = scale - dt
-        agent_params["target_position"] = scale - dt * 8
         agent_params["fixed_direction"] = True
         agent_params["wait_after_trajectory"] = int(WAIT_LINEAR_SEC / dt)
         agent_params["wait_between_same_target"] = 30
@@ -344,14 +326,12 @@ def get_agent_params(dt=DT, scale=None, environment="linear", **kwargs):
         agent_params["target_reached_within_tol_prop_to_speed_dt"] = TOLERANCE_2D
         agent_params["teleport_in_tol_factor"] = 1.5
         if environment == "openfield_corridor":
-            agent_params["reward_factor"] = 1
-            agent_params["no_target_factor"] = 2
+            agent_params["init_target_factors"] = {"no_target": 2}
             agent_params["num_random_walk_steps"] = 300
             agent_params["wait_between_same_target"] = 1000
             agent_params["trajectory_length"] = 2000
         else:
-            agent_params["reward_factor"] = 1
-            agent_params["no_target_factor"] = 2
+            agent_params["init_target_factors"] = {"no_target": 2}
             agent_params["num_random_walk_steps"] = 300
             agent_params["wait_between_same_target"] = 300
             agent_params["trajectory_length"] = None
@@ -408,9 +388,7 @@ def get_Obj_params(n=None, environment="linear", vector=False, **kwargs):
     }
 
     if environment == "openfield_corridor":
-        Obj_params["num_novel"] = 0
-        Obj_params["num_teleport"] = 0
-        Obj_params["num_reward"] = 1
+        Obj_params["num_per"] = {"landmark": 1}
 
     if vector:
         Obj_params["line_of_sight"] = True
@@ -566,34 +544,35 @@ def get_Pyr_params(
         Pyr_params = {
             "name": "Pyr_TwoComp",
             "n": n,
+            "proximal_noise_std": 0.0,
             "biases": BIASES,
-            "apical_init_weights_zero": False,
-            "somatic_init_weights_zero": INIT_WEIGHTS_ZERO,
-            "somatic_activation_function": LINEAR_SIGMOID_ACTIVATION_PARAMS,
-            "apical_activation_function": APICAL_SIGMOID_ACTIVATION_PARAMS,
+            "distal_init_weights_zero": False,
+            "proximal_init_weights_zero": INIT_WEIGHTS_ZERO,
+            "proximal_activation_function": LINEAR_SIGMOID_ACTIVATION_PARAMS,
+            "distal_activation_function": DISTAL_SIGMOID_ACTIVATION_PARAMS,
             "inhibitory_activation_function": LINEAR_SIGMOID_ACTIVATION_PARAMS,
-            "somatic_apply_Ojas_rule": False,  # subtractive normalization may blow up with high clamping
-            "somatic_color": PYR_SOMATIC_COLOR,
-            "apical_color": PYR_APICAL_COLOR,
-            "inhibitory_apical": True,
-            "apical_first": True,
-            "somatic_single_BTSP": False,
-            "somatic_BTSP_distance_prop": None,
-            "apical_w_init_loc": 0.4,
-            "somatic_w_init_loc": W_INIT_LOC,
-            "apical_w_init_scale": 0,
-            "somatic_w_init_scale": W_INIT_SCALE,
-            "somatic_to_apical_weight": 0.2,
-            "apical_to_somatic_weight": 1.0,
-            "somatic_normalize_weights_divisively": NORM_WEIGHTS_DIV,
-            "somatic_regularization_alpha": REG_ALPHA,
-            "somatic_p": P,
-            "somatic_lr": LR,  # basic learning rate
-            "somatic_BTSP_lr": BTSP_LR,  # BTSP learning rate
-            "somatic_NMDA_activation_threshold": 2,  # threshold for NMDA activation
-            "somatic_BTSP_induction_threshold": 8,  # sustained required for BTSP
-            "somatic_BTSP_plateau_length": 0.12,  # plateau length required for BTSP
-            "inhibitory_weight": 1.0,  # strength of apical inhibition from somatic compartment
+            "proximal_apply_Ojas_rule": False,  # subtractive normalization may blow up with high clamping
+            "proximal_color": PYR_PROXIMAL_COLOR,
+            "distal_color": PYR_DISTAL_COLOR,
+            "inhibitory_distal": True,
+            "distal_first": True,
+            "proximal_single_BTSP": False,
+            "proximal_BTSP_distance_prop": None,
+            "distal_w_init_loc": 0.4,
+            "proximal_w_init_loc": W_INIT_LOC,
+            "distal_w_init_scale": 0,
+            "proximal_w_init_scale": W_INIT_SCALE,
+            "proximal_to_distal_weight": 0.2,
+            "distal_to_proximal_weight": 1.0,
+            "proximal_normalize_weights_divisively": NORM_WEIGHTS_DIV,
+            "proximal_regularization_alpha": REG_ALPHA,
+            "proximal_p": P,
+            "proximal_lr": LR,  # basic learning rate
+            "proximal_BTSP_lr": BTSP_LR,  # BTSP learning rate
+            "proximal_NMDA_activation_threshold": 2,  # threshold for NMDA activation
+            "proximal_BTSP_induction_threshold": 8,  # sustained required for BTSP
+            "proximal_BTSP_plateau_length": 0.12,  # plateau length required for BTSP
+            "inhibitory_weight": 1.0,  # strength of distal inhibition from proximal compartment
             "inhibitory_input_filter_tau": 0.3,
             "inhibitory_input_trend_tau": None,
             "lateral_inhibition_weight": None,
@@ -602,13 +581,14 @@ def get_Pyr_params(
 
         BTSP_filter_param_dict = get_default_BTSP_filter_param_dict()
         for key, value in BTSP_filter_param_dict.items():
-            Pyr_params[f"somatic_{key}"] = value
+            Pyr_params[f"proximal_{key}"] = value
 
     else:
         Pyr_params = {
             "name": "Pyr",
             "n": n,
-            "color": PYR_SOMATIC_COLOR,
+            "color": PYR_PROXIMAL_COLOR,
+            "noise_std": 0.0,
             "biases": BIASES,
             "init_weights_zero": INIT_WEIGHTS_ZERO,
             "w_init_loc": W_INIT_LOC,

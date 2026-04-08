@@ -19,8 +19,8 @@ class TwoCompLayer(object):
     TwoCompLayer()
 
     This neuron layer class defines a population of neurons with two compartments
-    (somatic and apical), each of which is an NMDALayer. An additional HebbianLayer
-    apical inhibition compartment can optionally be included
+    (proximal and distal), each of which is an NMDALayer. An additional HebbianLayer
+    distal inhibition compartment can optionally be included
 
     Must be initialised with an Agent. A parameters dictionary can also be passed at
     initialisation, with, for example, input layers.
@@ -28,53 +28,61 @@ class TwoCompLayer(object):
     default_params = {
         "n": 2,
         "name": "TwoCompLayer",
-        "somatic_input_layers": [],
-        "apical_input_layers": [],
-        "somatic_to_apical_weight": 0.2,
-        "apical_to_somatic_weight": 1.0,
-        "apical_first": True,
-        "somatic_color": "C0",
-        "apical_color": "C1",
-        "inhibitory_apical": True,
+        "proximal_input_layers": list(),
+        "distal_input_layers": list(),
+        "proximal_to_distal_weight": 0.2,
+        "distal_to_proximal_weight": 1.0,
+        "distal_first": True,
+        "proximal_color": "C0",
+        "distal_color": "C1",
+        "inhibitory_distal": True,
         "inhibitory_color": "k",
         "inhibitory_weight": 3.0,  # multiplied by -1 identity matrix
         "inhibitory_activation_function": params_util.LINEAR_SIGMOID_ACTIVATION_PARAMS,
         "inhibitory_input_filter_tau": 3,
         "inhibitory_input_trend_tau": None,
         "lateral_inhibition_weight": None,
-        "lateral_tau": 0.3,
+        "lateral_tau": 0.1,
     }
-
-    No property attributes.
 
     List of methods:
         • self.set_learn()
         • self.set_BTSP_learn()
-        • self.get_place_cell_center_of_main_apical_input()
-        • self.get_vectors_to_place_cell_center_of_main_apical_input()
-        • self.get_distances_to_place_cell_center_of_main_apical_input()
+        • self.get_compartments()
+        • self.get_min_max_firingrates()
+        • self.get_main_distal_input_layer()
+        • self.get_index_of_main_distal_input()
+        • self.get_place_cell_center_of_main_distal_input()
+        • self.get_vectors_to_place_cell_center_of_main_distal_input()
+        • self.get_distances_to_place_cell_center_of_main_distal_input()
+        • self.get_target_visits()
         • self.get_closest_steps_to_target()
-        • self.match_closest_to_target_steps_to_BTSP_steps()
+        • self.get_nbr_visits_per_target()
+        • self.match_closest_steps_to_BTSP_events()
         • self.update()
         • self.add_compartment_legend()
         • self.plot_rate_map()
-        • self.plot_rate_timeseries()
         • self.plot_rate_maps_across_learning()
-        • self.plot_distances_to_target()
-        • self.plot_distances_to_targets()
+        • self.plot_rate_timeseries()
+        • plot_binned_rates()
+        • self.plot_distance_to_distal_target()
+        • self.plot_distance_to_distal_targets()
+        • plot_neuron_properties_at_BTSP_and_closest_to_target_steps()
+        • plot_properties_at_BTSP_and_closest_to_target_steps()
+        • plot_BTSP_counts_vs_target_visits()
     """
 
     default_params = {
         "n": 2,
         "name": "TwoCompLayer",
-        "somatic_input_layers": [],
-        "apical_input_layers": [],
-        "somatic_to_apical_weight": 0.2,
-        "apical_to_somatic_weight": 1.0,
-        "apical_first": True,
-        "somatic_color": "C0",
-        "apical_color": "C1",
-        "inhibitory_apical": True,
+        "proximal_input_layers": list(),
+        "distal_input_layers": list(),
+        "proximal_to_distal_weight": 0.2,
+        "distal_to_proximal_weight": 1.0,
+        "distal_first": True,
+        "proximal_color": "C0",
+        "distal_color": "C1",
+        "inhibitory_distal": True,
         "inhibitory_color": "k",
         "inhibitory_weight": 3.0,  # multiplied by -1 identity matrix
         "inhibitory_activation_function": params_util.LINEAR_SIGMOID_ACTIVATION_PARAMS,
@@ -113,7 +121,7 @@ class TwoCompLayer(object):
         self._organize_params(params)
         self._create_compartments()
 
-        self.set_learn(somatic=True, apical=True, inhibitory=False)
+        self.set_learn(proximal=True, distal=True, inhibitory=False)
 
     def _organize_params(self, params: dict[str, Any]):
         """
@@ -123,16 +131,16 @@ class TwoCompLayer(object):
         compartment as appropriate.
 
         Attributes:
-        - apical_params (dict): Parameters for the apical compartment.
+        - distal_params (dict): Parameters for the distal compartment.
         - name (str): Name of the layer.
-        - somatic_params (dict): Parameters for the somatic compartment.
+        - proximal_params (dict): Parameters for the proximal compartment.
 
         Args:
         - params (dict): Parameters passed to the TwoCompLayer class.
         """
 
-        self.somatic_params = {"name": "somatic"}
-        self.apical_params = dict()
+        self.proximal_params = {"name": "proximal"}
+        self.distal_params = dict()
 
         all_params = copy.deepcopy(self.default_params)  # type: ignore[name-defined]
         all_params.update(params)
@@ -146,9 +154,9 @@ class TwoCompLayer(object):
             params[key] = value
 
         local_attributes = [
-            "somatic_to_apical_weight",
-            "apical_to_somatic_weight",
-            "apical_first",
+            "proximal_to_distal_weight",
+            "distal_to_proximal_weight",
+            "distal_first",
             "lateral_inhibition_weight",
             "lateral_tau",
         ]
@@ -165,20 +173,20 @@ class TwoCompLayer(object):
 
             elif key == "name":
                 self.name = value
-                if "apical_name" not in all_params.keys():
-                    self.apical_params["name"] = f"{value}_apical"
-                if "somatic_name" not in all_params.keys():
-                    self.somatic_params["name"] = f"{value}_somatic"
+                if "distal_name" not in all_params.keys():
+                    self.distal_params["name"] = f"{value}_distal"
+                if "proximal_name" not in all_params.keys():
+                    self.proximal_params["name"] = f"{value}_proximal"
 
             elif key == "n":
                 self.n = value
-                self.somatic_params["n"] = value
-                self.apical_params["n"] = value
+                self.proximal_params["n"] = value
+                self.distal_params["n"] = value
 
-            elif key.startswith("somatic_") or key.startswith("apical_"):
+            elif key.startswith("proximal_") or key.startswith("distal_"):
                 for compartment, comp_dict in [
-                    ("somatic", self.somatic_params),
-                    ("apical", self.apical_params),
+                    ("proximal", self.proximal_params),
+                    ("distal", self.distal_params),
                 ]:
                     lead_str = f"{compartment}_"
                     if key.startswith(lead_str):
@@ -190,64 +198,64 @@ class TwoCompLayer(object):
                         comp_dict[key.replace(lead_str, "")] = value
 
             else:
-                self.somatic_params[key] = value
-                self.apical_params[key] = value
+                self.proximal_params[key] = value
+                self.distal_params[key] = value
 
     def _create_compartments(self):
         """
         self._create_compartments()
 
-        Create the somatic and apical compartments, and connect them to each other for
+        Create the proximal and distal compartments, and connect them to each other for
         each neuron.
 
         If applicable, an inhibitory compartment is also created for each neuron and
-        connected to the neuron's somatic and apical compartments.
+        connected to the neuron's proximal and distal compartments.
 
         Inter-compartment connections:
-            Somatic <--> Apical
-            if self.inhibitory_apical:
-                Somatic -->* Apical inhibition --> Apical
+            Proximal <--> Distal
+            if self.inhibitory_distal:
+                Proximal -->* Distal inhibition --> Distal
             *: learning possible
 
         Attributes:
-        - ApicalCompartment (learning_neurons.NMDALayer): Apical compartment.
-        - ApicalInhibition (learning_neurons.HebbianLayer): Inhibitory compartment.
-        - SomaticCompartment (learning_neurons.NMDALayer): Somatic compartment.
+        - DistalCompartment (learning_neurons.NMDALayer): Distal compartment.
+        - DistalInhibition (learning_neurons.HebbianLayer): Inhibitory compartment.
+        - ProximalCompartment (learning_neurons.NMDALayer): Proximal compartment.
         """
 
-        self.SomaticCompartment = learning_neurons.NMDALayer(
-            self.Agent, self.somatic_params
+        self.ProximalCompartment = learning_neurons.NMDALayer(
+            self.Agent, self.proximal_params
         )
-        self.ApicalCompartment = learning_neurons.NMDALayer(
-            self.Agent, self.apical_params
+        self.DistalCompartment = learning_neurons.NMDALayer(
+            self.Agent, self.distal_params
         )
 
-        if self.SomaticCompartment.n != self.n or self.ApicalCompartment.n != self.n:  # type: ignore[attr-defined]
+        if self.ProximalCompartment.n != self.n or self.DistalCompartment.n != self.n:  # type: ignore[attr-defined]
             raise ValueError(
                 f"The two compartment layers must have same number of units ({self.n})."
             )
 
-        apical_to_somatic_weight = np.eye(self.n) * self.apical_to_somatic_weight  # type: ignore[attr-defined]
-        self.SomaticCompartment.add_input_layers_with_no_learning(self.ApicalCompartment.name)  # type: ignore[attr-defined]
-        self.SomaticCompartment.add_input(
-            self.ApicalCompartment,
-            w=apical_to_somatic_weight,
-            recurrent=not (self.apical_first),
+        distal_to_proximal_weight = np.eye(self.n) * self.distal_to_proximal_weight  # type: ignore[attr-defined]
+        self.ProximalCompartment.add_input_layers_with_no_learning(self.DistalCompartment.name)  # type: ignore[attr-defined]
+        self.ProximalCompartment.add_input(
+            self.DistalCompartment,
+            w=distal_to_proximal_weight,
+            recurrent=not (self.distal_first),
         )
 
-        somatic_to_apical_weight = np.eye(self.n) * self.somatic_to_apical_weight  # type: ignore[attr-defined]
-        self.ApicalCompartment.add_input_layers_with_no_learning(
-            self.SomaticCompartment.name  # type: ignore[attr-defined]
+        proximal_to_distal_weight = np.eye(self.n) * self.proximal_to_distal_weight  # type: ignore[attr-defined]
+        self.DistalCompartment.add_input_layers_with_no_learning(
+            self.ProximalCompartment.name  # type: ignore[attr-defined]
         )
-        self.ApicalCompartment.add_input(
-            self.SomaticCompartment,
-            w=somatic_to_apical_weight,
-            recurrent=self.apical_first,
+        self.DistalCompartment.add_input(
+            self.ProximalCompartment,
+            w=proximal_to_distal_weight,
+            recurrent=self.distal_first,
         )
 
-        if self.inhibitory_apical:  # type: ignore[attr-defined]
+        if self.inhibitory_distal:  # type: ignore[attr-defined]
             inhibitory_params = {
-                "name": "SomaticInhibitionOfApical",
+                "name": "ProximalInhibitionOfDistal",
                 "n": self.n,
                 "activation_function": self.inhibitory_activation_function,  # type: ignore[attr-defined]
                 "color": self.inhibitory_color,  # type: ignore[attr-defined]
@@ -257,19 +265,19 @@ class TwoCompLayer(object):
 
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", "No input layers", UserWarning)
-                self.ApicalInhibition = learning_neurons.HebbianLayer(
+                self.DistalInhibition = learning_neurons.HebbianLayer(
                     self.Agent, params=inhibitory_params
                 )
 
-            somatic_input = np.eye(self.n) * self.inhibitory_weight  # type: ignore[attr-defined]
-            self.ApicalInhibition.add_input(self.SomaticCompartment, w=somatic_input)
+            proximal_input = np.eye(self.n) * self.inhibitory_weight  # type: ignore[attr-defined]
+            self.DistalInhibition.add_input(self.ProximalCompartment, w=proximal_input)
 
-            apical_inhibition = np.eye(self.n) * -1
-            self.ApicalCompartment.add_input_layers_with_no_learning(
-                self.ApicalInhibition.name  # type: ignore[attr-defined]
+            distal_inhibition = np.eye(self.n) * -1
+            self.DistalCompartment.add_input_layers_with_no_learning(
+                self.DistalInhibition.name  # type: ignore[attr-defined]
             )
-            self.ApicalCompartment.add_input(
-                self.ApicalInhibition, w=apical_inhibition, recurrent=self.apical_first
+            self.DistalCompartment.add_input(
+                self.DistalInhibition, w=distal_inhibition, recurrent=self.distal_first
             )
 
         if self.lateral_inhibition_weight is not None:
@@ -279,7 +287,7 @@ class TwoCompLayer(object):
                 lateral_params = {
                     "name": "LateralInhibition",
                     "n": self.n,
-                    "activation_function": self.SomaticCompartment.activation_function,
+                    "activation_function": self.ProximalCompartment.activation_function,
                     "color": "gray",
                     "input_filter_tau": self.lateral_tau,
                 }
@@ -288,16 +296,16 @@ class TwoCompLayer(object):
                     self.Agent, params=lateral_params
                 )
 
-            self.LateralInhibition.add_input(self.SomaticCompartment, w=np.eye(self.n))
+            self.LateralInhibition.add_input(self.ProximalCompartment, w=np.eye(self.n))
             lateral_inhibition = (np.eye(self.n) - 1) * self.lateral_inhibition_weight
-            self.SomaticCompartment.add_input(
+            self.ProximalCompartment.add_input(
                 self.LateralInhibition, w=lateral_inhibition
             )
-            self.SomaticCompartment.add_input_layers_with_no_learning(
+            self.ProximalCompartment.add_input_layers_with_no_learning(
                 self.LateralInhibition.name
             )
 
-    def set_learn(self, learn=None, somatic=None, apical=None, inhibitory=None):
+    def set_learn(self, learn=None, proximal=None, distal=None, inhibitory=None):
         """
         self.set_learn()
 
@@ -307,46 +315,46 @@ class TwoCompLayer(object):
         Args:
         - learn (bool, optional): Whether to learn learnable weights into all
             compartments.  Default is None.
-        - somatic (bool, optional): Whether to learn learnable weights into the
-            somatic compartment.  Default is None.
-        - apical (bool, optional): Whether to learn learnable weights into the
-            apical compartment. Default is None.
+        - proximal (bool, optional): Whether to learn learnable weights into the
+            proximal compartment.  Default is None.
+        - distal (bool, optional): Whether to learn learnable weights into the
+            distal compartment. Default is None.
         - inhibitory (bool, optional): Whether to learn learnable weights into the
             inhibitory compartment. Default is None.
         """
 
         if learn is not None:
-            somatic = learn if somatic is None else somatic
-            apical = learn if apical is None else apical
+            proximal = learn if proximal is None else proximal
+            distal = learn if distal is None else distal
             inhibitory = learn if inhibitory is None else inhibitory
 
-        self.SomaticCompartment.set_learn(somatic)
-        self.ApicalCompartment.set_learn(apical)
-        if self.inhibitory_apical:  # type: ignore[attr-defined]
-            self.ApicalInhibition.set_learn(inhibitory)
+        self.ProximalCompartment.set_learn(proximal)
+        self.DistalCompartment.set_learn(distal)
+        if self.inhibitory_distal:  # type: ignore[attr-defined]
+            self.DistalInhibition.set_learn(inhibitory)
 
-    def set_BTSP_learn(self, learn=None, somatic=None, apical=None):
+    def set_BTSP_learn(self, learn=None, proximal=None, distal=None):
         """
         self.set_BTSP_learn()
 
-        Set whether the somatic and apical compartments should learn using BTSP during
+        Set whether the proximal and distal compartments should learn using BTSP during
         self.update() calls. Only affects input weights that are learnable.
 
         Args:
         - learn (bool, optional): Whether to learn learnable weights into both
             compartments. Default is None
-        - somatic (bool, optional): Whether to learn learnable weights into the
-            somatic compartment.  Default is None.
-        - apical (bool, optional): Whether to learn learnable weights into the
-            apical compartment. Default is None.
+        - proximal (bool, optional): Whether to learn learnable weights into the
+            proximal compartment.  Default is None.
+        - distal (bool, optional): Whether to learn learnable weights into the
+            distal compartment. Default is None.
         """
 
         if learn is not None:
-            somatic = learn if somatic is None else somatic
-            apical = learn if apical is None else apical
+            proximal = learn if proximal is None else proximal
+            distal = learn if distal is None else distal
 
-        self.SomaticCompartment.set_BTSP_learn(somatic)
-        self.ApicalCompartment.set_BTSP_learn(apical)
+        self.ProximalCompartment.set_BTSP_learn(proximal)
+        self.DistalCompartment.set_BTSP_learn(distal)
 
     def get_compartments(
         self,
@@ -357,26 +365,26 @@ class TwoCompLayer(object):
         self.get_compartments()
 
         - compartment (str, optional): Which compartments to retrieve
-            ("somatic", "apical", "both", "inhibitory", "all"). Default is "all".
+            ("proximal", "distal", "both", "inhibitory", "all"). Default is "all".
 
         Returns:
         - compartments (list): List of compartments.
         """
 
-        if compartment not in ["somatic", "apical", "both", "inhibitory", "all"]:
+        if compartment not in ["proximal", "distal", "both", "inhibitory", "all"]:
             raise ValueError(
-                "compartment must be 'somatic', 'apical', 'both', 'inhibitory' or 'all', "
+                "compartment must be 'proximal', 'distal', 'both', 'inhibitory' or 'all', "
                 f"not '{compartment}'."
             )
 
         compartments = list()
-        if compartment in ["somatic", "both", "all"]:
-            compartments.append(self.SomaticCompartment)
-        if compartment in ["apical", "both", "all"]:
-            compartments.append(self.ApicalCompartment)
+        if compartment in ["proximal", "both", "all"]:
+            compartments.append(self.ProximalCompartment)
+        if compartment in ["distal", "both", "all"]:
+            compartments.append(self.DistalCompartment)
         if compartment in ["inhibitory", "all"]:
-            if self.inhibitory_apical:
-                compartments.append(self.ApicalInhibition)
+            if self.inhibitory_distal:
+                compartments.append(self.DistalInhibition)
             elif compartment == "inhibitory":  # type: ignore[attr-defined]
                 raise ValueError(
                     "Cannot retrieve inhibition compartment, as inhibition is not enabled."
@@ -413,7 +421,7 @@ class TwoCompLayer(object):
         - chosen_neurons (str, int, list or np.ndarray, optional): Neurons to consider
             for min and max firing rates. Default is "all".
         - compartment (str, optional): Which compartment to obtain max for
-            ("somatic", "apical", "both", "inhibitory", "all"). Default is "all".
+            ("proximal", "distal", "both", "inhibitory", "all"). Default is "all".
         - incl_lateral (bool, optional): Whether to include the lateral inhibition
             compartment. Default is False.
 
@@ -435,13 +443,13 @@ class TwoCompLayer(object):
 
         return min_firingrate, max_firingrate
 
-    def get_main_apical_input_layer(
+    def get_main_distal_input_layer(
         self, src_name: str = "Obj", return_dict: bool = False
     ):
         """
-        self.get_main_apical_input_layer()
+        self.get_main_distal_input_layer()
 
-        Get the main input layer to the apical compartment.
+        Get the main input layer to the distal compartment.
 
         Args:
         - src_name (str, optional): Name of the input layer
@@ -451,36 +459,36 @@ class TwoCompLayer(object):
 
         Returns:
         if return_dict:
-        - input_dict (dict): Full input dictionary for the main apical input layer.
+        - input_dict (dict): Full input dictionary for the main distal input layer.
         else:
-        - main_apical_input_layer (riab_neurons.PlaceCells): Main apical input layer.
+        - main_distal_input_layer (riab_neurons.PlaceCells): Main distal input layer.
         """
 
-        if src_name not in self.ApicalCompartment.inputs.keys():
-            raise ValueError(f"No '{src_name}' input to apical compartment.")
+        if src_name not in self.DistalCompartment.inputs.keys():
+            raise ValueError(f"No '{src_name}' input to distal compartment.")
 
-        main_apical_input_dict = self.ApicalCompartment.inputs[src_name]
+        main_distal_input_dict = self.DistalCompartment.inputs[src_name]
 
         if not gen_util.attribute_type_checker(
-            main_apical_input_dict["layer"], "PlaceCells"
+            main_distal_input_dict["layer"], "PlaceCells"
         ):
             raise ValueError(f"Input layer '{src_name}' is not a PlaceCells layer.")
 
         if return_dict:
-            return main_apical_input_dict
+            return main_distal_input_dict
 
         else:
-            main_apical_input_layer = main_apical_input_dict["layer"]
+            main_distal_input_layer = main_distal_input_dict["layer"]
 
-            return main_apical_input_layer
+            return main_distal_input_layer
 
-    def get_index_of_main_apical_input(
+    def get_index_of_main_distal_input(
         self, neuron_idx: int = 0, src_name: str = "Obj"
     ):
         """
-        self.get_index_of_main_apical_input()
+        self.get_index_of_main_distal_input()
 
-        Get the index of the main input to the apical compartment of a specified neuron.
+        Get the index of the main input to the distal compartment of a specified neuron.
 
         Args:
         - neuron_idx (int, optional): Neuron index. Default is 0.
@@ -488,10 +496,10 @@ class TwoCompLayer(object):
             (must be a place cell-derived layer). Default is "Obj".
 
         Returns:
-        - input_idx (int): Index of main apical input.
+        - input_idx (int): Index of main distal input.
         """
 
-        main_apical_input_dict = self.get_main_apical_input_layer(
+        main_distal_input_dict = self.get_main_distal_input_layer(
             src_name=src_name, return_dict=True
         )
 
@@ -501,17 +509,17 @@ class TwoCompLayer(object):
                 "in the layer."
             )
 
-        input_idx = np.argmax(main_apical_input_dict["w"][:, neuron_idx])
+        input_idx = np.argmax(main_distal_input_dict["w"][:, neuron_idx])
 
         return input_idx
 
-    def get_place_cell_center_of_main_apical_input(
+    def get_place_cell_center_of_main_distal_input(
         self, neuron_idx: int = 0, src_name: str = "Obj"
     ):
         """
-        self.get_place_cell_center_of_main_apical_input()
+        self.get_place_cell_center_of_main_distal_input()
 
-        Get the place cell center input location for the apical compartment of a
+        Get the place cell center input location for the distal compartment of a
         specified neuron.
 
         Args:
@@ -520,21 +528,21 @@ class TwoCompLayer(object):
             (must be a place cell-derived layer). Default is "Obj".
 
         Returns:
-        - place_cell_center (1D np.ndarray): Main apical input place cell center
+        - place_cell_center (1D np.ndarray): Main distal input place cell center
             location.
         """
 
-        main_apical_input_layer = self.get_main_apical_input_layer(src_name=src_name)
+        main_distal_input_layer = self.get_main_distal_input_layer(src_name=src_name)
 
-        input_idx = self.get_index_of_main_apical_input(
+        input_idx = self.get_index_of_main_distal_input(
             neuron_idx=neuron_idx, src_name=src_name
         )
 
-        place_cell_center = main_apical_input_layer.place_cell_centers[input_idx]
+        place_cell_center = main_distal_input_layer.place_cell_centers[input_idx]
 
         return place_cell_center
 
-    def get_vectors_to_place_cell_center_of_main_apical_input(
+    def get_vectors_to_place_cell_center_of_main_distal_input(
         self,
         neuron_idx: int = 0,
         src_name: str = "Obj",
@@ -542,10 +550,10 @@ class TwoCompLayer(object):
         radians: bool = False,
     ):
         """
-        self.get_vectors_to_place_cell_center_of_main_apical_input()
+        self.get_vectors_to_place_cell_center_of_main_distal_input()
 
         Get the vectors from the agent's current position to the place cell center
-        input location for the apical compartment of a specified neuron.
+        input location for the distal compartment of a specified neuron.
 
         Args:
         - neuron_idx (int, optional): Neuron index. Default is 0.
@@ -557,11 +565,11 @@ class TwoCompLayer(object):
             Default is False.
 
         Returns:
-        - vectors (2D np.ndarray): Vectors from agent's position to apical input
+        - vectors (2D np.ndarray): Vectors from agent's position to distal input
             place cell center.
         """
 
-        place_cell_center = self.get_place_cell_center_of_main_apical_input(
+        place_cell_center = self.get_place_cell_center_of_main_distal_input(
             neuron_idx=neuron_idx, src_name=src_name
         )
         pos = np.asarray(self.Agent.history["pos"])
@@ -572,14 +580,14 @@ class TwoCompLayer(object):
 
         return vectors
 
-    def get_distances_to_place_cell_center_of_main_apical_input(
+    def get_distances_to_place_cell_center_of_main_distal_input(
         self, neuron_idx: int = 0, src_name: str = "Obj"
     ):
         """
-        self.get_distances_to_place_cell_center_of_main_apical_input()
+        self.get_distances_to_place_cell_center_of_main_distal_input()
 
         Get the distances from the agent's current position to the place cell center
-        input location for the apical compartment of a specified neuron.
+        input location for the distal compartment of a specified neuron.
 
         Args:
         - neuron_idx (int, optional): Neuron index. Default is 0.
@@ -587,11 +595,11 @@ class TwoCompLayer(object):
             (must be a place cell-derived layer). Default is "Obj".
 
         Returns:
-        - distances (1D np.ndarray): Distances from agent's position to apical input
+        - distances (1D np.ndarray): Distances from agent's position to distal input
             place cell center.
         """
 
-        vectors = self.get_vectors_to_place_cell_center_of_main_apical_input(
+        vectors = self.get_vectors_to_place_cell_center_of_main_distal_input(
             neuron_idx, src_name
         )
 
@@ -610,7 +618,7 @@ class TwoCompLayer(object):
         self.get_target_visits()
 
         Get the indices of the steps where the agent is closest to the target specified
-        by the place cell center of the main input to the neuron's apical compartment.
+        by the place cell center of the main input to the neuron's distal compartment.
 
         Args:
         - neuron_idx (int, optional): Neuron index. Default is 0.
@@ -626,7 +634,7 @@ class TwoCompLayer(object):
             closest to the target.
         """
 
-        distances = self.get_distances_to_place_cell_center_of_main_apical_input(
+        distances = self.get_distances_to_place_cell_center_of_main_distal_input(
             neuron_idx=neuron_idx, src_name=target_src_name
         )
 
@@ -648,7 +656,7 @@ class TwoCompLayer(object):
         self.get_closest_steps_to_target()
 
         Get the steps where the agent is closest to the target specified by the place
-        cell center of the main input to the neuron's apical compartment.
+        cell center of the main input to the neuron's distal compartment.
 
         Args:
         - target_src_name (str, optional): Name of the input layer
@@ -666,7 +674,7 @@ class TwoCompLayer(object):
             target.
         """
 
-        distances = self.get_distances_to_place_cell_center_of_main_apical_input(
+        distances = self.get_distances_to_place_cell_center_of_main_distal_input(
             neuron_idx, src_name=target_src_name
         )
         closest_steps = gen_util.get_minima_indices(
@@ -693,7 +701,7 @@ class TwoCompLayer(object):
         self.get_nbr_visits_per_target()
 
         Get the number of visits to the target specified by the place cell center of
-        the main input to the neuron's apical compartment for each neuron in the layer.
+        the main input to the neuron's distal compartment for each neuron in the layer.
 
         Args:
         - target_src_name (str, optional): Name of the input layer
@@ -710,10 +718,10 @@ class TwoCompLayer(object):
         Returns:
         - nbr_visits_per_BTSP_target (1D np.ndarray): Number of visits to the target
             specified by the place cell center of the main input to the neuron's
-            apical compartment for each neuron in the layer.
+            distal compartment for each neuron in the layer.
         """
 
-        _, startid, endid = self.SomaticCompartment.get_plotting_times(
+        _, startid, endid = self.ProximalCompartment.get_plotting_times(
             t_start=t_start, t_end=t_end
         )
 
@@ -728,7 +736,7 @@ class TwoCompLayer(object):
 
             if len(visit_indices):
                 visit_indices = visit_indices[
-                    (visit_indices >= startid) & (visit_indices < endid)
+                    (visit_indices >= startid) & (visit_indices <= endid)
                 ]
                 nbr_visits_per_BTSP_target[neuron_idx] = len(visit_indices)
 
@@ -761,12 +769,12 @@ class TwoCompLayer(object):
 
         Returns:
         - steps_dict (dict): Dictionary of steps closest to the target, matched to
-            BTSP steps, with keys:
-                "steps_before": closest steps occurring before neuron's first BTSP step
-                "steps_near_BTSP": closest steps occurring near BTSP steps
-                "steps_of_nearest_BTSP": index of nearest BTSP step for each step_near_BTSP value
-                "steps_other": closest steps after first BTSP, but not near a BTSP step
-                "all_BTSP_steps": all BTSP steps, whether close to target or not
+            each BTSP step, with keys:
+                "steps_before": steps close to target before neuron's first BTSP step
+                "steps_near_BTSP": steps close to target nearest each BTSP step
+                "steps_of_nearest_BTSP": BTSP steps closest to each step close to target
+                "steps_other": other steps close to target after first BTSP
+                "other_BTSP_steps": all other BTSP steps, whether close to target or not
         """
 
         if neuron_idx >= self.n:
@@ -775,11 +783,11 @@ class TwoCompLayer(object):
                 f"neurons ({self.n})."
             )
 
-        _, start, end = self.SomaticCompartment.get_plotting_times(
+        _, start, end = self.ProximalCompartment.get_plotting_times(
             t_start=t_start, t_end=t_end
         )
 
-        BTSP_steps = self.SomaticCompartment.get_BTSP_step_dict()[neuron_idx]
+        BTSP_steps = self.ProximalCompartment.get_BTSP_step_dict()[neuron_idx]
         closest_steps = self.get_closest_steps_to_target(
             neuron_idx, target_src_name=target_src_name, min_dist=min_dist
         )
@@ -818,42 +826,42 @@ class TwoCompLayer(object):
 
         return steps_dict
 
-    def update(self, apical_first: bool | None = None):
+    def update(self, distal_first: bool | None = None):
         """
         self.update()
 
-        Update the somatic and apical compartments of the two compartment layer. If
-        there is an apical inhibition compartment, it is also updated.
+        Update the proximal and distal compartments of the two compartment layer. If
+        there is an distal inhibition compartment, it is also updated.
 
         Update order:
-            1. Apical inhibition compartment (if applicable)
-            if apical_first:
-                2. Apical compartment
-                3. Somatic compartment
+            1. Distal inhibition compartment (if applicable)
+            if distal_first:
+                2. Distal compartment
+                3. Proximal compartment
             otherwise:
-                2. Somatic compartment
-                3. Apical compartment
+                2. Proximal compartment
+                3. Distal compartment
 
         Args:
-        - apical_first (bool, optional): Whether to update the apical compartment
-            before the somatic compartment. If None, the attribute is used.
+        - distal_first (bool, optional): Whether to update the distal compartment
+            before the proximal compartment. If None, the attribute is used.
             Default is None.
         """
 
-        if self.inhibitory_apical:  # type: ignore[attr-defined]
-            self.ApicalInhibition.update()
+        if self.inhibitory_distal:  # type: ignore[attr-defined]
+            self.DistalInhibition.update()
 
-        if apical_first is None:
-            apical_first = self.apical_first  # type: ignore[attr-defined]
+        if distal_first is None:
+            distal_first = self.distal_first  # type: ignore[attr-defined]
 
-        if apical_first:
-            self.ApicalCompartment.update()
-            self.SomaticCompartment.update()
+        if distal_first:
+            self.DistalCompartment.update()
+            self.ProximalCompartment.update()
             if self.lateral_inhibition_weight is not None:
                 self.LateralInhibition.update()
         else:
-            self.SomaticCompartment.update()
-            self.ApicalCompartment.update()
+            self.ProximalCompartment.update()
+            self.DistalCompartment.update()
             if self.lateral_inhibition_weight is not None:
                 self.LateralInhibition.update()
 
@@ -865,11 +873,12 @@ class TwoCompLayer(object):
         compartment="all",
         plot_lateral=False,
         loc="best",
-        somatic_color=None,
-        apical_color=None,
+        proximal_color=None,
+        distal_color=None,
         inhibitory_color=None,
         lateral_color=None,
         lw=1.0,
+        label=None,
         **kwargs,
     ):
         """
@@ -880,39 +889,50 @@ class TwoCompLayer(object):
         Args:
         - sub_ax (plt.Axes): Subplot to add the legend to.
         - compartment (str, optional): Which compartments to include in the legend
-            ("somatic", "apical", "inhibitory", "all"). Default is "all".
+            ("proximal", "distal", "inhibitory", "all"). Default is "all".
         - plot_lateral (bool, optional): Whether to include the lateral inhibition
             compartment in the legend. Default is False.
-        - somatic_color (str, optional): Color for somatic compartment. Default is None.
-        - apical_color (str, optional): Color for apical compartment. Default is None.
+        - proximal_color (str, optional): Color for proximal compartment. Default is None.
+        - distal_color (str, optional): Color for distal compartment. Default is None.
         - inhibitory_color (str, optional): Color for inhibitory compartment.
             Default is None.
         - lateral_color (str, optional): Color for lateral inhibition compartment.
             Default is None.
         - lw (float, optional): Line width for the timeseries. Default is 1.0.
+        - label (str, optional): Label for the legend. If None, compartment names are
+            used. Default is None.
 
         Keyword args:
         - **kwargs: Additional keyword arguments passed to plt.legend().
         """
 
-        if compartment not in ["somatic", "apical", "both", "inhibitory", "all"]:
+        if compartment not in ["proximal", "distal", "both", "inhibitory", "all"]:
             raise ValueError(
-                "compartment must be 'somatic', 'apical', 'both', 'inhibitory' or "
+                "compartment must be 'proximal', 'distal', 'both', 'inhibitory' or "
                 f"'all', not '{compartment}'."
             )
 
-        if compartment in ["all", "somatic"]:
-            color = somatic_color or self.SomaticCompartment.color
-            sub_ax.plot([], [], color=color, lw=lw, label="somatic")
-        if compartment in ["all", "apical"]:
-            color = apical_color or self.ApicalCompartment.color
-            sub_ax.plot([], [], color=color, lw=lw, label="apical")
-        if self.inhibitory_apical and compartment in ["all", "inhibitory"]:
-            color = inhibitory_color or self.ApicalInhibition.color
-            sub_ax.plot([], [], color=color, lw=lw, label="inhibitory")
+        if compartment in ["both", "all"] and label is not None:
+            raise ValueError(
+                "Cannot specify label when plotting more than one compartment."
+            )
+
+        if compartment in ["all", "proximal"]:
+            use_label = label or "proximal"
+            color = proximal_color or self.ProximalCompartment.color
+            sub_ax.plot(list(), list(), color=color, lw=lw, label=use_label)
+        if compartment in ["all", "distal"]:
+            use_label = label or "distal"
+            color = distal_color or self.DistalCompartment.color
+            sub_ax.plot(list(), list(), color=color, lw=lw, label=use_label)
+        if self.inhibitory_distal and compartment in ["all", "inhibitory"]:
+            use_label = label or "inhibitory"
+            color = inhibitory_color or self.DistalInhibition.color
+            sub_ax.plot(list(), list(), color=color, lw=lw, label=use_label)
         if plot_lateral and self.lateral_inhibition_weight is not None:
+            use_label = label or "lat. inh."
             color = lateral_color or self.LateralInhibition.color
-            sub_ax.plot([], [], color=color, lw=lw, label="lat. inh.")
+            sub_ax.plot(list(), list(), color=color, lw=lw, label=use_label)
 
         sub_ax.legend(loc=loc, **kwargs)
 
@@ -942,8 +962,8 @@ class TwoCompLayer(object):
         - ax (np.ndarray or plt.Axes, optional): Subplot or array of subplots to plot
             on (one per plotted ROI, if environment is 2D). Default is None.
         - compartment (str, optional): Which compartment to plot, if environment is
-            2D ("somatic", "apical", "both", "inhibitory", "all"). Default is None
-            (i.e., "somatic" if environment is 2D, and "both" otherwise).
+            2D ("proximal", "distal", "both", "inhibitory", "all"). Default is None
+            (i.e., "proximal" if environment is 2D, and "both" otherwise).
         - norm_by (str, optional): Normalisation method for rate maps.
             Default is "shared_fr_max".
         - no_legend (bool, optional): Whether to remove the legend. Default is False.
@@ -959,10 +979,10 @@ class TwoCompLayer(object):
         """
 
         if compartment is None:
-            if self.Environment.dimensionality == "1D":
+            if self.Environment.D == 1:
                 compartment = "all"
             else:
-                compartment = "somatic"
+                compartment = "proximal"
 
         if norm_by is None and compartment in ["both", "all"]:
             norm_by = "shared_fr_max"
@@ -977,10 +997,10 @@ class TwoCompLayer(object):
         elif norm_by is not None:
             kwargs["norm_by"] = norm_by
 
-        if self.Environment.dimensionality == "2D" and compartment == "all":
+        if self.Environment.D == 2 and compartment == "all":
             warnings.warn(
                 "Plotting rate maps for all compartments in a 2D environment will "
-                "result in only the somatic compartment appearing."
+                "result in only the proximal compartment appearing."
             )
 
         for comp in self.get_compartments(compartment)[::-1]:
@@ -995,7 +1015,7 @@ class TwoCompLayer(object):
             )
             ax = ax or ax_out
 
-        if not no_legend and self.Environment.dimensionality == "1D":
+        if not no_legend and self.Environment.D == 1:
             self.add_compartment_legend(ax, compartment=compartment, loc="lower right")
 
         fig = np.asarray(ax).ravel()[0].figure
@@ -1023,8 +1043,8 @@ class TwoCompLayer(object):
             (number of ROIs, num_maps) or v.v.. If None, a new subplot array is created.
             Default is None.
         - compartment (str, optional): Which compartment to plot, if environment is
-            2D ("somatic", "apical", "inhibitory" or "both"). Default is None
-            (i.e., "somatic" if environment is 2D, and "both" otherwise).
+            2D ("proximal", "distal", "inhibitory" or "both"). Default is None
+            (i.e., "proximal" if environment is 2D, and "both" otherwise).
         - no_legend (bool, optional): Whether to remove the legend. Default is False.
         - title (str, optional): Title for the figure. Default is None.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
@@ -1035,8 +1055,8 @@ class TwoCompLayer(object):
             NMDALayer.plot_rate_maps_across_learning().
 
         Raises:
-        - ValueError: If compartment is not "somatic", "apical", "inhibitory" or "all".
-        - ValueError: If compartment is "inhibitory", but self.inhibitory_apical is False.
+        - ValueError: If compartment is not "proximal", "distal", "inhibitory" or "all".
+        - ValueError: If compartment is "inhibitory", but self.inhibitory_distal is False.
 
         Returns:
         - axes (2D np.ndarray): Array of subplots. If input axes was None,
@@ -1044,15 +1064,15 @@ class TwoCompLayer(object):
         """
 
         if compartment is None:
-            if self.Environment.dimensionality == "1D":
+            if self.Environment.D == 1:
                 compartment = "all"
             else:
-                compartment = "somatic"
+                compartment = "proximal"
 
-        if self.Environment.dimensionality == "2D" and compartment == "both":
+        if self.Environment.D == 2 and compartment == "both":
             warnings.warn(
                 "Plotting rate maps across learning for both compartments in a 2D "
-                "environment will result in only the somatic compartment appearing."
+                "environment will result in only the proximal compartment appearing."
             )
 
         for comp in self.get_compartments(compartment)[::-1]:
@@ -1064,7 +1084,7 @@ class TwoCompLayer(object):
             )
             axes = axes or axes_out
 
-        if not no_legend and self.Environment.dimensionality == "1D":
+        if not no_legend and self.Environment.D == 1:
             sub_ax = np.asarray(axes).ravel()[0]
             self.add_compartment_legend(
                 sub_ax, compartment=compartment, loc="lower right"
@@ -1073,23 +1093,199 @@ class TwoCompLayer(object):
         if title is None:
             if compartment == "both":
                 title_start = "Rate maps"
-            elif compartment == "somatic":
-                title_start = "Somatic rate maps"
+            elif compartment == "proximal":
+                title_start = "Proximal rate maps"
             elif compartment == "inhibitory":
                 title_start = "Inhibition rate maps"
             else:
-                title_start = "Apical rate maps"
+                title_start = "Distal rate maps"
 
             title = f"{title_start} across learning"
 
         fig = np.asarray(axes).ravel()[0].figure
 
-        y = 0.9 if self.Environment.dimensionality == 1 else 0.97
+        y = 0.9 if self.Environment.D == 1 else 0.97
         fig.suptitle(title, y=y)
 
         plot_util.save_figure(fig, f"{self.name}_rate_maps_across_learning", save=autosave)  # type: ignore[attr-defined]
 
         return axes
+
+    def plot_rate_timeseries(
+        self,
+        t_start: float | None = None,
+        t_end: float | None = None,
+        chosen_neurons: str | int | list | np.ndarray = "all",
+        ax: plt.Axes | np.ndarray | None = None,
+        proximal_color: str | None = None,
+        distal_color: str | None = None,
+        inhibitory_color: str | None = None,
+        lateral_color: str | None = None,
+        separate_axes: bool = False,
+        plot_lateral: bool = False,
+        single_x_axis: bool = True,
+        norm_by: str | None = None,
+        in_min: bool = True,
+        lw: float = 1.0,
+        omit_target_reset: bool = False,
+        no_legend: bool = False,
+        autosave: bool | None = None,
+        **kwargs,
+    ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
+        """
+        self.plot_rate_timeseries()
+
+        Plot a timeseries of the firing rate of the specified compartments, either
+        overlayed or split across subplots.
+
+        Args:
+        - t_start (float, optional): Start time of the plot. Default is None.
+        - t_end (float, optional): End time. Default is None.
+        - chosen_neurons (str, int, list or np.ndarray, optional): Neurons to plot.
+            Default is "all".
+        - ax (1D np.ndarray or plt.Axes, optional): Subplot or 1D array of subplots
+            if separate_axes (one per compartment). Default is None.
+        - proximal_color (str, optional): Color for proximal compartment. Default is None.
+        - distal_color (str, optional): Color for distal compartment. Default is None.
+        - inhibitory_color (str, optional): Color for inhibitory compartment.
+            Default is None.
+        - lateral_color (str, optional): Color for lateral inhibition compartment.
+            Default is None.
+        - separate_axes (bool, optional): Whether to plot each compartment on a
+            separate subplot. Default is False.
+        - plot_lateral (bool, optional): Whether to plot the lateral inhibition layer,
+            if it exists. Default is False.
+        - single_x_axis (bool, optional): Whether to plot x axis spine and ticks only
+            for the last subplot, instead of all of them. Default is True.
+        - norm_by (str, optional): Normalisation method for rate maps. Default is None.
+        - in_min (bool, optional): Whether to plot the time in minutes instead of
+            seconds. Default is True.
+        - lw (float, optional): Line width for the timeseries. Default is 1.0.
+        - omit_target_reset (bool, optional): Whether to omit marking the target and
+            reset points on the plot. Default is False.
+        - no_legend (bool, optional): Whether to remove the legend. Default is False.
+        - autosave (bool, optional): Whether to autosave the figure. If None, the
+        global autosave setting for ratinabox is used. Default is None.
+
+        Keyword args:
+        - **kwargs: Keyword arguments passed to NMDALayer.plot_rate_timeseries().
+
+        Returns:
+        - ax (2D np.ndarray or plt.Axes): Subplot or 1D array of subplots
+            if separate_axes (one per compartment).
+        """
+
+        compartments = self.get_compartments("all", incl_lateral=plot_lateral)
+
+        if "linewidth" in kwargs.keys():
+            lw = kwargs.pop("linewidth")
+
+        if "imshow" in kwargs.keys() and kwargs["imshow"]:
+            raise NotImplementedError("'imshow' option is not implemented.")
+
+        if separate_axes:
+            num_rows = len(compartments)
+            norm_by = norm_by or "max"
+            if ax is None:
+                _, ax = plt.subplots(
+                    num_rows,
+                    1,
+                    figsize=[6, 1.2 * num_rows],
+                    sharex=True,
+                    sharey=True,
+                    squeeze=False,
+                )
+
+            else:
+                ax_shape = np.asarray(ax).shape
+                if not (ax_shape == (num_rows,) or ax_shape == (num_rows, 1)):
+                    raise ValueError(
+                        f"ax must have shape ({num_rows}, ) or ({num_rows}, 1), but "
+                        f"found {ax.shape}."
+                    )
+
+            ax1D = np.asarray(ax).ravel()
+        else:
+            if "sub_ax" in kwargs.keys() and ax is None:
+                ax = kwargs.pop("sub_ax")
+            sub_ax = ax
+            norm_by = norm_by or "shared_max"
+
+        if norm_by == "shared_max":
+            norm_by = self.get_min_max_firingrates(
+                t_start=t_start,
+                t_end=t_end,
+                incl_lateral=plot_lateral,
+                chosen_neurons=chosen_neurons,
+            )[1]
+
+        colors = [proximal_color, distal_color]
+        separate_titles = ["Proximal compartment", "Distal compartment"]
+        if self.inhibitory_distal:  # type: ignore[attr-defined]
+            colors.append(inhibitory_color)
+            separate_titles.append("Inhibitory interneuron")
+        if plot_lateral and self.lateral_inhibition_weight is not None:
+            colors.append(lateral_color)
+            separate_titles.append("Lateral inhibition")
+
+        if len(compartments) != len(colors):
+            raise NotImplementedError(
+                "Number of compartments does not match number of colors."
+            )
+
+        for c, comp in enumerate(compartments):
+            if norm_by == "max_per":
+                use_norm_by = comp.get_min_max_firingrates(
+                    t_start=t_start, t_end=t_end, chosen_neurons=chosen_neurons
+                )[1]
+            else:
+                use_norm_by = norm_by
+            color = colors[c] or comp.color
+            use_sub_ax = ax1D[c] if separate_axes else sub_ax
+            sub_ax_out = comp.plot_rate_timeseries(
+                t_start=t_start,
+                t_end=t_end,
+                chosen_neurons=chosen_neurons,
+                sub_ax=use_sub_ax,
+                color=color,
+                norm_by=use_norm_by,
+                in_min=in_min,
+                lw=lw,
+                autosave=False,
+                **kwargs,
+            )
+            if not separate_axes:
+                sub_ax = sub_ax or sub_ax_out
+
+        if separate_axes:
+            if single_x_axis:
+                plot_util.clear_bottom(ax1D[:-1])
+
+            plural = "s" if self.n > 1 else ""
+            for s, sub_ax in enumerate(ax1D):
+                sub_ax.set_title(f"{separate_titles[s]}{plural}")
+                if not omit_target_reset:
+                    plot_fcts.mark_target_and_reset_points(self, sub_ax=sub_ax, lw=lw)
+                if s != len(ax1D) - 1:
+                    sub_ax.set_xlabel("")
+            fig = np.asarray(ax).ravel()[0].figure
+        else:
+            if not no_legend:
+                self.add_compartment_legend(
+                    sub_ax,
+                    compartment="all",
+                    plot_lateral=plot_lateral,
+                    proximal_color=proximal_color,
+                    distal_color=distal_color,
+                    inhibitory_color=inhibitory_color,
+                    lateral_color=lateral_color,
+                    lw=lw,
+                )
+            fig = sub_ax.figure
+
+        plot_util.save_figure(fig, f"{self.name}_firingrate", save=autosave)  # type: ignore[attr-defined]
+
+        return ax
 
     def plot_binned_rates(
         self,
@@ -1149,7 +1345,7 @@ class TwoCompLayer(object):
         """
 
         compartments = self.get_compartments("all", incl_lateral=plot_lateral)
-        chosen_neurons = self.SomaticCompartment.get_chosen_neurons(chosen_neurons)
+        chosen_neurons = self.ProximalCompartment.get_chosen_neurons(chosen_neurons)
 
         num_rows = len(compartments)
         if axes is None:
@@ -1166,8 +1362,8 @@ class TwoCompLayer(object):
                 raise ValueError(
                     f"axes must have shape ({num_rows}, {num_cols}), not {ax_shape}."
                 )
-        titles = ["Somatic comp.", "Apical comp."]
-        if self.inhibitory_apical:  # type: ignore[attr-defined]
+        titles = ["Proximal comp.", "Distal comp."]
+        if self.inhibitory_distal:  # type: ignore[attr-defined]
             titles.append("Inhib. interneuron")
         if plot_lateral and self.lateral_inhibition_weight is not None:
             titles.append("Lateral inhib.")
@@ -1229,207 +1425,34 @@ class TwoCompLayer(object):
 
         return axes
 
-    def plot_rate_timeseries(
-        self,
-        t_start: float | None = None,
-        t_end: float | None = None,
-        chosen_neurons: str | int | list | np.ndarray = "all",
-        ax: plt.Axes | np.ndarray | None = None,
-        somatic_color: str | None = None,
-        apical_color: str | None = None,
-        inhibitory_color: str | None = None,
-        lateral_color: str | None = None,
-        separate_axes: bool = False,
-        plot_lateral: bool = False,
-        single_x_axis: bool = True,
-        norm_by: str | None = None,
-        in_min: bool = True,
-        lw: float = 1.0,
-        omit_reset: bool = False,
-        no_legend: bool = False,
-        autosave: bool | None = None,
-        **kwargs,
-    ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
-        """
-        self.plot_rate_timeseries()
-
-        Plot a timeseries of the firing rate of the specified compartments, either
-        overlayed or split across subplots.
-
-        Args:
-        - t_start (float, optional): Start time of the plot. Default is None.
-        - t_end (float, optional): End time. Default is None.
-        - chosen_neurons (str, int, list or np.ndarray, optional): Neurons to plot.
-            Default is "all".
-        - ax (1D np.ndarray or plt.Axes, optional): Subplot or 1D array of subplots
-            if separate_axes (one per compartment). Default is None.
-        - somatic_color (str, optional): Color for somatic compartment. Default is None.
-        - apical_color (str, optional): Color for apical compartment. Default is None.
-        - inhibitory_color (str, optional): Color for inhibitory compartment.
-            Default is None.
-        - lateral_color (str, optional): Color for lateral inhibition compartment.
-            Default is None.
-        - separate_axes (bool, optional): Whether to plot each compartment on a
-            separate subplot. Default is False.
-        - plot_lateral (bool, optional): Whether to plot the lateral inhibition layer,
-            if it exists. Default is False.
-        - single_x_axis (bool, optional): Whether to plot x axis spine and ticks only
-            for the last subplot, instead of all of them. Default is True.
-        - norm_by (str, optional): Normalisation method for rate maps. Default is None.
-        - in_min (bool, optional): Whether to plot the time in minutes instead of
-            seconds. Default is True.
-        - lw (float, optional): Line width for the timeseries. Default is 1.0.
-        - omit_reset (bool, optional): Whether to omit resetting the points for
-            marking target and reset points. Default is False.
-        - no_legend (bool, optional): Whether to remove the legend. Default is False.
-        - autosave (bool, optional): Whether to autosave the figure. If None, the
-        global autosave setting for ratinabox is used. Default is None.
-
-        Keyword args:
-        - **kwargs: Keyword arguments passed to NMDALayer.plot_rate_timeseries().
-
-        Returns:
-        - ax (2D np.ndarray or plt.Axes): Subplot or 1D array of subplots
-            if separate_axes (one per compartment).
-        """
-
-        compartments = self.get_compartments("all", incl_lateral=plot_lateral)
-
-        if "linewidth" in kwargs.keys():
-            lw = kwargs.pop("linewidth")
-
-        if "imshow" in kwargs.keys() and kwargs["imshow"]:
-            raise NotImplementedError("'imshow' option is not implemented.")
-
-        if separate_axes:
-            num_rows = len(compartments)
-            norm_by = norm_by or "max"
-            if ax is None:
-                _, ax = plt.subplots(
-                    num_rows,
-                    1,
-                    figsize=[6, 1.2 * num_rows],
-                    sharex=True,
-                    sharey=True,
-                    squeeze=False,
-                )
-
-            else:
-                ax_shape = np.asarray(ax).shape
-                if not (ax_shape == (num_rows,) or ax_shape == (num_rows, 1)):
-                    raise ValueError(
-                        f"ax must have shape ({num_rows}, ) or ({num_rows}, 1)."
-                    )
-
-            ax1D = np.asarray(ax).ravel()
-        else:
-            if "sub_ax" in kwargs.keys() and ax is None:
-                ax = kwargs.pop("sub_ax")
-            sub_ax = ax
-            norm_by = norm_by or "shared_max"
-
-        if norm_by == "shared_max":
-            norm_by = self.get_min_max_firingrates(
-                t_start=t_start,
-                t_end=t_end,
-                incl_lateral=plot_lateral,
-                chosen_neurons=chosen_neurons,
-            )[1]
-
-        colors = [somatic_color, apical_color]
-        separate_titles = ["Somatic compartment", "Apical compartment"]
-        if self.inhibitory_apical:  # type: ignore[attr-defined]
-            colors.append(inhibitory_color)
-            separate_titles.append("Inhibitory interneuron")
-        if plot_lateral and self.lateral_inhibition_weight is not None:
-            colors.append(lateral_color)
-            separate_titles.append("Lateral inhibition")
-
-        if len(compartments) != len(colors):
-            raise NotImplementedError(
-                "Number of compartments does not match number of colors."
-            )
-
-        for c, comp in enumerate(compartments):
-            if norm_by == "max_per":
-                use_norm_by = comp.get_min_max_firingrates(
-                    t_start=t_start, t_end=t_end, chosen_neurons=chosen_neurons
-                )[1]
-            else:
-                use_norm_by = norm_by
-            color = colors[c] or comp.color
-            use_sub_ax = ax1D[c] if separate_axes else sub_ax
-            sub_ax_out = comp.plot_rate_timeseries(
-                t_start=t_start,
-                t_end=t_end,
-                chosen_neurons=chosen_neurons,
-                sub_ax=use_sub_ax,
-                color=color,
-                norm_by=use_norm_by,
-                in_min=in_min,
-                lw=lw,
-                autosave=False,
-                **kwargs,
-            )
-            if not separate_axes:
-                sub_ax = sub_ax or sub_ax_out
-
-        if separate_axes:
-            if single_x_axis:
-                plot_util.clear_bottom(ax1D[:-1])
-
-            for s, sub_ax in enumerate(ax1D):
-                sub_ax.set_title(separate_titles[s])
-                plot_fcts.mark_target_and_reset_points(
-                    self, sub_ax=sub_ax, lw=lw, omit_reset=omit_reset
-                )
-                if s != len(ax1D) - 1:
-                    sub_ax.set_xlabel("")
-            fig = np.asarray(ax).ravel()[0].figure
-        else:
-            if not no_legend:
-                self.add_compartment_legend(
-                    sub_ax,
-                    compartment="all",
-                    plot_lateral=plot_lateral,
-                    somatic_color=somatic_color,
-                    apical_color=apical_color,
-                    inhibitory_color=inhibitory_color,
-                    lateral_color=lateral_color,
-                    lw=lw,
-                )
-            fig = sub_ax.figure
-
-        plot_util.save_figure(fig, f"{self.name}_firingrate", save=autosave)  # type: ignore[attr-defined]
-
-        return ax
-
-    def plot_distances_to_target(
+    def plot_distance_to_distal_target(
         self,
         neuron_idx=0,
         target_src_name="Obj",
         sub_ax=None,
-        mark_somatic_BTSP=True,
+        mark_proximal_BTSP=True,
         mark_teleport=True,
         mark_closest=True,
         min_dist=0.1,
         min_steps_btw=20,
-        log_num_closest=False,
+        BTSP_prop_data="above",
+        BTSP_s=plot_fcts.BTSP_S,
+        base_s=8,
         in_min=True,
         autosave=None,
     ):
         """
-        self.plot_distances_to_target()
+        self.plot_distance_to_distal_target()
 
         Plot the distances from the agent's current position to the place cell center
-        of the main input to the neuron's apical compartment, over time.
+        of the main input to the neuron's distal compartment, over time.
 
         Args:
         - neuron_idx (int, optional): Neuron index. Default is 0.
         - target_src_name (str, optional): Name of the input layer
             (must be a place cell-derived layer). Default is "Obj".
         - sub_ax (plt.Axes, optional): Subplot to plot on. Default is None.
-        - mark_somatic_BTSP (bool, optional): Whether to mark the somatic compartment
+        - mark_proximal_BTSP (bool, optional): Whether to mark the proximal compartment
             BTSP points. Default is True.
         - mark_teleport (bool, optional): Whether to mark the teleport points.
             Default is True.
@@ -1439,8 +1462,13 @@ class TwoCompLayer(object):
             Default is 0.1.
         - min_steps_btw (int, optional): Minimum number of steps between closest steps.
             Default is 20.
-        - log_num_closest (bool, optional): Whether to print the number of closest
-            steps identified. Default is False.
+        - BTSP_prop_data (float ro str, optional): Proportional y-offset for the BTSP
+            markers with respect to the distance data. If "above", markers are placed
+            above the highest data point. Default is "above".
+        - BTSP_s (float, optional): Marker size for BTSP points.
+            Default is plot_fcts.BTSP_S.
+        - base_s (float, optional): Base marker size for target and teleportation points.
+            Default is 8.
         - in_min (bool, optional): Whether to plot the time in minutes instead of
             seconds. Default is True.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
@@ -1450,10 +1478,10 @@ class TwoCompLayer(object):
         - sub_ax (plt.Axes): Subplot with distances plotted.
         """
 
-        t = np.asarray(self.Agent.history["t"])
+        t = self.Agent.get_t_history()
         if in_min:
             t = t / 60
-        distances = self.get_distances_to_place_cell_center_of_main_apical_input(
+        distances = self.get_distances_to_place_cell_center_of_main_distal_input(
             neuron_idx, src_name=target_src_name
         )
 
@@ -1462,42 +1490,59 @@ class TwoCompLayer(object):
 
         sub_ax.plot(t, distances)
 
-        if mark_somatic_BTSP:
-            self.SomaticCompartment.add_BTSP_markers_to_plots(
-                sub_ax, chosen_neurons=[neuron_idx], timeseries=True
+        target_close_idxs = gen_util.get_minima_indices(
+            distances, minimum=min_dist, min_pts_btw=min_steps_btw
+        )
+
+        if len(target_close_idxs) and mark_closest:
+            plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.1, prop_high=0)
+            plot_kwargs = plot_util.get_plot_marker_kwargs("target", base_s=base_s)
+            sub_ax.scatter(
+                t[target_close_idxs],
+                np.zeros_like(target_close_idxs),
+                alpha=0.7,
+                **plot_kwargs,
             )
-            plot_util.pad_axis(sub_ax, prop_high=1.0)
 
         if mark_teleport:
-            plot_util.pad_axis(sub_ax, pad_prop=0.1, prop_high=1.0)
-            self.Agent.add_teleportation_markers_to_plots(sub_ax, timeseries=True)
+            if not hasattr(self.Agent, "teleportation_df"):
+                mark_teleport = False
+            elif len(self.Agent.teleportation_df) == 0:
+                mark_teleport = False
+
+        heights = [distances.max()]
+        if mark_teleport:
+            heights = self.Environment.get_marker_yvals(
+                sub_ax,
+                heights,
+                object_type="teleport",
+                base_s=base_s,
+                above=above,
+            )
+            self.Agent.add_teleportation_markers_to_plots(
+                sub_ax, timeseries=True, base_s=base_s, heights=heights
+            )
 
             legend = sub_ax.get_legend()
             if legend is not None:
                 sub_ax.legend(loc="upper right", fontsize=5)
 
-        if mark_closest or log_num_closest:
-            closest_steps = self.get_closest_steps_to_target(
-                neuron_idx=neuron_idx,
-                target_src_name=target_src_name,
-                min_dist=min_dist,
-                min_steps_btw=min_steps_btw,
-                log=log_num_closest,
+        if mark_proximal_BTSP:
+            above = 0.8 if mark_teleport else 1.5
+            heights = plot_util.get_marker_yvals(
+                sub_ax,
+                data=heights,
+                s=BTSP_s,
+                prop_data=BTSP_prop_data,
+                above=3,
             )
-            closest_step_idxs = gen_util.get_minima_indices(
-                distances, minimum=min_dist, min_pts_btw=min_steps_btw
+            self.ProximalCompartment.add_BTSP_markers_to_plots(
+                sub_ax,
+                chosen_neurons=[neuron_idx],
+                timeseries=True,
+                s=BTSP_s,
+                heights=heights,
             )
-
-            if mark_closest and len(closest_step_idxs):
-                plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.2)
-                sub_ax.plot(
-                    t[closest_step_idxs - 1],
-                    np.zeros_like(closest_step_idxs),
-                    lw=0,
-                    marker="o",
-                    ms=2,
-                    color=self.SomaticCompartment.color,
-                )
 
         sub_ax.spines[["right", "top"]].set_visible(False)
         sub_ax.set_ylabel("Dist. to target")
@@ -1510,11 +1555,11 @@ class TwoCompLayer(object):
 
         return sub_ax
 
-    def plot_distances_to_targets(
+    def plot_distances_to_distal_targets(
         self,
         target_src_name="Obj",
         num_neurons="all",
-        mark_somatic_BTSP=True,
+        mark_proximal_BTSP=True,
         mark_teleport=True,
         mark_closest=True,
         min_dist=0.1,
@@ -1522,23 +1567,21 @@ class TwoCompLayer(object):
         axes=None,
         num_cols=2,
         sharey=True,
-        log_num_closest=False,
         in_min=True,
         autosave=None,
     ):
         """
-        self.plot_distances_to_targets()
+        self.plot_distances_to_distal_targets()
 
         Plot the distances from the agent's current position to the place cell center
-        of the main input to the neuron's apical compartment, over time.
+        of the main input to the neuron's distal compartment, over time.
 
         Args:
         - target_src_name (str, optional): Name of the input layer
             (must be a place cell-derived layer). Default is "Obj".
-        - axes (2D np.ndarray): Array of subplots to plot on (one per neuron).
-            Default is None.
-        - neuron_idx (int, optional): Neuron index. Default is 0.
-        - mark_somatic_BTSP (bool, optional): Whether to mark the somatic compartment
+        - num_neurons (str or int, optional): Number of neurons whose distal target
+            distances should be plotted. Default is "all".
+        - mark_proximal_BTSP (bool, optional): Whether to mark the proximal compartment
             BTSP points. Default is True.
         - mark_teleport (bool, optional): Whether to mark the teleport points.
             Default is True.
@@ -1548,12 +1591,12 @@ class TwoCompLayer(object):
             Default is 0.1.
         - min_steps_btw (int, optional): Minimum number of steps between closest steps.
             Default is 20.
+        - axes (2D np.ndarray): Array of subplots to plot on (one per neuron).
+            Default is None.
         - num_cols (int, optional): Number of columns in the subplot array.
             Default is 2.
         - sharey (bool, optional): Whether to share the y-axis across subplots.
             Default is True.
-        - log_num_closest (bool, optional): Whether to print the number of closest
-            steps identified. Default is False.
         - in_min (bool, optional): Whether to plot the time in minutes instead of
             seconds. Default is True.
         - autosave (bool, optional): Whether to autosave the figure. If None, the
@@ -1597,16 +1640,15 @@ class TwoCompLayer(object):
                     if r == 0:
                         use_mark_teleport = mark_teleport
 
-                    self.plot_distances_to_target(
+                    self.plot_distance_to_distal_target(
                         neuron_idx=i,
                         target_src_name=target_src_name,
                         sub_ax=sub_ax,
-                        mark_somatic_BTSP=mark_somatic_BTSP,
+                        mark_proximal_BTSP=mark_proximal_BTSP,
                         mark_teleport=use_mark_teleport,
                         mark_closest=mark_closest,
                         min_dist=min_dist,
                         min_steps_btw=min_steps_btw,
-                        log_num_closest=log_num_closest,
                         in_min=in_min,
                         autosave=False,
                     )
@@ -1616,8 +1658,8 @@ class TwoCompLayer(object):
                             legend.remove()
                 else:
                     sub_ax.spines[["left", "bottom"]].set_visible(False)
-                    sub_ax.set_xticks([])
-                    sub_ax.set_yticks([])
+                    sub_ax.set_xticks(list())
+                    sub_ax.set_yticks(list())
 
                 if c == 0 and r == len(ax2D) // 2:
                     sub_ax.set_ylabel("Distance to target")
@@ -1661,7 +1703,7 @@ class TwoCompLayer(object):
         """
         self.plot_neuron_properties_at_BTSP_and_closest_to_target_steps()
 
-        Plot properties (step number, firing rate, velocity and angle near target)
+        Plot properties (step number, firing rate, velocity near and angle from target)
         at BTSP and closest to target steps for a neuron.
 
         Args:
@@ -1688,15 +1730,15 @@ class TwoCompLayer(object):
         elif len(axes.ravel()) != 4:
             raise ValueError("axes must have length 4.")
 
-        distances = self.get_distances_to_place_cell_center_of_main_apical_input(
+        distances = self.get_distances_to_place_cell_center_of_main_distal_input(
             neuron_idx, src_name=target_src_name
         )
-        firingrates = np.asarray(self.SomaticCompartment.history["firingrate"]).T[
+        firingrates = np.asarray(self.ProximalCompartment.history["firingrate"]).T[
             neuron_idx
         ]
 
         velocities = np.sqrt(np.sum(np.asarray(self.Agent.history["vel"]) ** 2, axis=1))
-        angles = self.get_vectors_to_place_cell_center_of_main_apical_input(
+        angles = self.get_vectors_to_place_cell_center_of_main_distal_input(
             neuron_idx, src_name=target_src_name, polar=True
         )[:, 1]
 
@@ -1706,7 +1748,7 @@ class TwoCompLayer(object):
 
         for i, (x_data_type, x_data, sub_ax) in enumerate(
             zip(
-                ["Step", "Firing rate", "Velocity near target", "Angle near target"],
+                ["Step", "Firing rate", "Velocity (m/s)", "Angle from target (deg)"],
                 [None, firingrates, velocities, angles],
                 axes.ravel(),
             )
@@ -1740,9 +1782,7 @@ class TwoCompLayer(object):
                         sub_ax.axvline(step, color="k", ls="dashed", lw=1)
 
         fig = sub_ax.figure
-        fig.suptitle(
-            f"Properties near BTSP and closest to target steps (#{neuron_idx})"
-        )
+        fig.suptitle(f"Properties at steps near target (#{neuron_idx})")
 
         plot_util.save_figure(fig, f"{self.name}_neuron_properties_at_BTSP", save=autosave)  # type: ignore[attr-defined]
 
@@ -1792,7 +1832,7 @@ class TwoCompLayer(object):
         sorter = np.arange(self.n)
         if sort_by_num_BTSP:
             num_BTSP = [
-                len(self.SomaticCompartment.get_BTSP_step_dict()[i]) for i in sorter
+                len(self.ProximalCompartment.get_BTSP_step_dict()[i]) for i in sorter
             ]
             sorter = np.argsort(num_BTSP)
 
@@ -1807,14 +1847,19 @@ class TwoCompLayer(object):
                 no_legend=no_legend,
                 autosave=False,
             )
-            title = f"Neuron {neuron_idx}"
+            neuron_label = f"Neuron {neuron_idx}"
+            labelpad = 15
             if sort_by_num_BTSP:
                 n = num_BTSP[neuron_idx]
-                neuron_str = f"{n} BTSP event" if n == 1 else f"{n} BTSP events"
-                title = f"{title} ({neuron_str})"
-            axes[i, 0].set_title(title)
+                plural = "" if n == 1 else "s"
+                neuron_label = f"{neuron_label}\n({n} BTSP event{plural})"
+                labelpad = 20
 
-        fig.suptitle("Properties near BTSP and closest to target steps", y=0.885)
+            # on the right side
+            axes[i, -1].set_ylabel(neuron_label, rotation=270, labelpad=labelpad)
+            axes[i, -1].yaxis.set_label_position("right")
+
+        fig.suptitle("Properties at steps near target", y=0.885)
 
         # adjust x limits to match within each column
         for i in range(axes.shape[1]):
@@ -1891,7 +1936,7 @@ class TwoCompLayer(object):
             t_end=t_end,
         )
 
-        BTSP_counts = self.SomaticCompartment.get_BTSP_counts(
+        BTSP_counts = self.ProximalCompartment.get_BTSP_counts(
             applied_only=applied_only, t_start=t_start, t_end=t_end
         )
 
@@ -1914,12 +1959,12 @@ class TwoCompLayer(object):
         sub_ax.scatter(
             nbr_visits_per_target,
             BTSP_counts,
-            color=self.SomaticCompartment.color,
+            color=self.ProximalCompartment.color,
             alpha=alpha,
             s=10,
         )
 
-        plot_util.pad_axis(sub_ax, axis="x", pad_prop=0.2)
+        plot_util.pad_axis(sub_ax, axis="x", pad_prop=0.1)
         plot_util.pad_axis(sub_ax, axis="y")
         if xmin is None:
             xticks = sub_ax.get_xticks()

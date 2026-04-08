@@ -8,7 +8,7 @@ import warnings
 
 import itertools
 from joblib import Parallel, delayed
-from matplotlib import pyplot as plt
+from matplotlib import animation as mpl_animation
 import numpy as np
 import ratinabox
 from tqdm.auto import tqdm
@@ -19,25 +19,29 @@ from predhpc.experiments import metrics
 
 PAPER_SEED = 18
 
-SPEED_MEANS = gen_util.get_rounded_linspace(0.05, 0.4, 29)  # (0.05, 0.55, 41)
+SPEED_MEANS = gen_util.get_rounded_linspace(0.05, 0.4, 29)
 SPEED_EXAMPLES = [0.15, 0.25, 0.35]
 
-TARGET_SHIFTS = gen_util.get_rounded_linspace(-3.6, 2.4, 61)
+LANDMARK_SHIFTS = gen_util.get_rounded_linspace(-3.6, 2.4, 61)
 SHIFT_EXAMPLES = [1.0, 0, -0.4, -3.0]
 
 COMPARISON_KWARGS = {
-    "somatic_BTSP_lr": [0.10, 0.30, 5],
+    "proximal_BTSP_lr": [0.10, 0.30, 5],
     "inhibitory_input_filter_tau": [0.2, 0.4, 5],
     "inhibitory_weight": [0.5, 2.0, 4],
 }
 
 
 NUM_TRAJ_SPEED = 15
-OPENFIELD_TIME_IN_MIN = 10
 EX_TRAJ_IDX = 8
 
+OPENFIELD_TIME_IN_MIN = 12
+OPENFIELD_TIME_AFTER_BTSP_IN_MIN = 10
+
 OPENFIELD_TELEPORT_REPEAT_TIME_IN_MIN = 30
+
 OPENFIELD_MULTITARGET_TIME_IN_MIN = 90
+OPENFIELD_MULTITARGET_TIME_AFTER_BTSP_IN_MIN = 15
 
 
 def suppress_warnings():
@@ -120,11 +124,11 @@ def gather_learner_data(
     - data_dict (dict): Dictionary containing the gathered data.
     """
 
-    norm_values = learner.Pyrs.SomaticCompartment.get_normalization_values("PCs")[1]
+    norm_values = learner.Pyrs.ProximalCompartment.get_normalization_values("PCs")[1]
 
     data_dict = metrics.gather_PF_info(learner, k=k, position_name=position_name)
     data_dict["norm_values"] = norm_values[..., 0]
-    data_dict["end_time"] = learner.Pyrs.Agent.t
+    data_dict["end_time"] = learner.Agent.t
 
     for key, value in kwargs.items():
         data_dict[key] = value
@@ -222,16 +226,16 @@ def aggregate_from_data_dicts(data_dicts):
     if "seed" in data_dict.keys():
         data_dict["seeds"] = data_dict.pop("seed")
 
-    for key in "end_time", "end_time_initial":
+    for key in ["end_time", "end_time_initial"]:
         if key in data_dict.keys():
             data_dict[key.replace("time", "times")] = data_dict.pop(key)
 
-    for key in "end_traj_idx", "end_traj_idx_initial":
+    for key in ["end_traj_idx", "end_traj_idx_initial"]:
         if key in data_dict.keys():
             data_dict[key.replace("idx", "idxs")] = data_dict.pop(key)
 
-    if "target_shift" in data_dict.keys():
-        data_dict["target_shifts"] = data_dict.pop("target_shift")
+    if "landmark_shift" in data_dict.keys():
+        data_dict["landmark_shifts"] = data_dict.pop("landmark_shift")
 
     if "speed_mean" in data_dict.keys():
         data_dict["speed_means"] = data_dict.pop("speed_mean")
@@ -304,16 +308,17 @@ def log_max_normalization_value(norm_values):
     print(log_str)
 
 
-def log_num_BTSP_if_above(num_BTSP, above=1, traj_idxs=None):
+def log_num_BTSP_if_above(num_BTSP, above=1, traj_idxs=None, num_traj_total=None):
     """
-    log_num_BTSP_if_above(num_BTSP, above=1)
+    log_num_BTSP_if_above(num_BTSP)
 
     Logs if any number of BTSP events are above a certain threshold.
 
     Args:
     - num_BTSP (1D np.ndarray): Number of BTSP events recorded.
     - above (int): Threshold value. Default is 1.
-    - log_traj_idx (bool): Whether to log trajectory indices. Default is False.
+    - traj_idxs (list): List of trajectory indices to log. Default is None.
+    - num_traj_total (int): Total number of trajectories. Default is None.
     """
 
     if np.any(num_BTSP > above):
@@ -329,9 +334,20 @@ def log_num_BTSP_if_above(num_BTSP, above=1, traj_idxs=None):
             traj_idx_min = int(np.nanmin(traj_idxs))
             traj_idx_max = int(np.nanmax(traj_idxs))
             if traj_idx_min != traj_idx_max:
-                traj_str = f" (btw traj. {traj_idx_min + 1} and {traj_idx_max + 1})."
+                traj_str = f"btw traj. {traj_idx_min + 1} and {traj_idx_max + 1}"
             else:
-                traj_str = f" (on traj. {traj_idx_min + 1})."
+                traj_str = f"on traj. {traj_idx_min + 1})."
+
+            if num_traj_total is not None:
+                num_traj_min = int(np.nanmin(num_traj_total))
+                num_traj_max = int(np.nanmax(num_traj_total))
+                if num_traj_min != num_traj_max:
+                    traj_total_str = f" of {num_traj_min}-{num_traj_max} total"
+                else:
+                    traj_total_str = f" of {num_traj_min} total"
+
+            traj_str = f" ({traj_str}{traj_total_str})."
+
         log_str = f"{log_str}{traj_str}"
         print(log_str)
 
@@ -358,7 +374,33 @@ def log_num_teleportations(num_teleportations):
     print(log_str)
 
 
-def get_linear_Pyrs(
+def estimate_steps_per_linear_track_trajectory(Ag):
+    """
+    estimate_steps_per_linear_track_trajectory(Ag)
+
+    Estimates the number of steps per trajectory in a linear track environment based on
+    the agent's speed and the environment's scale.
+
+    Args:
+    - Ag (Agent): Agent object for which to estimate steps per trajectory.
+
+    Returns:
+    - avg_steps_per_traj (int): Estimated average number of steps per trajectory.
+    """
+
+    if Ag.speed_mean == 0:
+        raise ValueError(
+            "Agent speed mean must be non negative to estimate steps per trajectory."
+        )
+
+    avg_steps_per_traj = int(
+        Ag.Environment.scale / (Ag.speed_mean * Ag.dt) + Ag.wait_after_trajectory
+    )
+
+    return avg_steps_per_traj
+
+
+def get_linear_track_Pyrs(
     scale=params_util.SCALE_LINEAR,
     speed_mean=params_util.SPEED_MEAN_LINEAR,
     speed_std=params_util.SPEED_STD_LINEAR,
@@ -368,7 +410,7 @@ def get_linear_Pyrs(
     **Pyr_kwargs,
 ):
     """
-    get_linear_Pyrs()
+    get_linear_track_Pyrs()
 
     Initializes Pyr parameters for linear environment.
 
@@ -396,17 +438,15 @@ def get_linear_Pyrs(
         seed = PAPER_SEED if isinstance(seed, bool) else seed
         gen_util.seed_all(seed)
 
-    target_position = params_util.get_target_position()
-
     env_params = params_util.get_env_params(
         environment="linear",
         scale=scale,
+        init_env_object_prop=params_util.REL_ENV_OBJECT_POS,
     )
 
     agent_params = params_util.get_agent_params(
         environment="linear",
         scale=scale,
-        target_position=target_position,
         speed_mean=speed_mean,
         speed_std=speed_std,
         wait_after_trajectory=wait_after_trajectory,
@@ -437,12 +477,13 @@ def get_linear_Pyrs(
     return Pyrs
 
 
-def run_linear(
-    Pyrs=None,
-    num_steps_can_stop=5000,
+def run_linear_track(
+    Pyrs_or_learner=None,
     time_in_min_can_stop=None,
     num_target_reaches_can_stop=None,
+    num_traj_can_stop=4,
     BTSP_on=None,
+    min_traj_after_BTSP=2,
     seed=True,
     inhibition="balanced",
     factor=2.0,
@@ -450,27 +491,25 @@ def run_linear(
     **kwargs,
 ):
     """
-    run_linear()
+    run_linear_track()
 
     Runs a linear environment with the specified Pyr parameters.
 
     Args:
-    - Pyrs (Pyr, optional): Pyr object with initialized parameters. If None,
-        a new Pyr object is created with default parameters.
-    - num_steps_can_stop (int or None, optional): Number of steps after which early
-        stopping can occur. May prevent the learner object's other stopping conditions
-        (number of target reaches or trajectories) from being reached. Pass None to
-        avoid constraining these by number of steps, and early stopping will only be
-        triggered when one (either) of those conditions is reached, if provided.
-        Default is 5000.
-    - time_in_min_can_stop (float, optional): Time in minutes after which learning can
-        stop. If specified, it overrides num_steps_can_stop. Note that additional
-        criteria (trajectory completion, minimum number of BTSP events, etc.) may
-        prolong learning. Default is None.
+    - Pyrs_or_learner (Pyr or Learner, optional): Pyr or Learner object with
+        initialized parameters. If None, a new Pyr object is created with default
+        parameters.
+    - num_traj_can_stop (int or None, optional): Number of trajectories after which
+        learning can stop. If specified, it overrides time_in_min_can_stop. Note that
+        additional criteria (minimum number of BTSP events, etc.) may prolong learning.
+        Default is 4.
     - num_target_reaches_can_stop (int or None, optional): Number of target reaches
         after which early stopping can occur. Default is None.
     - BTSP_on (int): Trajectory on which to turn on BTSP. 1 for first trajectory.
         Default is None.
+    - min_traj_after_BTSP (int): Minimum number of trajectories to complete after
+        turning on BTSP before stopping. Ignored if inhibition is "insufficient".
+        Default is 2.
     - seed (bool or int): Whether to seed the random number generator with the paper
         seed or seed to use. If False, experiment is not seeded. Default is True.
     - inhibition (str): Type of inhibition to apply. Options are "balanced",
@@ -490,13 +529,14 @@ def run_linear(
         seed = PAPER_SEED if isinstance(seed, bool) else seed
         gen_util.seed_all(seed)
 
-    if Pyrs is None:
+    if Pyrs_or_learner is None:
         if inhibition in ["balanced", "excessive", "insufficient"]:
             inhibitory_weight = params_util.get_Pyr_params()["inhibitory_weight"]
             if inhibition == "excessive":
                 inhibitory_weight *= factor
             elif inhibition == "insufficient":
                 inhibitory_weight /= factor
+                min_traj_after_BTSP = 0
             if inhibition != "balanced":
                 print(
                     f"Using {inhibition} inhibition (weight: {inhibitory_weight:.2f})."
@@ -504,20 +544,32 @@ def run_linear(
         else:
             raise ValueError(f"Unknown inhibition type: {inhibition}.")
 
-        Pyrs = get_linear_Pyrs(
+        Pyrs_or_learner = get_linear_track_Pyrs(
             seed=False,
             wait_after_trajectory=params_util.WAIT_LINEAR,
             inhibitory_weight=inhibitory_weight,
         )
+    if gen_util.attribute_type_checker(Pyrs_or_learner, "Learner"):
+        Pyrs = Pyrs_or_learner.Pyrs
+    else:
+        Pyrs = Pyrs_or_learner
 
+    num_steps_can_stop = None
     if time_in_min_can_stop is not None:
         num_steps_can_stop = int(time_in_min_can_stop * 60 / Pyrs.Agent.dt)
 
+    min_steps_after_BTSP = 0
+    if min_traj_after_BTSP:
+        avg_steps_per_traj = estimate_steps_per_linear_track_trajectory(Pyrs.Agent)
+        min_steps_after_BTSP = int(min_traj_after_BTSP * avg_steps_per_traj)
+
     learner = run_manager.learn_1D_BTSP(
-        Pyrs,
+        Pyrs_or_learner,
         BTSP_on=BTSP_on,
         num_steps_can_stop=num_steps_can_stop,
+        num_traj_can_stop=num_traj_can_stop,
         num_target_reaches_can_stop=num_target_reaches_can_stop,
+        min_steps_after_BTSP=min_steps_after_BTSP,
         plot=False,
         no_logs=no_logs,
         **kwargs,
@@ -529,25 +581,23 @@ def run_linear(
     return learner
 
 
-def plot_linear(
+def plot_linear_track(
     learner=None,
-    time_in_min_can_stop=2.0,
+    num_traj_can_stop=4,
     inhibition="balanced",
     factor=1.8,
     plot_type="summary",
     **kwargs,
 ):
     """
-    plot_linear()
+    plot_linear_track()
 
     Produces plots for a linear experiment.
 
     Args:
     - learner (Learner): Learner object.
-    - time_in_min_can_stop (float, optional): Time in minutes after which learning can
-        stop. If specified, it overrides num_steps_can_stop. Note that additional
-        criteria (trajectory completion, minimum number of BTSP events, etc.) may
-        prolong learning. Default is 2.0.
+    - num_traj_can_stop (int or None, optional): Number of trajectories after which
+        learning can stop. Default is 4.
     - inhibition (str): Type of inhibition to apply. Options are "balanced",
         "excessive", or "insufficient". Default is "balanced".
     - factor (float): Factor by which to adjust inhibitory weight for "excessive" or
@@ -564,76 +614,87 @@ def plot_linear(
 
     if plot_type in ["environment", "BTSP_kernel"]:
         if learner is None:
-            Pyrs = get_linear_Pyrs(
+            Pyrs = get_linear_track_Pyrs(
                 wait_after_trajectory=params_util.WAIT_LINEAR,
             )
         else:
             Pyrs = learner.Pyrs
 
     elif learner is None:
-        learner = run_linear(
-            time_in_min_can_stop=time_in_min_can_stop,
+        learner = run_linear_track(
+            num_traj_can_stop=num_traj_can_stop,
             inhibition=inhibition,
             factor=factor,
         )
 
     if plot_type == "environment":
-        ax = paper_plot_fcts.plot_linear_environment(Ag=Pyrs.Agent, **kwargs)
+        ax = paper_plot_fcts.plot_linear_track_environment(
+            Pyrs.Agent.Environment, **kwargs
+        )
     elif plot_type == "BTSP_kernel":
         ax = paper_plot_fcts.plot_BTSP_kernel(Pyrs, **kwargs)
     elif plot_type == "summary":
-        ax = paper_plot_fcts.plot_linear_summary(learner, **kwargs)
+        ax = paper_plot_fcts.plot_linear_track_summary(learner, **kwargs)
     elif plot_type == "neural_activity":
-        ax = paper_plot_fcts.plot_linear_neural_activity(learner, **kwargs)
+        ax = paper_plot_fcts.plot_linear_track_neural_activity(learner, **kwargs)
     elif plot_type == "place_fields":
-        ax = paper_plot_fcts.plot_linear_place_fields(learner, **kwargs)
+        ax = paper_plot_fcts.plot_linear_track_place_fields(learner, **kwargs)
     elif plot_type == "binned_rates":
-        ax = paper_plot_fcts.plot_linear_binned_rates(learner, **kwargs)
+        ax = paper_plot_fcts.plot_linear_track_binned_rates(learner, **kwargs)
     else:
         raise ValueError(f"Plot type not recognized: {plot_type}.")
 
     return ax
 
 
-def run_linear_speed(
+def run_linear_track_speed(
     speed_mean=params_util.SPEED_MEAN_LINEAR,
     speed_std=params_util.SPEED_STD_LINEAR,
     test_speed_mean=None,
     test_speed_std=None,
-    time_in_min_can_stop=NUM_TRAJ_SPEED,
     num_traj_can_stop=NUM_TRAJ_SPEED,
+    wait_after_trajectory=0,
+    min_traj_after_BTSP=10,
     k=metrics.SMOOTH_K,
     no_logs=True,
+    return_data_dict=True,
     seed=True,
     **Pyrs_kwargs,
 ):
     """
-    run_linear_speed()
+    run_linear_track_speed()
 
     Runs and collects data for a single linear speed experiment.
 
     Args:
     - speed_mean (float): Mean speed for the experiment.
         Default is params_util.SPEED_MEAN_LINEAR.
-    - time_in_min_can_stop (float, optional): Time in minutes after which learning can
-        stop. If specified, it overrides num_steps_can_stop. Note that additional
-        criteria (trajectory completion, minimum number of BTSP events, etc.) may
-        prolong learning. Default is NUM_TRAJ_SPEED.
+    - speed_std (float): Standard deviation of speed for the experiment.
+        Default is params_util.SPEED_STD_LINEAR.
+    - test_speed_mean (float, optional): Mean speed to switch to after initial learning
+        phase. If None, speed is not changed. Default is None.
+    - test_speed_std (float, optional): Standard deviation of speed to switch to after
+        initial learning phase. If None, speed is not changed. Default is None.
     - num_traj_can_stop (int): Number of trajectories after which learning may stop.
         Default is NUM_TRAJ_SPEED.
-    - BTSP_on (int): Trajectory on which to enable. Later trajectories allow more
-        time Default is 5.
+    - wait_after_trajectory (int): Number of steps to wait after completing a
+        trajectory. Default is 0.
+    - min_traj_after_BTSP (int or None): Minimum number of trajectories to complete
+        after a BTSP event. Default is 10.
     - k (int): Smoothing factor for measuring place field width from firingrate history.
         Default is metrics.SMOOTH_K.
     - no_logs (bool): Whether to disable logging. Default is True.
+    - return_data_dict (bool): Whether to return a data dictionary containing the
+        results of the experiment. Default is True.
     - seed (bool or int): Whether to seed the random number generator with the paper
         seed or seed to use. If False, experiment is not seeded. Default is True.
 
     Keyword Args:
-    - **Pyrs_kwargs: Additional keyword arguments passed to get_linear_Pyrs().
+    - **Pyrs_kwargs: Additional keyword arguments passed to get_linear_track_Pyrs().
 
     Returns:
     - learner (Learner): The learner object after running the experiment.
+    if return_data_dict:
     - data_dict (dict): Dictionary containing the results of the experiment under keys:
         - "speed_mean": Mean speed for the experiment.
         - "PC_place_centers": Place cell centers.
@@ -665,66 +726,75 @@ def run_linear_speed(
         seed = PAPER_SEED if isinstance(seed, bool) else seed
         gen_util.seed_all(seed)
 
-    Pyrs = get_linear_Pyrs(
+    Pyrs = get_linear_track_Pyrs(
         speed_mean=speed_mean,
         speed_std=speed_std,
         log_BTSP=False,
-        wait_after_trajectory=0,
+        wait_after_trajectory=wait_after_trajectory,
         seed=False,
         **Pyrs_kwargs,
     )
 
-    for _ in range(5):
-        learner = run_linear(
-            Pyrs,
-            time_in_min_can_stop=time_in_min_can_stop,
-            num_traj_can_stop=4,
-            num_target_reaches_can_stop=4,
-            no_logs=no_logs,
-            seed=False,
-        )
+    initial_min_traj_after_BTSP = min_traj_after_BTSP
+    if test_speed_mean is not None or test_speed_std is not None:
+        initial_min_traj_after_BTSP = 0
 
-        num_BTSP_applied = len(
-            Pyrs.SomaticCompartment.get_BTSP_steps(applied_only=True, apply_step=True)
-        )
-        if num_BTSP_applied:
-            break
-
-    if num_BTSP_applied == 0:
-        raise RuntimeError("No BTSP occurred.")
-
-    end_time_initial = Pyrs.Agent.t
-
-    Pyrs.Agent.set_speed(mean=test_speed_mean, std=test_speed_std)
-    run_linear(
+    learner = run_linear_track(
         Pyrs,
-        time_in_min_can_stop=time_in_min_can_stop,
         num_traj_can_stop=num_traj_can_stop,
-        num_target_reaches_can_stop=num_traj_can_stop,
+        num_target_reaches_can_stop=None,
+        min_traj_after_BTSP=initial_min_traj_after_BTSP,
         no_logs=no_logs,
         seed=False,
     )
 
-    data_dict = gather_learner_data(
-        learner,
-        seed=seed,
-        k=k,
-        speed_mean=speed_mean,
-        end_time_initial=end_time_initial,
+    num_BTSP_applied = len(
+        Pyrs.ProximalCompartment.get_BTSP_steps(applied_only=True, apply_step=True)
     )
 
-    return learner, data_dict
+    if num_BTSP_applied == 0:
+        raise RuntimeError("No BTSP occurred.")
+
+    kwargs = dict()
+    if test_speed_mean is not None or test_speed_std is not None:
+        kwargs["end_time_initial"] = learner.Agent.t
+        learner.Agent.set_speed(mean=test_speed_mean, std=test_speed_std)
+
+        num_prev_traj_compl = len(learner.Agent.get_completed_trajectory_df())
+        learner = run_linear_track(
+            learner,
+            num_traj_can_stop=num_prev_traj_compl + num_traj_can_stop,
+            num_target_reaches_can_stop=None,
+            min_traj_after_BTSP=min_traj_after_BTSP,
+            no_logs=no_logs,
+            seed=False,
+        )
+
+    if return_data_dict:
+        data_dict = gather_learner_data(
+            learner,
+            seed=seed,
+            k=k,
+            speed_mean=speed_mean,
+            **kwargs,
+        )
+
+        return learner, data_dict
+
+    else:
+        return learner
 
 
-def run_linear_speeds(
+def run_linear_track_speeds(
     seed=True,
-    time_in_min_can_stop=NUM_TRAJ_SPEED,
+    num_traj_can_stop=NUM_TRAJ_SPEED,
+    min_traj_after_BTSP=10,
     num_repeats=1,
     k=metrics.SMOOTH_K,
     num_jobs=1,
 ):
     """
-    run_linear_speeds()
+    run_linear_track_speeds()
 
     Runs a linear environment with varying speeds and collects data on place field
     widths and weights.
@@ -733,10 +803,10 @@ def run_linear_speeds(
     - seed (bool or int): Whether to seed the random number generator with the paper
         seed or seed to use. If False, a randomly selected seed is used for each
         repeat. Default is True.
-    - time_in_min_can_stop (float, optional): Time in minutes after which learning can
-        stop. If specified, it overrides num_steps_can_stop. Note that additional
-        criteria (trajectory completion, minimum number of BTSP events, etc.) may
-        prolong learning. Default is NUM_TRAJ_SPEED.
+    - num_traj_can_stop (int or None, optional): Number of trajectories after which
+        learning can stop. Default is NUM_TRAJ_SPEED.
+    - min_traj_after_BTSP (int or None): Minimum number of trajectories to complete
+        after a BTSP event. Default is 10.
     - num_repeats (int): Number of repeats for the experiment. Default is 1.
     - k (int): Smoothing factor for measuring place field width from firingrate history.
         Default is metrics.SMOOTH_K.
@@ -800,7 +870,8 @@ def run_linear_speeds(
 
     kwargs = {
         "speed_std": 0,
-        "time_in_min_can_stop": time_in_min_can_stop,
+        "num_traj_can_stop": num_traj_can_stop,
+        "min_traj_after_BTSP": min_traj_after_BTSP,
         "test_speed_mean": params_util.SPEED_MEAN_LINEAR,
         "test_speed_std": params_util.SPEED_MEAN_LINEAR,
         "k": k,
@@ -809,14 +880,16 @@ def run_linear_speeds(
 
     if num_jobs > 1:
         outputs = Parallel(n_jobs=n_jobs)(
-            delayed(run_linear_speed)(speed_mean=speed_mean, seed=seed, **kwargs)
+            delayed(run_linear_track_speed)(speed_mean=speed_mean, seed=seed, **kwargs)
             for speed_mean, seed in tqdm(iterations, total=total)
         )
         _, speed_dicts = zip(*outputs)
     else:
         speed_dicts = list()
         for speed_mean, seed in tqdm(iterations, total=total):
-            _, speed_dict = run_linear_speed(speed_mean=speed_mean, seed=seed, **kwargs)
+            _, speed_dict = run_linear_track_speed(
+                speed_mean=speed_mean, seed=seed, **kwargs
+            )
             speed_dicts.append(speed_dict)
 
     speed_data = aggregate_from_data_dicts(speed_dicts)
@@ -824,7 +897,7 @@ def run_linear_speeds(
     return speed_data
 
 
-def plot_linear_speed_PFs(
+def plot_linear_track_speed_PFs(
     speed_data=None,
     examples=SPEED_EXAMPLES,
     PF_type="history",
@@ -833,14 +906,14 @@ def plot_linear_speed_PFs(
     **kwargs,
 ):
     """
-    plot_linear_speed_PFs()
+    plot_linear_track_speed_PFs()
 
     Plots place fields for different speeds on the linear track.
 
     Args:
     - speed_data (dict): Dictionary containing speed-related data
-        (see run_linear_speeds()). If not provided, data is loaded or experiment is run
-        from scratch. Default is None.
+        (see run_linear_track_speeds()). If not provided, data is loaded or experiment
+        is run from scratch. Default is None.
     - examples (list): List of example speed means. Default is SPEED_EXAMPLES.
     - PF_type (str): PF type to plot. Default is "history".
     - plot_type (str): Type of plot to produce. Options are "examples" or "all".
@@ -856,7 +929,7 @@ def plot_linear_speed_PFs(
     """
 
     if speed_data is None:
-        speed_data = run_linear_fct("speeds", overwrite=False, seed=seed)
+        speed_data = run_linear_track_fct("speeds", overwrite=False, seed=seed)
 
     if plot_type == "examples":
         keep_seed = speed_data["seeds"].min()
@@ -868,16 +941,16 @@ def plot_linear_speed_PFs(
                 skip_keys=["PF_centers", "PC_place_centers"],
             )
 
-        Pyrs = get_linear_Pyrs()
+        Pyrs = get_linear_track_Pyrs()
         _, Ag, _, _ = ext_util.extract_objects_from_Pyrs(Pyrs)  # to add plot markers
 
         k = metrics.SMOOTH_K if PF_type == "history" else 1
 
-        ax = paper_plot_fcts.plot_linear_speed_PF_examples(
+        ax = paper_plot_fcts.plot_linear_track_speed_PF_examples(
             speed_data, Ag=Ag, PF_type=PF_type, k=k, **kwargs
         )
     elif plot_type == "all":
-        ax = paper_plot_fcts.plot_linear_speed_PF_widths(
+        ax = paper_plot_fcts.plot_linear_track_speed_PF_widths(
             speed_data, mark_examples=examples, PF_type=PF_type, **kwargs
         )
     else:
@@ -886,47 +959,50 @@ def plot_linear_speed_PFs(
     return ax
 
 
-def run_linear_shift(
+def run_linear_track_shift(
     learner=None,
-    target_shift=0,
+    landmark_shift=0,
     i=0,
     speed_std=0,
-    time_in_min_can_stop=5,
-    num_traj_can_stop=5,
+    num_traj_can_stop=6,
+    wait_after_trajectory=0,
+    min_traj_after_BTSP=6,
     k=metrics.SMOOTH_K,
     no_logs=True,
+    return_data_dict=True,
     seed=True,
 ):
     """
-    run_linear_shift()
+    run_linear_track_shift()
 
     Runs and collects data for a single linear speed experiment.
 
     Args:
     - learner (Learner, optional): Learner object. If None, new learner object is
         created and run before shift is evaluated. Default is None.
-    - target_shift (float): Target shift for the experiment.
-        Default is 0.
+    - landmark_shift (float): Landmark object shift for the experiment. Default is 0.
     - i (int): Index for the experiment run. Default is 0.
     - speed_std (float): Standard deviation of speed for the experiment.
         Default is 0.
-    - time_in_min_can_stop (float, optional): Time in minutes after which learning can
-        stop. If specified, it overrides num_steps_can_stop. Note that additional
-        criteria (trajectory completion, minimum number of BTSP events, etc.) may
-        prolong learning. Default is 5.
-    - num_traj_can_stop (int): Number of trajectories after which learning may stop.
-        Default is 5.
-    - BTSP_on (int): Trajectory on which to enable. Later trajectories allow more
-        time Default is 5.
+    - num_traj_can_stop (int): Number of trajectories after which learning may stop,
+        before and after the shift. Default is 6.
+    - wait_after_trajectory (int): Number of steps to wait after completing a
+        trajectory. Default is 0.
+    - min_traj_after_BTSP (int): Minimum number of trajectories to complete after
+        a BTSP event occurs. Default is 6.
     - k (int): Smoothing factor for measuring place field width from firingrate history.
         Default is metrics.SMOOTH_K.
     - no_logs (bool): Whether to disable logging. Default is True.
+    - return_data_dict (bool): Whether to return a data dictionary containing the
+        results of the experiment. Default is True.
     - seed (bool or int): Whether to seed the random number generator with the paper
         seed or seed to use. If False, experiment is not seeded. Default is True.
 
     Returns:
+    - learner (Learner): The learner object after running the experiment.
+    if return_data_dict:
     - data_dict (dict): Dictionary containing the results of the experiment under keys:
-        - "target_shift": Target shift for the experiment.
+        - "landmark_shift": Landmark object shift for the experiment.
         - "PC_place_centers": Place cell centers.
         - "PC_weights": Place cell input weights.
         - "PC_weight_widths": Last place cell input weight widths.
@@ -949,49 +1025,48 @@ def run_linear_shift(
         gen_util.seed_all(seed)
 
     if learner is None:
-        learner, _ = run_linear_speed(
+        learner = run_linear_track_speed(
             speed_mean=params_util.SPEED_MEAN_LINEAR,
             speed_std=speed_std,
-            time_in_min_can_stop=time_in_min_can_stop,
-            num_traj_can_stop=time_in_min_can_stop,
+            num_traj_can_stop=num_traj_can_stop,
+            wait_after_trajectory=wait_after_trajectory,
+            min_traj_after_BTSP=min_traj_after_BTSP,
             k=k,
             no_logs=no_logs,
+            return_data_dict=False,
             seed=False,
         )
 
     num_BTSP_applied = len(
-        learner.Pyrs.SomaticCompartment.get_BTSP_steps(
+        learner.Pyrs.ProximalCompartment.get_BTSP_steps(
             applied_only=True, apply_step=True
         )
     )
     if num_BTSP_applied != 1:
         raise RuntimeError("Learner does not have exactly one BTSP event.")
 
-    end_time_initial = learner.Pyrs.Agent.t
+    end_time_initial = learner.Agent.t
 
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore", category=UserWarning, message="Target position"
         )
-        learner.Pyrs.Agent.shift_target_position(target_shift)
+        learner.Agent.shift_target_position(landmark_shift)
 
-    for i in range(5):
-        learner = run_linear(
-            learner.Pyrs,
-            time_in_min_can_stop=time_in_min_can_stop,
-            num_traj_can_stop=2,
-            num_target_reaches_can_stop=2,
-            no_logs=no_logs,
-            seed=False,
-        )
+    num_prev_traj_compl = learner.Agent.get_num_completed_trajectories()
+    run_linear_track(
+        learner,
+        num_traj_can_stop=num_prev_traj_compl + num_traj_can_stop,
+        min_traj_after_BTSP=min_traj_after_BTSP,
+        no_logs=no_logs,
+        seed=False,
+    )
 
-        num_BTSP_applied = len(
-            learner.Pyrs.SomaticCompartment.get_BTSP_steps(
-                applied_only=True, apply_step=True
-            )
+    num_BTSP_applied = len(
+        learner.Pyrs.ProximalCompartment.get_BTSP_steps(
+            applied_only=True, apply_step=True
         )
-        if num_BTSP_applied == 2:
-            break
+    )
 
     if num_BTSP_applied not in [1, 2]:
         raise RuntimeError(
@@ -999,52 +1074,37 @@ def run_linear_shift(
             f"but found {num_BTSP_applied}."
         )
 
-    run_linear(
-        learner.Pyrs,
-        time_in_min_can_stop=time_in_min_can_stop,
-        num_traj_can_stop=num_traj_can_stop,
-        num_target_reaches_can_stop=num_traj_can_stop,
-        no_logs=no_logs,
-        seed=False,
-    )
-
-    num_BTSP_applied_after = len(
-        learner.Pyrs.SomaticCompartment.get_BTSP_steps(
-            applied_only=True, apply_step=True
+    if return_data_dict:
+        data_dict = gather_learner_data(
+            learner,
+            seed=seed,
+            k=k,
+            landmark_shift=landmark_shift,
+            end_time_initial=end_time_initial,
         )
-    )
 
-    additional = num_BTSP_applied_after - num_BTSP_applied
-    if additional > 0:
-        raise RuntimeError(f"Expected no new BTSP events, but {additional} occurred.")
+        return learner, data_dict
 
-    data_dict = gather_learner_data(
-        learner,
-        seed=seed,
-        k=k,
-        target_shift=target_shift,
-        end_time_initial=end_time_initial,
-    )
-
-    return learner, data_dict
+    else:
+        return learner
 
 
-def run_linear_shifts(
-    seed=True, time_in_min_can_stop=5, num_repeats=1, k=metrics.SMOOTH_K, num_jobs=1
+def run_linear_track_shifts(
+    seed=True, num_traj_can_stop=6, num_repeats=1, k=metrics.SMOOTH_K, num_jobs=1
 ):
     """
-    run_linear_shifts()
+    run_linear_track_shifts()
 
-    Runs a linear environment with varying target position shifts and collects data
+    Runs a linear environment with varying landmark position shifts and collects data
     on place field widths and weights.
 
     Args:
     - seed (bool or int): Whether to seed the random number generator with the paper
         seed or seed to use. If False, experiment is not seeded. Default is True.
-    - time_in_min_can_stop (float, optional): Time in minutes after which learning can
-        stop. If specified, it overrides num_steps_can_stop. Note that additional
-        criteria (trajectory completion, minimum number of BTSP events, etc.) may
-        prolong learning. Default is 5.
+    - num_traj_can_stop (int, optional): Number of trajectories after which learning can
+        stop. If specified, it overrides time_in_min_can_stop. Note that additional
+        criteria (minimum number of BTSP events, etc.) may
+        prolong learning. Default is 6.
     - num_repeats (int): Number of repeats for the experiment. Default is 1.
     - k (int): Smoothing factor for measuring place field width from firingrate history.
         Default is metrics.SMOOTH_K.
@@ -1052,7 +1112,7 @@ def run_linear_shifts(
 
     Returns:
     - shift_data (dict): Dictionary containing:
-        - "target_shifts" (1D np.ndarray): Array of target position shifts used in the
+        - "landmark_shifts" (1D np.ndarray): Array of landmark position shifts used in the
             experiment.
         - "PC_place_centers" (1D np.ndarray): Array of place cell centers.
         - "PC_weights" (3D np.ndarray): Array of place cell input weights with shape
@@ -1093,21 +1153,20 @@ def run_linear_shifts(
         - "seeds" (1D np.ndarray): Array of seeds for each shift.
     """
 
-    target_shifts = TARGET_SHIFTS
+    landmark_shifts = LANDMARK_SHIFTS
 
     # product of means and seeds
-    total = num_repeats * len(target_shifts)
+    total = num_repeats * len(landmark_shifts)
     n_jobs = min(num_jobs, total)
-    iterations = itertools.product(target_shifts, range(num_repeats))
+    iterations = itertools.product(landmark_shifts, range(num_repeats))
 
     kwargs = {
-        "time_in_min_can_stop": time_in_min_can_stop,
-        "num_traj_can_stop": time_in_min_can_stop,
+        "num_traj_can_stop": num_traj_can_stop,
         "k": k,
         "no_logs": True,
     }
 
-    learner, initial_shift_dict = run_linear_speed(
+    learner, initial_shift_dict = run_linear_track_speed(
         speed_mean=params_util.SPEED_MEAN_LINEAR, speed_std=0, seed=seed, **kwargs
     )
     kwargs["seed"] = False
@@ -1117,17 +1176,20 @@ def run_linear_shifts(
 
     if num_jobs > 1:
         outputs = Parallel(n_jobs=n_jobs)(
-            delayed(run_linear_shift)(
-                target_shift=target_shift, i=i, learner=learner, **kwargs
+            delayed(run_linear_track_shift)(
+                landmark_shift=landmark_shift, i=i, learner=learner, **kwargs
             )
-            for target_shift, i in tqdm(iterations, total=total)
+            for landmark_shift, i in tqdm(iterations, total=total)
         )
         _, shift_dicts = zip(*outputs)
     else:
         shift_dicts = list()
-        for target_shift, i in tqdm(iterations, total=total):
-            _, shift_dict = run_linear_shift(
-                target_shift=target_shift, i=i, learner=copy.deepcopy(learner), **kwargs
+        for landmark_shift, i in tqdm(iterations, total=total):
+            _, shift_dict = run_linear_track_shift(
+                landmark_shift=landmark_shift,
+                i=i,
+                learner=copy.deepcopy(learner),
+                **kwargs,
             )
             shift_dicts.append(shift_dict)
 
@@ -1136,19 +1198,19 @@ def run_linear_shifts(
     return shift_dict
 
 
-def plot_linear_shift_PFs(
+def plot_linear_track_shift_PFs(
     shift_data=None, examples=SHIFT_EXAMPLES, plot_cmap=False, plot_type="all", **kwargs
 ):
     """
-    plot_linear_shift_PFs()
+    plot_linear_track_shift_PFs()
 
-    Plots place fields for different target shifts on the linear track.
+    Plots place fields for different landmark shifts on the linear track.
 
     Args:
-    - shift_data (dict): Dictionary containing target shift-related data
-        (see run_linear_shifts()). If not provided, data is loaded or experiment is run
-        from scratch. Default is None.
-    - examples (list): List of example target shifts. Default is SHIFT_EXAMPLES.
+    - shift_data (dict): Dictionary containing landmark shift-related data
+        (see run_linear_track_shifts()). If not provided, data is loaded or experiment
+        is run from scratch. Default is None.
+    - examples (list): List of example landmark shifts. Default is SHIFT_EXAMPLES.
     - plot_cmap (bool): Whether to plot the place field colormap instead of a peak shift
         plot. Default is False.
     - plot_type (str): Type of plot to produce. Options are "all" or "examples".
@@ -1163,9 +1225,9 @@ def plot_linear_shift_PFs(
     """
 
     if shift_data is None:
-        shift_data = run_linear_fct("shifts", overwrite=False)
+        shift_data = run_linear_track_fct("shifts", overwrite=False)
 
-    Pyrs = get_linear_Pyrs()
+    Pyrs = get_linear_track_Pyrs()
     _, Ag, _, _ = ext_util.extract_objects_from_Pyrs(Pyrs)  # to add plot markers
 
     if plot_type == "examples":
@@ -1174,18 +1236,18 @@ def plot_linear_shift_PFs(
         )
 
         one_BTSP_pos_range = [
-            shift_data["target_shifts"][start] + Ag.target_position[0],
-            shift_data["target_shifts"][end - 1] + Ag.target_position[0],
+            shift_data["landmark_shifts"][start] + Ag.target_position[0],
+            shift_data["landmark_shifts"][end - 1] + Ag.target_position[0],
         ]
 
         shift_data = gen_util.get_filtered_np_data_dict(
             shift_data,
-            "target_shifts",
+            "landmark_shifts",
             values=examples,
             skip_keys=["PF_centers", "PC_place_centers"],
         )
 
-        ax = paper_plot_fcts.plot_linear_shift_PF_examples(
+        ax = paper_plot_fcts.plot_linear_track_shift_PF_examples(
             shift_data,
             Ag=Ag,
             plot_cmap=plot_cmap,
@@ -1194,7 +1256,7 @@ def plot_linear_shift_PFs(
         )
 
     elif plot_type == "all":
-        ax = paper_plot_fcts.plot_target_shift_PFs(
+        ax = paper_plot_fcts.plot_landmark_shift_PFs(
             shift_data, Ag=Ag, mark_examples=examples, plot_cmap=plot_cmap, **kwargs
         )
 
@@ -1204,9 +1266,68 @@ def plot_linear_shift_PFs(
     return ax
 
 
-def run_linear_fct(fct_name="speeds", overwrite=False, seed=True, num_jobs=1):
+def animate_linear_track_shift(
+    landmark_shift=SHIFT_EXAMPLES[2],
+    speed_std=params_util.SPEED_STD_LINEAR,
+    wait_after_trajectory=params_util.WAIT_LINEAR,
+    fps=8,
+    speed_up=5,
+    **kwargs,
+):
     """
-    run_linear_fct()
+    animate_linear_track_shift()
+
+    Creates an animation of a linear track shift experiment.
+
+    Args:
+    - landmark_shift (float): Landmark object shift for the experiment.
+        Default is SHIFT_EXAMPLES[2].
+    - speed_std (float): Standard deviation of speed for the experiment.
+        Default is params_util.SPEED_STD_LINEAR.
+    - fps (int): Frames per second for the animation. Default is 8.
+    - speed_up (int): Factor by which to speed up the animation. Default is 3.
+    - wait_after_trajectory (int): Number of steps to wait after completing a
+    trajectory. Default is params_util.WAIT_LINEAR.
+
+    Keyword args:
+    - **kwargs: Additional keyword arguments passed to the animation function.
+
+    Returns:
+    - anim (matplotlib.animation.FuncAnimation): Animation object for the linear
+        shift experiment.
+    """
+
+    learner, data_dict = run_linear_track_shift(
+        landmark_shift=landmark_shift,
+        i=0,
+        speed_std=speed_std,
+        num_traj_can_stop=3,
+        wait_after_trajectory=wait_after_trajectory,
+        min_traj_after_BTSP=0,
+        k=1,
+        no_logs=True,
+    )
+
+    landmark_shift = data_dict["landmark_shift"]
+    shift_time = data_dict["end_time_initial"] / 60
+    addendum = f"{landmark_shift:.2f}m shift at {shift_time:.2f} min"
+
+    anim = paper_plot_fcts.animate_linear(
+        learner,
+        fps=fps,
+        speed_up=speed_up,
+        addendum=addendum,
+        plot_positions=["landmark"],
+        reached_only=False,  # plot visits too
+        **kwargs,
+    )
+
+    return anim
+
+
+def run_linear_track_fct(fct_name="speeds", overwrite=False, seed=True, num_jobs=1):
+    """
+    run_linear_track_fct()
 
     Runs a specified linear function (either 'speeds' or 'shifts'),
     loading an existing data dictionary if it exists or rerunning the experiment.
@@ -1216,8 +1337,8 @@ def run_linear_fct(fct_name="speeds", overwrite=False, seed=True, num_jobs=1):
         'shifts'. Default is 'speeds'.
     - overwrite (bool): Whether to overwrite existing data. Default is False.
     - seed (bool or int): Whether to seed the random number generator with the paper
-        seed or seed to use. If False, seed run_linear_speeds() or run_linear_shifts()
-        for details. Default is True.
+        seed or seed to use. If False, seed run_linear_track_speeds() or
+        run_linear_track_shifts() for details. Default is True.
 
     Returns:
     - data_dict (dict): Dictionary containing the results of the experiment.
@@ -1229,11 +1350,11 @@ def run_linear_fct(fct_name="speeds", overwrite=False, seed=True, num_jobs=1):
         seed_str = f"_{seed}"
 
     if fct_name == "speeds":
-        fct = run_linear_speeds
+        fct = run_linear_track_speeds
         data_name = "speed_data"
         above = 1
     elif fct_name == "shifts":
-        fct = run_linear_shifts
+        fct = run_linear_track_shifts
         data_name = "shift_data"
         above = 2
     else:
@@ -1251,21 +1372,27 @@ def run_linear_fct(fct_name="speeds", overwrite=False, seed=True, num_jobs=1):
         gen_util.save_np_dict(save_path, data_dict)
         gen_util.get_duration_str(start_time, log=True)
 
-    traj_idxs = data_dict["BTSP_traj_idxs"][:, 1:] - data_dict[
-        "end_traj_idxs_initial"
-    ].reshape(-1, 1)
-    log_num_BTSP_if_above(data_dict["num_BTSP"], above=above, traj_idxs=traj_idxs)
+    traj_idxs = data_dict["BTSP_traj_idxs"][:, 1:] - (
+        data_dict["end_traj_idxs_initial"].reshape(-1, 1) + 1
+    )
+    num_traj_total = data_dict["end_traj_idxs"] - data_dict["end_traj_idxs_initial"]
+    log_num_BTSP_if_above(
+        data_dict["num_BTSP"],
+        above=above,
+        traj_idxs=traj_idxs,
+        num_traj_total=num_traj_total,
+    )
     if "norm_values" in data_dict.keys():
         log_max_normalization_value(data_dict["norm_values"])
 
     return data_dict
 
 
-def run_linear_hyperparameter_comparison(
+def run_linear_track_hyperparameter_comparison(
     num_repeats=4, num_jobs=1, overwrite=False, seed=True, **kwargs
 ):
     """
-    run_linear_hyperparameter_comparison()
+    run_linear_track_hyperparameter_comparison()
 
     Runs a hyperparameter comparison for the linear environment, collecting BTSP-related
     metrics for each run.
@@ -1279,8 +1406,8 @@ def run_linear_hyperparameter_comparison(
         seed or seed to use. If False, experiment is not seeded. Default is True.
 
     Keyword args:
-    - **kwargs: Additional keyword arguments passed to the run_linear_speed function for
-        each run.
+    - **kwargs: Additional keyword arguments passed to the run_linear_track_speed
+        function for each run.
 
     Returns:
     - data_df (pd.DataFrame): Dataframe containing the results of the hyperparameter
@@ -1309,7 +1436,7 @@ def run_linear_hyperparameter_comparison(
 
         kwargs_use.update(config)
 
-        Pyrs = get_linear_Pyrs(
+        Pyrs = get_linear_track_Pyrs(
             speed_mean=params_util.SPEED_MEAN_LINEAR,
             speed_std=params_util.SPEED_MEAN_LINEAR,
             log_BTSP=False,
@@ -1318,9 +1445,13 @@ def run_linear_hyperparameter_comparison(
             **kwargs_use,
         )
 
-        run_linear(Pyrs, no_logs=True, seed=False)
+        run_linear_track(
+            Pyrs, num_traj_can_stop=10, min_traj_after_BTSP=0, no_logs=True, seed=False
+        )
 
         output_dict = metrics.compute_BTSP_metrics(Pyrs, k=metrics.SMOOTH_K, bins=31)
+        output_dict["num_traj_total"] = Pyrs.Agent.get_num_completed_trajectories()
+        output_dict["time_total"] = Pyrs.Agent.t
 
         return output_dict
 
@@ -1364,9 +1495,9 @@ def run_linear_hyperparameter_comparison(
     return data_df
 
 
-def plot_linear_hyperparameter_comparison(data_df=None, **kwargs):
+def plot_linear_track_hyperparameter_comparison(data_df=None, **kwargs):
     """
-    plot_linear_hyperparameter_comparison()
+    plot_linear_track_hyperparameter_comparison()
 
     Plots the results of a hyperparameter comparison.
 
@@ -1383,17 +1514,19 @@ def plot_linear_hyperparameter_comparison(data_df=None, **kwargs):
     """
 
     if data_df is None:
-        data_df = run_linear_hyperparameter_comparison(**kwargs)
+        data_df = run_linear_track_hyperparameter_comparison(**kwargs)
 
-    Pyrs = get_linear_Pyrs()
+    Pyrs = get_linear_track_Pyrs()
 
     mark = (
-        Pyrs.SomaticCompartment.BTSP_lr,
+        Pyrs.ProximalCompartment.BTSP_lr,
         Pyrs.inhibitory_input_filter_tau,
         Pyrs.inhibitory_weight,
     )
 
-    ax1D = paper_plot_fcts.plot_linear_hyperparameter_comparison(data_df, mark=mark)
+    ax1D = paper_plot_fcts.plot_linear_track_hyperparameter_comparison(
+        data_df, mark=mark
+    )
 
     return ax1D
 
@@ -1403,9 +1536,10 @@ def get_openfield_Pyrs(
     n=None,
     log_BTSP=True,
     always_log_teleportation=True,
-    init_reward_only=False,
     init_teleport_pairs=None,
     horizontal_in_from_left=True,
+    proximal_noise_std=0,
+    proximal_w_init_scale=0,
     seed=True,
 ):
     """
@@ -1415,15 +1549,19 @@ def get_openfield_Pyrs(
 
     Args:
     - corridor (bool): Whether to use the corridor environment. Default is False.
-    - n (int, optional): Number of reward objects to initialize in the openfield environment.
-        If None, defaults are used. Default is None.
+    - n (int, optional): Number of landmark objects to initialize in the openfield
+        environment. If None, defaults are used. Default is None.
     - log_BTSP (bool): Whether to log BTSP events. Default is True.
     - always_log_teleportation (bool): Whether to always log teleportation events.
         Default is True.
-    - init_reward_only (bool): Whether to initialize the agent with only reward
-        inputs. Only implemented for corridor environment. Default is False.
     - init_teleport_pairs (3D np.ndarray, optional): Teleport pairs to initialized
         with shape (pair, port, coord). Default is None.
+    - horizontal_in_from_left (bool): Whether to make teleport entry on the left
+        instead of the right. Default is True.
+    - proximal_noise_std (float): Standard deviation of noise added to proximal
+        compartment neural activity. Default is 0.
+    - proximal_w_init_scale (float): Standard deviation of initial weights to proximal
+        compartments. Default is 0.
     - seed (bool or int): Whether to seed the random number generator with the paper
         seed or seed to use. If False, experiment is not seeded. Default is True.
 
@@ -1446,33 +1584,22 @@ def get_openfield_Pyrs(
         env_params["init_teleport_pairs"] = init_teleport_pairs
     if not corridor:
         env_params["init_random_walls"] = 4
-        env_params["init_random_reward_obj"] = n
-        env_params["init_random_novel_obj"] = 0
+        env_params["init_random_objects"] = {"landmark": n}
         env_params["init_random_teleport_pairs"] = 0
         env_params["min_dist"] = 0.15
 
     env_params = params_util.get_env_params(environment=environment, **env_params)
 
-    if init_reward_only:
-        if not corridor:
-            raise NotImplementedError(
-                "'init_reward_only' is only implemented for corridor environment."
-            )
-        agent_params = params_util.get_agent_params(
-            environment=environment,
-            reward_factor=1,
-            no_target_factor=0,
-            always_log_teleportation=always_log_teleportation,
-        )
-    else:
-        agent_params = params_util.get_agent_params(
-            environment=environment, always_log_teleportation=always_log_teleportation
-        )
+    agent_params = params_util.get_agent_params(
+        environment=environment, always_log_teleportation=always_log_teleportation
+    )
 
     Pyr_params = params_util.get_Pyr_params(
         n=n,
         environment=environment,
         log_BTSP=log_BTSP,
+        proximal_noise_std=proximal_noise_std,
+        proximal_w_init_scale=proximal_w_init_scale,
     )
 
     Pyrs = run_manager.init_env_objects(
@@ -1491,7 +1618,7 @@ def run_openfield_corridor(
     num_steps_can_stop=None,
     time_in_min_can_stop=OPENFIELD_TIME_IN_MIN,
     teleportation_enabled=False,
-    min_time_after_BTSP=60 * 6,
+    min_time_after_BTSP=8 * 60,
     no_logs=False,
     seed=True,
     teleport_kwargs=dict(),
@@ -1542,14 +1669,14 @@ def run_openfield_corridor(
     if Pyrs is None:
         Pyrs = get_openfield_Pyrs(
             corridor=True,
-            init_reward_only=True,
             seed=False,
             log_BTSP=not (no_logs),
             always_log_teleportation=not (no_logs),
             **teleport_kwargs,
         )
 
-    Pyrs.Agent.set_no_target_factor(2)
+    Pyrs.Agent.update_target_probability_factor_dict("landmark", 1)
+    Pyrs.Agent.update_target_probability_factor_dict("no_target", 2)
 
     min_steps_after_BTSP = int(np.ceil(min_time_after_BTSP / Pyrs.Agent.dt))
 
@@ -1610,11 +1737,11 @@ def plot_openfield_corridor(
         ax = paper_plot_fcts.plot_last_openfield_PF(Pyrs, **kwargs)
     elif plot_type == "BTSP_trajectory":
         ax = paper_plot_fcts.plot_openfield_corridor_BTSP_trajectory(
-            Pyrs, obj_s=30, **kwargs
+            Pyrs, obj_base_s=20, clabel_length=12, **kwargs
         )
     elif plot_type == "timeseries":
         ax = paper_plot_fcts.plot_single_neuron_rate_timeseries(
-            Pyrs.SomaticCompartment,
+            Pyrs.ProximalCompartment,
             mark_traj_idxs=[EX_TRAJ_IDX],
             BTSP_kernel_lw=0.02,
             **kwargs,
@@ -1625,7 +1752,7 @@ def plot_openfield_corridor(
         t_start, t_end = kernel_time
 
         ax = paper_plot_fcts.plot_single_neuron_rate_timeseries(
-            Pyrs.SomaticCompartment,
+            Pyrs.ProximalCompartment,
             t_start=t_start,
             t_end=t_end,
             in_min=False,
@@ -1682,7 +1809,6 @@ def get_openfield_corridor_repeat_run_params(
     run_kwargs = dict()
     if teleport:
         run_kwargs["min_num_teleports"] = 6
-        run_kwargs["min_time_after_BTSP"] = 10 * 60  # better coverage
         run_kwargs["time_in_min_can_stop"] = (
             time_in_min_can_stop or OPENFIELD_TELEPORT_REPEAT_TIME_IN_MIN
         )
@@ -1757,10 +1883,10 @@ def run_openfield_corridors(seed=True, num_repeats=10):
         - "num_BTSP_applied" (1D np.ndarray): Number of BTSP events that were applied
             for each run.
         - "visit_times" (1D np.ndarray): Array of times at which the agent visited the
-            reward location.
+            landmark location.
         - "visit_traj_idxs" (1D np.ndarray): Array of trajectory indices at which the
-            agent visited the reward location.
-        - "num_visits" (int): Number of visits to the reward location for each run.
+            agent visited the landmark location.
+        - "num_visits" (int): Number of visits to the landmark location for each run.
         - "norm_values" (1D np.ndarray): Normalization values used for each run.
         - "end_times" (1D np.ndarray): End time of the experiment for each run.
         - "end_traj_idxs" (1D np.ndarray): End trajectory index of the experiment for
@@ -1772,7 +1898,9 @@ def run_openfield_corridors(seed=True, num_repeats=10):
     for i in tqdm(range(num_repeats)):
         run_seed, run_kwargs = get_openfield_corridor_repeat_run_params(i, seed=seed)
         learner = run_openfield_corridor(seed=run_seed, no_logs=True, **run_kwargs)
-        data_dict = gather_learner_data(learner, seed=run_seed, position_name="reward")
+        data_dict = gather_learner_data(
+            learner, seed=run_seed, position_name="landmark"
+        )
         data_dicts.append(data_dict)
 
     data_dict = aggregate_from_data_dicts(data_dicts)
@@ -1814,6 +1942,7 @@ def plot_openfield_corridors(
             corridor_data["visit_times"],
             corridor_data["PF_times"],
             end_times=corridor_data["end_times"],
+            num_ticks=13,
             **kwargs,
         )
     elif plot_type == "PFs":
@@ -1833,9 +1962,9 @@ def run_openfield_corridor_teleport(
     seed=True,
     num_steps_can_stop=None,
     time_in_min_can_stop=OPENFIELD_TIME_IN_MIN,
-    min_num_teleports=4,
+    min_num_teleports=6,
     disable_teleportation_between=True,
-    min_time_after_BTSP=60 * 6,
+    min_time_after_BTSP=OPENFIELD_TIME_AFTER_BTSP_IN_MIN * 60,
     no_logs=False,
     teleport_kwargs=dict(),
 ):
@@ -1861,13 +1990,14 @@ def run_openfield_corridor_teleport(
         criteria (trajectory completion, minimum number of BTSP events, etc.) may
         prolong learning. Default is OPENFIELD_TIME_IN_MIN.
     - min_num_teleports (int): Minimum number of teleportation events to occur
-        before stopping the experiment. Default is 4.
+        before stopping the experiment. Default is 6.
     - disable_teleportation_between (int): If True, teleportation is disabled for
         6 minutes after a BTSP event (increases probability that PFs can be
         calculated for each BTSP event if teleportation events induce BTSP events).
         Default is True.
     - min_time_after_BTSP (float): Minimum time in seconds since last
-        BTSP event was applied to end the experiment. Default is 60 * 6.
+        BTSP event was applied to end the experiment. Default is
+        OPENFIELD_TIME_AFTER_BTSP_IN_MIN * 60.
     - no_logs (bool): Whether to suppress logging. Default is False.
     - teleport_kwargs (dict): Additional keyword arguments passed to
         run_openfield_corridor() for teleportation initialization.
@@ -1889,15 +2019,17 @@ def run_openfield_corridor_teleport(
     if not no_logs:
         print("\nTeleportation enabled.")
 
-    learner.Agent.set_reward_factor(0.5)
-    learner.Agent.set_no_target_factor(0.5)
-    learner.Agent.allow_teleportation(True)
+    learner.Agent.enable_teleportation(True)
+
+    learner.Agent.update_target_probability_factor_dict("landmark", 2)
+    learner.Agent.update_target_probability_factor_dict("no_target", 5)
+    learner.Agent.update_target_probability_factor_dict("teleport", 3)
 
     disable_teleportation = 0
     if disable_teleportation_between:
         disable_teleportation = int(360 / learner.Agent.dt)
 
-    updater = run_manager.TeleportRewardUpdater(
+    updater = run_manager.TeleportObjectUpdater(
         learner.Agent,
         Pyrs=learner.Pyrs_for_weights,
         disable_teleportation=disable_teleportation,
@@ -1917,7 +2049,7 @@ def run_openfield_corridor_teleport(
         no_logs=no_logs,
     )
 
-    learner.Agent.allow_teleportation(True)
+    learner.Agent.enable_teleportation(True)
 
     if not no_logs:
         gen_util.get_duration_str(start_time, log=True)
@@ -1959,6 +2091,59 @@ def plot_openfield_teleportation(learner=None, plot_type="summary", **kwargs):
     return axes
 
 
+def animate_openfield_teleportation(
+    learner=None,
+    fps=8,
+    speed_up=10,
+    **kwargs,
+):
+    """
+    animate_openfield_teleportation()
+
+    Creates an animation of an openfield teleportation experiment.
+
+    Args:
+    - learner (Learner, optional): Learner object. If None, a new learner object is
+        run first. Default is None.
+    - fps (int): Frames per second for the animation. Default is 8.
+    - speed_up (int): Factor by which to speed up the animation. Default is 10.
+
+    Keyword args:
+    - **kwargs: Additional keyword arguments passed to the animation function.
+
+    Returns:
+    - anim (matplotlib.animation.FuncAnimation): Animation object for the linear
+        shift experiment.
+    """
+
+    if learner is None:
+        learner = run_openfield_corridor_teleport(
+            seed=True,
+            time_in_min_can_stop=OPENFIELD_TIME_IN_MIN,
+            min_num_teleports=4,
+            disable_teleportation_between=True,
+        )
+
+    addendum = None
+    if len(learner.Agent.teleportation_disabled):
+        first_teleportation_disabled = learner.Agent.teleportation_disabled[0]
+        if np.isclose(first_teleportation_disabled[0], 0):
+            enabled_time = first_teleportation_disabled[1] * learner.Agent.dt / 60
+            addendum = f"teleportation enabled at {enabled_time:.2f} min"
+
+    anim = paper_plot_fcts.animate_openfield(
+        learner,
+        fps=fps,
+        speed_up=speed_up,
+        addendum=addendum,
+        plot_positions=["landmark"],
+        reached_only=False,  # plot both target reaches and visits to landmark
+        **kwargs,
+    )
+
+    return anim
+
+
 def run_openfield_corridor_teleports(num_repeats=2, seed=True):
     """
     run_openfield_corridor_teleports()
@@ -1988,7 +2173,7 @@ def run_openfield_corridor_teleports(num_repeats=2, seed=True):
         - "BTSP_applied_times": Array of times at which BTSP events were applied.
         - "BTSP_applied_traj_idxs": Array of trajectory indices of applied BTSP events.
         - "num_BTSP_applied": Number of BTSP events that were applied.
-        - "visit_times": Array of times at which the agent visited the reward location.
+        - "visit_times": Array of times at which the agent visited the landmark location.
         - "visit_traj_idxs": Array of trajectory indices at which the agent visited the
             target location.
         - "num_visits": Number of visits to the target location.
@@ -2012,7 +2197,7 @@ def run_openfield_corridor_teleports(num_repeats=2, seed=True):
         )
 
         data_dict = gather_learner_data(
-            learner, seed=run_seed, position_name="reward", teleport=True
+            learner, seed=run_seed, position_name="landmark", teleport=True
         )
         data_dicts.append(data_dict)
 
@@ -2080,7 +2265,7 @@ def plot_openfield_teleportations(
             num_BTSP=teleport_data["num_BTSP"],
             num_teleportations=teleport_data["num_teleportations"],
             num_cols=num_cols,
-            obj_s=6,
+            obj_base_s=5,
             no_teleport=False,
             **kwargs,
         )
@@ -2094,7 +2279,9 @@ def run_openfield_multitarget(
     Pyrs=None,
     num_steps_can_stop=None,
     time_in_min_can_stop=OPENFIELD_MULTITARGET_TIME_IN_MIN,
-    min_time_after_BTSP=60 * 15,
+    min_time_after_BTSP=OPENFIELD_MULTITARGET_TIME_AFTER_BTSP_IN_MIN * 60,
+    proximal_noise_std=0.1,
+    proximal_w_init_scale=0.1,
     no_logs=False,
     seed=True,
     **kwargs,
@@ -2119,7 +2306,11 @@ def run_openfield_multitarget(
         prolong learning. Default is OPENFIELD_MULTITARGET_TIME_IN_MIN.
     - min_time_after_BTSP (float): Minimum time in seconds since last
         BTSP event was applied to end the experiment.
-        Default is 900 seconds (15 minutes).
+        Default is OPENFIELD_MULTITARGET_TIME_AFTER_BTSP_IN_MIN * 60.
+    - proximal_noise_std (float): Standard deviation of noise to add to proximal
+        activity. Default is 0.1.
+    - proximal_w_init_scale (float): Standard deviation of initial weights to proximal
+        compartments. Default is 0.1.
     - no_logs (bool): Whether to disable logging. Default is False.
     - seed (bool or int): Whether to seed the random number generator with the paper
         seed or seed to use. If False, experiment is not seeded. Default is True.
@@ -2144,6 +2335,8 @@ def run_openfield_multitarget(
                 corridor=False,
                 log_BTSP=False,
                 seed=False,
+                proximal_noise_std=proximal_noise_std,
+                proximal_w_init_scale=proximal_w_init_scale,
             )
 
     min_steps_after_BTSP = int(np.ceil(min_time_after_BTSP / Pyrs.Agent.dt))
@@ -2207,11 +2400,57 @@ def plot_openfield_multitarget(learner=None, plot_type="summary", **kwargs):
     return ax
 
 
+def animate_openfield_multitarget(
+    learner=None,
+    fps=8,
+    speed_up=[10, 30, 100, 300],
+    **kwargs,
+):
+    """
+    animate_openfield_multitarget()
+
+    Creates an animation of a multitarget openfield experiment.
+
+    Args:
+    - learner (Learner, optional): Learner object. If None, a new learner object is
+        run first. Default is None.
+    - fps (int): Frames per second for the animation. Default is 8.
+    - speed_up (int or list): Factor or list of factors by which to speed up the
+        animation. Default is [10, 30, 100, 300].
+
+    Keyword args:
+    - **kwargs: Additional keyword arguments passed to the animation function.
+
+    Returns:
+    - anim (matplotlib.animation.FuncAnimation): Animation object for the linear
+        shift experiment.
+    """
+
+    if learner is None:
+        learner = run_openfield_multitarget(
+            time_in_min_can_stop=OPENFIELD_TIME_IN_MIN,
+        )
+
+    addendum = f"{learner.Pyrs.n} target objects"
+
+    anim = paper_plot_fcts.animate_openfield(
+        learner,
+        fps=fps,
+        speed_up=speed_up,
+        addendum=addendum,
+        plot_positions=["target"],
+        reached_only=True,  # plot only when objects were visited as targets
+        **kwargs,
+    )
+
+    return anim
+
+
 def run_openfield_multitarget_remapping(
     Pyrs=None,
     num_steps_can_stop=None,
     time_in_min_can_stop=OPENFIELD_MULTITARGET_TIME_IN_MIN,
-    min_time_after_BTSP=60 * 15,
+    min_time_after_BTSP=OPENFIELD_MULTITARGET_TIME_AFTER_BTSP_IN_MIN * 60,
     no_logs=False,
     seed=True,
     **kwargs,
@@ -2236,7 +2475,7 @@ def run_openfield_multitarget_remapping(
         prolong learning. Default is OPENFIELD_MULTITARGET_TIME_IN_MIN.
     - min_time_after_BTSP (float): Minimum time in seconds since last
         BTSP event was applied to end the experiment.
-        Default is 900 seconds (15 minutes).
+        Default is OPENFIELD_MULTITARGET_TIME_AFTER_BTSP_IN_MIN * 60.
     - no_logs (bool): Whether to disable logging. Default is False.
     - seed (bool or int): Whether to seed the random number generator with the paper
         seed or seed to use. If False, experiment is not seeded. Default is True.
@@ -2410,59 +2649,62 @@ def get_fig_dict():
     fig_dict = {
         1: {
             "A": {"fct": "schematic"},
-            "B": {"fct": plot_linear, "plot_type": "environment"},
+            "B": {"fct": plot_linear_track, "plot_type": "environment"},
             "C": {"fct": "schematic"},
-            "D": {"fct": plot_linear, "plot_type": "BTSP_kernel"},
+            "D": {"fct": plot_linear_track, "plot_type": "BTSP_kernel"},
         },
         2: {
-            "A": {"fct": plot_linear, "plot_type": "summary"},
-            "B": {"fct": plot_linear, "plot_type": "place_fields"},
-            "C": {"fct": plot_linear, "plot_type": "binned_rates"},
+            "A": {"fct": plot_linear_track, "plot_type": "summary"},
+            "B": {"fct": plot_linear_track, "plot_type": "place_fields"},
+            "C": {"fct": plot_linear_track, "plot_type": "binned_rates"},
         },
         "1S": {
             "A-E": {
-                "fct": plot_linear_hyperparameter_comparison,
+                "fct": plot_linear_track_hyperparameter_comparison,
                 "plot_type": "hyperparameters",
-            },
+            }
         },
         "2S": {
             "A": {
-                "fct": plot_linear,
+                "fct": plot_linear_track,
                 "plot_type": "neural_activity",
                 "inhibition": "balanced",
             },
             "B": {
-                "fct": plot_linear,
+                "fct": plot_linear_track,
                 "plot_type": "neural_activity",
                 "inhibition": "insufficient",
             },
             "C": {
-                "fct": plot_linear,
+                "fct": plot_linear_track,
                 "plot_type": "neural_activity",
                 "inhibition": "excessive",
             },
         },
         3: {
-            "A": {"fct": plot_linear_speed_PFs, "plot_type": "examples"},
-            "B": {"fct": plot_linear_speed_PFs, "plot_type": "all"},
+            "A": {"fct": plot_linear_track_speed_PFs, "plot_type": "examples"},
+            "B": {"fct": plot_linear_track_speed_PFs, "plot_type": "all"},
         },
         "3S": {
             "A": {
-                "fct": plot_linear_speed_PFs,
+                "fct": plot_linear_track_speed_PFs,
                 "plot_type": "examples",
                 "PF_type": "weights",
             },
             "B": {
-                "fct": plot_linear_speed_PFs,
+                "fct": plot_linear_track_speed_PFs,
                 "plot_type": "all",
                 "PF_type": "weights",
             },
         },
         4: {
-            "A-B": {"fct": plot_linear_shift_PFs, "plot_type": "examples"},
+            "A-B": {"fct": plot_linear_track_shift_PFs, "plot_type": "examples"},
         },
         "4S": {
-            "A-B": {"fct": plot_linear_shift_PFs, "plot_type": "all"},
+            "A-B": {"fct": plot_linear_track_shift_PFs, "plot_type": "all"},
+        },
+        "4V": {
+            "A": {"fct": animate_linear_track_shift},
         },
         5: {
             "A-D": {"fct": plot_openfield_corridor, "plot_type": "components"},
@@ -2479,7 +2721,7 @@ def get_fig_dict():
                 "fct": plot_openfield_corridor,
                 "plot_type": "last_PF",
                 "PF_type": "weights",
-                "fig_side": 2.5,
+                "fig_side": 2.7,
             },
             "C": {"fct": plot_openfield_corridors, "plot_type": "timelines"},
             "D": {"fct": plot_openfield_corridors, "plot_type": "PFs"},
@@ -2498,6 +2740,9 @@ def get_fig_dict():
                 "plot_type": "PFs",
                 "fig_side": 1.8,
             },
+        },
+        "6V": {
+            "A": {"fct": animate_openfield_teleportation},
         },
         7: {
             "A-C": {"fct": plot_openfield_multitarget, "plot_type": "summary"},
@@ -2518,43 +2763,46 @@ def get_fig_dict():
             "B": {"fct": plot_openfield_multitarget, "plot_type": "BTSP_responses"},
             "C": {"fct": plot_openfield_multitarget, "plot_type": "normalization"},
         },
-        # 8: {
-        #     "A": {
-        #         "fct": plot_openfield_multitarget_remapping,
-        #         "plot_type": "pre_post_weights",
-        #     },
-        #     "B-D": {
-        #         "fct": plot_openfield_multitarget_remapping,
-        #         "plot_type": "summary",
-        #     },
-        #     "E": {
-        #         "fct": plot_openfield_multitarget_remapping,
-        #         "plot_type": "PFs",
-        #         "n": 9,
-        #     },
-        #     "F": {
-        #         "fct": plot_openfield_multitarget_remapping,
-        #         "plot_type": "counts",
-        #         "height": 2.3,
-        #     },
-        #     "G": {
-        #         "fct": plot_openfield_multitarget_remapping,
-        #         "plot_type": "correlations",
-        #     },
-        # },
-        # "8S": {
-        #     "A": {
-        #         "fct": plot_openfield_multitarget_remapping,
-        #         "plot_type": "PFs",
-        #         "n": "all",
-        #         "width_per": 0.76,
-        #     },
-        #     "B": {
-        #         "fct": plot_openfield_multitarget_remapping,
-        #         "plot_type": "normalization",
-        #         "fig_width": 10,
-        #     },
-        # },
+        "7V": {
+            "A": {"fct": animate_openfield_multitarget},
+        },
+        8: {
+            "A": {
+                "fct": plot_openfield_multitarget_remapping,
+                "plot_type": "pre_post_weights",
+            },
+            "B-D": {
+                "fct": plot_openfield_multitarget_remapping,
+                "plot_type": "summary",
+            },
+            "E": {
+                "fct": plot_openfield_multitarget_remapping,
+                "plot_type": "PFs",
+                "n": 9,
+            },
+            "F": {
+                "fct": plot_openfield_multitarget_remapping,
+                "plot_type": "counts",
+                "height": 2.3,
+            },
+            "G": {
+                "fct": plot_openfield_multitarget_remapping,
+                "plot_type": "correlations",
+            },
+        },
+        "8S": {
+            "A": {
+                "fct": plot_openfield_multitarget_remapping,
+                "plot_type": "PFs",
+                "n": "all",
+                "width_per": 0.76,
+            },
+            "B": {
+                "fct": plot_openfield_multitarget_remapping,
+                "plot_type": "normalization",
+                "fig_width": 10,
+            },
+        },
     }
 
     return fig_dict
@@ -2653,8 +2901,18 @@ def plot_figure_panel(*args, fig=1, panel="A", save=True, **kwargs):
 
     if save and ax is not None:
         key = f"{fig}{panel}"
-        fig = ax.ravel()[0].figure if isinstance(ax, np.ndarray) else ax.figure
-        plot_util.save_figure(fig, key, no_timestamp=True, dpi=600)
+        if isinstance(ax, mpl_animation.FuncAnimation):
+            fig = ax
+            dpi = 300
+            fig_save_types = "mp4"
+        else:
+            fig = ax.ravel()[0].figure if isinstance(ax, np.ndarray) else ax.figure
+            dpi = 600
+            fig_save_types = ["png", "svg"]
+
+        plot_util.save_figure(
+            fig, key, no_timestamp=True, dpi=dpi, fig_save_types=fig_save_types
+        )
 
     return ax
 
@@ -2715,7 +2973,7 @@ def main():
         if args.seed is not None:
             kwargs["seed"] = args.seed
         if args.data_dict in ["speeds", "shifts"]:
-            run_linear_fct(args.data_dict, num_jobs=args.num_jobs, **kwargs)
+            run_linear_track_fct(args.data_dict, num_jobs=args.num_jobs, **kwargs)
         elif args.data_dict in ["corridors", "teleports"]:
             run_openfield_fct(args.data_dict, **kwargs)
         else:

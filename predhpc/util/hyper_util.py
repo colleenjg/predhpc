@@ -576,9 +576,9 @@ def plot_metric_by_parameters(
 
         sub_ax.figure.colorbar(im, ax=sub_ax, orientation="vertical")
         sub_ax.set_xlabel(" x\n".join(param_labels[0]))
-        sub_ax.set_xticks([])
+        sub_ax.set_xticks(list())
         sub_ax.set_ylabel(" x\n".join(param_labels[1]))
-        sub_ax.set_yticks([])
+        sub_ax.set_yticks(list())
 
         # add vertical lines for each repeat
         num_repeats = get_num_repeats_from_df(df, parameters=parameters)
@@ -974,7 +974,6 @@ def get_values_at_target_roots(
         align_pt = np.argmax(exp)
 
     t = (np.arange(len(exp)) - align_pt) * dt
-    print(t)
 
     target_root_dict = get_target_root_dict()
 
@@ -1281,8 +1280,8 @@ def run_kernel_gridsearch(
             min_val = loss_array_finite[..., k].min()
             title = f"{main_title}: {all_param_values[-1][k]:.2f}\n(min: {min_val:.4f})"
             sub_ax.set_title(title)
-            sub_ax.set_xticks([])
-            sub_ax.set_yticks([])
+            sub_ax.set_xticks(list())
+            sub_ax.set_yticks(list())
 
             if k >= len(all_param_values[-1]) - num_cols:
                 sub_ax.set_xlabel(xlabel, fontsize="x-small")

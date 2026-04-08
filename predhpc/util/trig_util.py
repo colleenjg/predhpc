@@ -60,12 +60,16 @@ def get_angle_between_vectors(
     - angle (float): Angle between vectors.
     """
 
+    if (v1 == 0).all() or (v2 == 0).all():
+        raise ValueError("Cannot calculate angle with a zero-length vector.")
+
     unit_v1 = v1 / np.linalg.norm(v1)
     unit_v2 = v2 / np.linalg.norm(v2)
     angle = np.rad2deg(np.arccos(np.dot(unit_v1, unit_v2))) % 360
     if not directional:
         angle = angle % 180
         angle = min(angle, 180 - angle)
+
     return angle
 
 

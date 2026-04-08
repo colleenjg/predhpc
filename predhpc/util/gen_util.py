@@ -50,7 +50,7 @@ def attribute_type_checker(var, var_type):
         "NMDACurrent": "NMDA_activation_decay_tau",
         "NMDALayer": "BTSP_induction_threshold",
         "BTSPLayer": "BTSP_lr",
-        "TwoCompLayer": "apical_first",
+        "TwoCompLayer": "distal_first",
         "Learner": "agent_start_step",
     }
 
@@ -80,6 +80,30 @@ def seed_all(seed=None):
         seed = int(seed)
         random.seed(seed)
         np.random.seed(seed)
+
+
+def round_values(values, resolution=0.001, min_decimals=2):
+    """
+    round_values(values, resolution)
+
+    Round an array of values to the nearest multiple of a specified resolution.
+
+    Args:
+    - values (array-like or float): Values to round.
+    - resolution (float): Resolution to consider in determining number of decimals
+        to round to. Default is 0.001.
+    - min_decimals (int, optional): Minimum number of decimals to round to, regardless
+        of resolution. Default is 2.
+
+    Returns:
+    - rounded_values (numpy.ndarray): Rounded values.
+    """
+
+    decimals = max(min_decimals, -int(np.floor(np.log10(resolution)) * 4))
+
+    rounded_values = np.around(values, decimals=decimals)
+
+    return rounded_values
 
 
 def get_integer_fraction(value, denom_min=None, denom_max=None, raise_error=True):
@@ -787,7 +811,10 @@ def get_density_spread_values(x, max_spread=0.3, spread_bin_width=0.05):
 
     x = x[sorter]
     unique_x, x_counts = np.unique(x, return_counts=True)
-    min_diff = np.min(np.diff(unique_x))
+    if len(unique_x) > 1:
+        min_diff = np.min(np.diff(unique_x))
+    else:
+        min_diff = np.inf
 
     if min_diff >= spread_bin_width:
         spread_vals = np.zeros_like(x)
@@ -853,7 +880,7 @@ def get_density_spread_values(x, max_spread=0.3, spread_bin_width=0.05):
                 spread_idxs = spread_idxs_rem
             else:
                 num_choose = num_each[x_i]
-                spread_idxs = np.asarray([], dtype=int)
+                spread_idxs = np.asarray(list(), dtype=int)
 
                 # keep or remove 0
                 if spread_vals[spread_idxs_rem[0]] == 0:

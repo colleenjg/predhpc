@@ -49,11 +49,11 @@ def extract_objects_from_Pyrs(Pyrs):
     Ag = Pyrs.Agent
 
     if gen_util.attribute_type_checker(Pyrs, "TwoCompLayer"):
-        Obj_key = list(Pyrs.ApicalCompartment.inputs.keys())[-1]
-        Objs = Pyrs.ApicalCompartment.inputs[Obj_key]["layer"]
+        Obj_key = list(Pyrs.DistalCompartment.inputs.keys())[-1]
+        Objs = Pyrs.DistalCompartment.inputs[Obj_key]["layer"]
 
-        PC_key = list(Pyrs.SomaticCompartment.inputs.keys())[0]
-        PCs = Pyrs.SomaticCompartment.inputs[PC_key]["layer"]
+        PC_key = list(Pyrs.ProximalCompartment.inputs.keys())[0]
+        PCs = Pyrs.ProximalCompartment.inputs[PC_key]["layer"]
     else:
         Objs = None
         PC_key = list(Pyrs.inputs.keys())[0]
@@ -438,7 +438,7 @@ def get_trajectory_lengths(
 
 
 def get_T_shape_env_boundaries(
-    prop_env: float = 0.2,
+    width_prop_env: float = 0.2,
     scale_x: float = 1.0,
     scale_y: float = 1,
     stem_width_as_prop_of_x: float | None = None,
@@ -450,7 +450,7 @@ def get_T_shape_env_boundaries(
     Obtain boundaries for a T-shape environment.
 
     Args:
-    - prop_env (float, optional): Proportion of the dims of the environment that the
+    - width_prop_env (float, optional): Proportion of the dims of the environment that the
         T-shape stem and arms should span.
     - scale_x (float, optional): Scale of the environment in the x-direction.
     - scale_y (float, optional): Scale of the environment in the y-direction.
@@ -466,20 +466,20 @@ def get_T_shape_env_boundaries(
     """
 
     stem_width_as_prop_of_x = (
-        prop_env if stem_width_as_prop_of_x is None else stem_width_as_prop_of_x
+        width_prop_env if stem_width_as_prop_of_x is None else stem_width_as_prop_of_x
     )
     arm_height_as_prop_of_y = (
-        prop_env if arm_height_as_prop_of_y is None else arm_height_as_prop_of_y
+        width_prop_env if arm_height_as_prop_of_y is None else arm_height_as_prop_of_y
     )
 
-    for prop_env, dim in [
+    for width_prop_env, dim in [
         (stem_width_as_prop_of_x, "x"),
         (arm_height_as_prop_of_y, "y"),
     ]:
-        if prop_env >= 1:
+        if width_prop_env >= 1:
             raise ValueError(
                 f"{dim} proportion must be strictly smaller than 1, "
-                f"but found {prop_env}."
+                f"but found {width_prop_env}."
             )
 
     # add diff and width
@@ -760,7 +760,7 @@ def estimate_1D_place_cell_density(PCs):
 
 def get_times_for_each_BTSP_event(
     NeuronLayer,
-    i=0,
+    chosen_neurons="all",
     t_buffer=6,
     next_trajectory=False,
     min_total=60,
@@ -776,7 +776,8 @@ def get_times_for_each_BTSP_event(
 
     Args:
     - NeuronLayer: The neuron layer object.
-    - i (int): Neuron index. Default is 0.
+    - chosen_neurons (list or str): List of neuron indices to consider or "all"
+        for all neurons. Default is "all".
     - t_buffer (float): Time buffer to add after each BTSP event. Default is 6.
     - next_trajectory (bool): Whether to use the next trajectory's start time.
         Default is False.
@@ -796,13 +797,14 @@ def get_times_for_each_BTSP_event(
     BTSP_applied = NeuronLayer.get_BTSP_steps(
         applied_only=True,
         apply_step=True,
-        chosen_neurons=[i],
+        chosen_neurons=chosen_neurons,
         t_start=t_start,
         t_end=t_end,
     )
 
-    t_start = t_start or 0
-    t_final_end = t_end or NeuronLayer.Agent.t
+    t_start, t_final_end = NeuronLayer.Agent.get_t_start_end(
+        t_start=t_start, t_end=t_end
+    )
 
     times = list()
     for step in BTSP_applied:
@@ -844,7 +846,7 @@ def create_weights_dict(weights, steps, t, steps_triggered=None):
         recorded steps that do not reflect BTSP updates. Default is None.
 
     Returns:
-    - recorded_weights (dict): Dictionary with keys "weights", "steps", "time", and
+    - recorded_weights (dict): Dictionary with keys "weights", "steps", "times", and
         "steps_triggered" in which input weights from place cells are recorded,
         along with the step/time at which they were recorded and step at which they
         the BTSP update behind the recorded weight update was triggered, if applicable.
@@ -859,11 +861,12 @@ def create_weights_dict(weights, steps, t, steps_triggered=None):
 
     weights = np.asarray(weights)
     if len(steps):
-        time = np.asarray(t)[steps - 1]
+        times = np.asarray(t)[steps - 1]
+        times[steps == 0] = 0
     else:
-        time = np.asarray([])
+        times = np.asarray(list())
 
-    weights_dict = {"weights": weights, "steps": steps, "time": time}
+    weights_dict = {"weights": weights, "steps": steps, "times": times}
 
     if steps_triggered is not None:
         weights_dict["steps_triggered"] = steps_triggered

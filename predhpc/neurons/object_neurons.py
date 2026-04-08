@@ -1,10 +1,9 @@
 import copy
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 import warnings
 
 import numpy as np
 
-from predhpc import env
 from predhpc.neurons import riab_neurons
 from predhpc.util import gen_util, ext_util, plot_util
 
@@ -12,11 +11,126 @@ if TYPE_CHECKING:
     import ratinabox  # type: ignore[import]
 
 
+class ObjectTypeMixin:
+    """
+    ObjectTypeMixin()
+
+    Mixin for object cell layers, providing a method to obtain object types for each
+    neuron in the layer.
+
+    Added to FixedObjectCells, WeightedObjectCells, FixedObjectVectorCells and
+    WeightedObjectVectorCells.
+
+    Adds the following method to the class:
+        • self._get_object_types()
+    """
+
+    Environment: "ratinabox.Environment"
+    input_object_types: list
+    super: riab_neurons.riabNeurons
+    n: int
+
+    def _get_object_types(self):
+        """
+        self._get_object_types()
+
+        Obtains object types for each neuron in the layer, based on the environment and
+        parameters of the layer.
+        """
+
+        if len(self.input_object_types) == 0:
+            raise RuntimeError("No objects found in environment.")
+
+        per_teleport = None
+
+        by_weight = hasattr(self, "weights_per")
+        if by_weight:
+            weight_dict = dict()
+            source_dict = self.weights_per
+            if hasattr(self, "weight_per_teleport"):
+                per_teleport = self.weight_per_teleport
+            if not hasattr(self, "allow_omit_object_types"):
+                raise AttributeError(
+                    "Expected the weight object layer to have the attribute "
+                    "'allow_omit_object_types'."
+                )
+
+        else:
+            object_types = list()
+            if hasattr(self, "num_per"):
+                source_dict = self.num_per
+            else:
+                raise ValueError(
+                    "Assumed object layer was of a type with a fixed number of "
+                    "neurons per object type, but no 'num_per' attribute found."
+                )
+            if hasattr(self, "num_per_teleport"):
+                per_teleport = self.num_per_teleport
+
+        keys_unused = list(source_dict.keys())
+        no_general_teleports = True
+        for object_type in np.unique(self.input_object_types):
+            object_type_name = self.Environment.object_type_num_to_name_dict[
+                object_type
+            ]
+
+            if object_type_name in source_dict.keys():
+                value = source_dict[object_type_name]
+                if object_type_name in keys_unused:
+                    keys_unused.remove(object_type_name)
+
+            elif "teleport" in object_type_name and per_teleport is not None:
+                no_general_teleports = False
+                value = per_teleport
+
+            if by_weight:
+                weight_dict[object_type] = value
+            else:
+                object_types.extend([object_type] * value)
+
+        if len(keys_unused):
+            raise ValueError(
+                f"Object types {keys_unused} specified in num_per not found in "
+                "environment."
+            )
+
+        if per_teleport is not None and per_teleport > 0 and no_general_teleports:
+            teleport_keys = list()
+            for key in source_dict.keys():
+                if "teleport" in key:
+                    teleport_keys.append(key)
+
+            per_str = ""
+            if len(teleport_keys):
+                dict_name = "weights_per" if by_weight else "num_per"
+                per_str = (
+                    f" (other than those already specified in {dict_name} "
+                    f"({', '.join(teleport_keys)}))"
+                )
+
+            per_teleport_str = (
+                "weight_per_teleport" if by_weight else "num_per_teleport"
+            )
+            raise ValueError(
+                f"{per_teleport_str} is {per_teleport}, but no teleport "
+                f"objects{per_str} are present in the environment."
+            )
+
+        if by_weight:
+            object_types = ext_util.get_weighted_object_types(
+                weight_dict, self.n, self.allow_omit_object_types
+            )
+        else:
+            np.random.shuffle(object_types)
+
+        return object_types
+
+
 class ObjectInstanceCells(riab_neurons.PlaceCells):
     """
     ObjectInstanceCells()
 
-    Class extending riab_neurons.FeedForwardLayer. Defines a population of neurons
+    Class extending riab_neurons.PlaceCells. Defines a population of neurons
     that each respond to a single object in the environment.
 
     Must be initialised with an Agent. A parameters dictionary can also be passed at
@@ -31,11 +145,12 @@ class ObjectInstanceCells(riab_neurons.PlaceCells):
         "max_fr": 1,
     }
 
-    List of properties (in addition to riab_neurons.FeedForwardLayer properties):
+    List of properties (in addition to riab_neurons.PlaceCells properties):
         • self.input_object_types
         • self.input_object_locations
 
-    List of methods (in addition to riab_neurons.FeedForwardLayer methods):
+    List of methods (in addition to riab_neurons.PlaceCells methods):
+        • self.check_link()
         • self.update()
     """
 
@@ -143,8 +258,8 @@ class ObjectInstanceCells(riab_neurons.PlaceCells):
         """
         self.check_link()
 
-        Check whether the place cell centers are still linked  of objects in the
-        environment has changed.
+        Check whether the objects the place cell centers are linked to in the
+        environment have changed.
 
         If the number of objects has changed, a warning is raised, as this change will
         have detached the object cell centers from the environment object locations,
@@ -192,6 +307,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
         "wall_geometry": "line_of_sight",  # input place cells
         "min_fr": 0,
         "max_fr": 1,
+        "dynamic": True,  # place cells centers will update if object locations change
     }
 
     List of properties (in addition to riab_neurons.FeedForwardLayer properties):
@@ -200,10 +316,14 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
         • self.object_types
         • self.place_cell_input_weights
         • self.neuron_type_dict
+        • self.dummy_mode
 
     List of methods (in addition to riab_neurons.FeedForwardLayer methods):
+        • self.check_link()
+        • self.get_state()
         • self.update()
-        • self.log_num_neurons_per_object_name()
+        • self.log_num_neurons_per_object_type_name()
+        • self.plot_place_cell_locations()
     """
 
     default_params = {
@@ -214,7 +334,6 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
         "min_fr": 0,
         "max_fr": 1,
         "dynamic": True,  # place cells centers will update if object locations change
-        "is_dummy": False,  # dummy object cells, where all objects have been removed
     }
 
     ignored_param_keys = list()
@@ -238,16 +357,6 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
         """
 
         self.Agent = Agent
-
-        n = self._get_num_neurons()
-
-        if "n" in params and params["n"] != n:
-            raise ValueError(
-                "Number of cells should not be passed as a parameter to "
-                "ObjectCells. It is set automatically based on "
-                "the environment."
-            )
-
         self.check_if_ignored_params(params)
 
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
@@ -255,6 +364,15 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
 
         # update object params
         self.params.update(params)
+
+        self.dynamic = self.params["dynamic"]
+        n = self._get_num_neurons()
+        if "n" in params and params["n"] != n:
+            raise ValueError(
+                "Number of cells should not be passed as a parameter to "
+                "ObjectCells. It is set automatically based on "
+                "the environment."
+            )
         self.params["n"] = n
 
         with warnings.catch_warnings():
@@ -269,9 +387,6 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
         self._create_place_cell_layer()
         self._add_place_inputs()
 
-        if self.is_dummy:
-            self.set_to_dummy()
-
     @property
     def input_object_types(self):
         """
@@ -285,6 +400,9 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
 
         if not hasattr(self, "_input_object_types"):
             self._input_object_types = self.Environment.objects["object_types"]
+            if not self.dynamic:
+                self._input_object_types = self._input_object_types.copy()
+
         return self._input_object_types
 
     @property
@@ -301,6 +419,9 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
 
         if not hasattr(self, "_input_object_locations"):
             self._input_object_locations = self.Environment.objects["objects"]
+            if not self.dynamic:
+                self._input_object_locations = self._input_object_locations.copy()
+
         return self._input_object_locations
 
     @property
@@ -363,18 +484,49 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
             object_types, counts = np.unique(self.object_types, return_counts=True)
             _neuron_type_dict = dict()
             for object_type, count in zip(object_types, counts):
-                object_name = self.Environment.object_type_num_to_name_dict[object_type]
-                if "teleport" in object_name:
-                    object_name = "teleport"
+                object_type_name = self.Environment.object_type_num_to_name_dict[
+                    object_type
+                ]
+                if "teleport" in object_type_name:
+                    object_type_name = "teleport"
 
-                if object_name in _neuron_type_dict.keys():
-                    _neuron_type_dict[object_name] += count
+                if object_type_name in _neuron_type_dict.keys():
+                    _neuron_type_dict[object_type_name] += count
                 else:
-                    _neuron_type_dict[object_name] = count
+                    _neuron_type_dict[object_type_name] = count
 
             self._neuron_type_dict = _neuron_type_dict
 
         return self._neuron_type_dict
+
+    @property
+    def dummy_mode(self):
+        """
+        self.dummy_mode
+
+        Whether the neuron layer should be managed in a dummy mode. This is triggered
+        when the input object locations are set to NaNs.
+
+        Works in coordination with environments with objects which are all removed
+        at once by setting their coordinates to NaNs. Setting to NaNs in turn ensures
+        that removing and restoring the objects does not break the the dynamic link
+        between the object cells and object locations in the environment.
+
+        Returns:
+        - dummy_mode (bool): Whether the neuron layer is in a dummy mode.
+        """
+
+        if np.isnan(self.input_object_locations).all():
+            dummy_mode = True
+        elif np.isfinite(self.input_object_locations).all():
+            dummy_mode = False
+        else:
+            raise NotImplementedError(
+                "Expected all input object locations to be finite or all set to Nans "
+                "(dummy mode), but found a partial configuration."
+            )
+
+        return dummy_mode
 
     def _get_num_neurons(self):
         """
@@ -423,12 +575,15 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
         self.check_link()
 
         Check whether the place cell centers are still linked to the objects in the
-        environment has changed.
+        environment has changed. This is only expected if self.dynamic is True.
 
         If the number of objects has changed, a warning is raised, as this change will
         have detached the object cell centers from the environment object locations,
         preventing them from being dynamically updated.
         """
+
+        if not self.dynamic:
+            return
 
         if (
             self.PlaceCellInputs.place_cell_centers
@@ -439,37 +594,6 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
                 "locations, preventing them from being dynamically updated."
             )
             self._broken_link = True
-
-    def set_to_dummy(self):
-        """
-        self.set_to_dummy()
-
-        Set the layer to a dummy state, where all objects have been removed.
-        """
-
-        if self.is_dummy:
-            return
-
-        self._saved_input_object_locations = copy.deepcopy(self.input_object_locations)
-
-        # set to far outside the environment
-        self._input_object_locations[:] = np.nan
-
-        self.is_dummy = True
-
-    def reset_from_dummy(self):
-        """
-        self.reset_from_dummy()
-
-        Reset the layer from a dummy state, where all objects have been removed.
-        """
-
-        if not self.is_dummy:
-            return
-
-        self._input_object_locations[:] = self._saved_input_object_locations[:]
-
-        self.is_dummy = False
 
     def get_state(self, evaluate_at="agent", **kwargs):
         """
@@ -484,7 +608,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
                 (n x number of positions) if firingrates for more than 1 position are
                 requested.
         """
-        if self.is_dummy:
+        if self.dummy_mode:
             if evaluate_at == "agent":
                 V_shape = self.n
             elif evaluate_at == "all":
@@ -523,15 +647,15 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
         the future.
         """
 
-        if not (self.is_dummy or self._broken_link):
+        if not self._broken_link:
             self.check_link()
 
         self.PlaceCellInputs.update()
         super().update()
 
-    def log_num_neurons_per_object_name(self):
+    def log_num_neurons_per_object_type_name(self):
         """
-        self.log_num_neurons_per_object_name()
+        self.log_num_neurons_per_object_type_name()
 
         Log the number of neurons per object name in the layer.
         """
@@ -565,7 +689,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
         - sub_ax (plt.Axes): Subplot with place cell locations plotted.
         """
 
-        if self.is_dummy:
+        if self.dummy_mode:
             sub_ax = self.Environment.plot_environment(
                 sub_ax=sub_ax, alpha=0.6, autosave=False
             )
@@ -577,7 +701,7 @@ class ObjectCells(riab_neurons.FeedForwardLayer):
             )
 
 
-class FixedObjectCells(ObjectCells):
+class FixedObjectCells(ObjectCells, ObjectTypeMixin):
     """
     FixedObjectCells()
 
@@ -591,12 +715,13 @@ class FixedObjectCells(ObjectCells):
 
     default_params = {
         "name": "FixedObjectCells",
-        "num_novel": 1,  # altogether
-        "num_reward": 5,  # altogether
-        "num_teleport": 1,  # per teleportation object
+        "num_per": {
+            "landmark": 5
+        },  # total for each specified object type (regardless of number)
+        "num_per_teleport": 0,  # total for each teleport port (except any specified in num_per)
     }
 
-    List of properties (in addition to riab_neurons.FeedForwardLayer properties):
+    List of properties (in addition to ObjectCells properties):
         • self.object_types
 
     See ObjectCells for methods.
@@ -604,9 +729,10 @@ class FixedObjectCells(ObjectCells):
 
     default_params = {
         "name": "FixedObjectCells",
-        "num_novel": 1,  # altogether
-        "num_reward": 5,  # altogether
-        "num_teleport": 1,  # per teleportation object
+        "num_per": {
+            "landmark": 5
+        },  # total for each specified object type (regardless of number)
+        "num_per_teleport": 0,  # total for each teleport port (except any specified in num_per)
     }
 
     ignored_param_keys = list()  # type: list[str]
@@ -622,9 +748,7 @@ class FixedObjectCells(ObjectCells):
 
         Attributes:
         - Agent (agent.ResetableAgent): Associated agent.
-        - num_novel (int): Number of novel object cells.
-        - num_reward (int): Number of reward object cells.
-        - num_teleport (int): Number of teleport object cells
+        - num_per (dict): Number of neurons per object type
 
         Args:
         - Agent (agent.ResetableAgent): Associated agent.
@@ -640,9 +764,8 @@ class FixedObjectCells(ObjectCells):
         self.params = copy.deepcopy(__class__.default_params)  # type: ignore[name-defined]
         self.params.update(params)
 
-        self.num_novel = self.params["num_novel"]
-        self.num_reward = self.params["num_reward"]
-        self.num_teleport = self.params["num_teleport"]
+        self.num_per = self.params["num_per"]
+        self.num_per_teleport = self.params["num_per_teleport"]
 
         super().__init__(Agent, self.params)
 
@@ -658,25 +781,12 @@ class FixedObjectCells(ObjectCells):
         """
 
         if not hasattr(self, "_object_types"):
-            if len(self.input_object_types) == 0:
-                raise RuntimeError("No objects found in environment.")
-
-            object_types = list()
-            for object_type in np.unique(self.input_object_types):
-                object_name = self.Environment.object_type_num_to_name_dict[object_type]
-
-                if hasattr(self, f"num_{object_name}"):
-                    num = getattr(self, f"num_{object_name}")
-                    object_types.extend([object_type] * num)
-
-            np.random.shuffle(object_types)
-
-            self._object_types = object_types
+            self._object_types = self._get_object_types()
 
         return self._object_types
 
 
-class WeightedObjectCells(ObjectCells):
+class WeightedObjectCells(ObjectCells, ObjectTypeMixin):
     """
     WeightedObjectCells()
 
@@ -692,13 +802,14 @@ class WeightedObjectCells(ObjectCells):
     default_params = {
         "n": 10,
         "name": "WeightedObjectCells",
-        "novel_weight": 1,  # altogether
-        "reward_weight": 5,  # altogether
-        "teleport_weight": 0,  # per teleportation object
+        "weights_per": {
+            "landmark": 5
+        },  # weight for each specified object type (regardless of number)
+        "weight_per_teleport": 0,  # weight for each teleport port (except any specified in weight_per)
         "allow_omit_object_types": False,
     }
 
-    List of properties (in addition to riab_neurons.FeedForwardLayer properties):
+    List of properties (in addition to ObjectCells properties):
         • self.object_types
 
     See ObjectCells for methods.
@@ -707,9 +818,10 @@ class WeightedObjectCells(ObjectCells):
     default_params = {
         "n": 10,
         "name": "WeightedObjectCells",
-        "novel_weight": 1,  # altogether
-        "reward_weight": 5,  # altogether
-        "teleport_weight": 0,  # per teleportation object
+        "weights_per": {
+            "landmark": 5
+        },  # weight for each specified object type (regardless of number)
+        "weight_per_teleport": 0,  # weight for each teleport port (except any specified in weight_per)
         "allow_omit_object_types": False,
     }
 
@@ -745,9 +857,9 @@ class WeightedObjectCells(ObjectCells):
         self.params.update(params)
 
         self.n = self.params["n"]
-        self.novel_weight = self.params["novel_weight"]
-        self.reward_weight = self.params["reward_weight"]
-        self.teleport_weight = self.params["teleport_weight"]
+        self.weights_per = self.params["weights_per"]
+        self.weight_per_teleport = self.params["weight_per_teleport"]
+        self.allow_omit_object_types = self.params["allow_omit_object_types"]
 
         super().__init__(Agent, self.params)
 
@@ -763,23 +875,7 @@ class WeightedObjectCells(ObjectCells):
         """
 
         if not hasattr(self, "_object_types"):
-            if len(self.input_object_types) == 0:
-                raise RuntimeError("No objects found in environment.")
-
-            weight_dict = dict()
-            for object_type in np.unique(self.input_object_types):
-                object_name = self.Environment.object_type_num_to_name_dict[object_type]
-
-                if not hasattr(self, f"{object_name}_weight"):
-                    continue
-
-                weight_dict[object_type] = getattr(self, f"{object_name}_weight")
-
-            object_types = ext_util.get_weighted_object_types(
-                weight_dict, self.n, self.allow_omit_object_types
-            )
-
-            self._object_types = object_types
+            self._object_types = self._get_object_types()
 
         return self._object_types
 
@@ -796,7 +892,7 @@ class WeightedObjectCells(ObjectCells):
         return self.n
 
 
-class FixedObjectVectorCells(riab_neurons.ObjectVectorCells):
+class FixedObjectVectorCells(riab_neurons.ObjectVectorCells, ObjectTypeMixin):
     """
     FixedObjectVectorCells()
 
@@ -814,9 +910,8 @@ class FixedObjectVectorCells(riab_neurons.ObjectVectorCells):
 
     default_params = {
         "name": "FixedObjectVectorCells",
-        "num_novel": 1,  # altogether
-        "num_reward": 5,  # altogether
-        "num_teleport": 1,  # per teleportation object
+        "num_per": {"landmark": 5},  # total for each specified object type
+        "num_per_teleport": 0,  # total for each teleport port
         "reference_frame": "egocentric",
     }
 
@@ -828,14 +923,13 @@ class FixedObjectVectorCells(riab_neurons.ObjectVectorCells):
 
     List of methods (in addition to riab_neurons.ObjectVectorCells methods):
         • self.set_tuning_types()
-        • self.log_num_neurons_per_object_name()
+        • self.log_num_neurons_per_object_type_name()
     """
 
     default_params = {
         "name": "FixedObjectVectorCells",
-        "num_novel": 1,  # altogether
-        "num_reward": 5,  # altogether
-        "num_teleport": 1,  # per teleportation object
+        "num_per": {"landmark": 5},  # total for each specified object type
+        "num_per_teleport": 0,  # total for each teleport port
         "reference_frame": "egocentric",
     }
 
@@ -871,9 +965,8 @@ class FixedObjectVectorCells(riab_neurons.ObjectVectorCells):
                 "the environment."
             )
 
-        self.num_novel = self.params["num_novel"]
-        self.num_reward = self.params["num_reward"]
-        self.num_teleport = self.params["num_teleport"]
+        self.num_per = self.params["num_per"]
+        self.num_per_teleport = self.params["num_per_teleport"]
 
         n = self._get_num_neurons()
 
@@ -930,20 +1023,7 @@ class FixedObjectVectorCells(riab_neurons.ObjectVectorCells):
         """
 
         if not hasattr(self, "_object_types"):
-            if len(self.input_object_types) == 0:
-                raise RuntimeError("No objects found in environment.")
-
-            object_types = list()
-            for object_type in np.unique(self.input_object_types):
-                object_name = self.Environment.object_type_num_to_name_dict[object_type]
-
-                if hasattr(self, f"num_{object_name}"):
-                    num = getattr(self, f"num_{object_name}")
-                    object_types.extend([object_type] * num)
-
-            np.random.shuffle(object_types)
-
-            self._object_types = object_types
+            self._object_types = self._get_object_types()
 
         return self._object_types
 
@@ -963,14 +1043,16 @@ class FixedObjectVectorCells(riab_neurons.ObjectVectorCells):
             object_types, counts = np.unique(self.object_types, return_counts=True)
             _neuron_type_dict = dict()
             for object_type, count in zip(object_types, counts):
-                object_name = self.Environment.object_type_num_to_name_dict[object_type]
-                if "teleport" in object_name:
-                    object_name = "teleport"
+                object_type_name = self.Environment.object_type_num_to_name_dict[
+                    object_type
+                ]
+                if "teleport" in object_type_name:
+                    object_type_name = "teleport"
 
-                if object_name in _neuron_type_dict.keys():
-                    _neuron_type_dict[object_name] += count
+                if object_type_name in _neuron_type_dict.keys():
+                    _neuron_type_dict[object_type_name] += count
                 else:
-                    _neuron_type_dict[object_name] = count
+                    _neuron_type_dict[object_type_name] = count
 
             self._neuron_type_dict = _neuron_type_dict
 
@@ -1000,23 +1082,15 @@ class FixedObjectVectorCells(riab_neurons.ObjectVectorCells):
         - tuning_types (list): Preferred object type for each OVC.
         """
 
-        tuning_types = list()
-        for object_type in np.unique(self.object_types):
-            object_name = self.Environment.object_type_num_to_name_dict[object_type]
-            if object_name == "novel":
-                tuning_types.extend([object_type] * self.num_novel)  # type: ignore[attr-defined]
-            elif object_name == "reward":
-                tuning_types.extend([object_type] * self.num_reward)  # type: ignore[attr-defined]
-            elif "teleport" in object_name:
-                tuning_types.extend([object_type] * self.num_teleport)  # type: ignore[attr-defined]
+        tuning_types = self.object_types.copy()
 
         np.random.shuffle(tuning_types)
 
         self.tuning_types = tuning_types
 
-    def log_num_neurons_per_object_name(self):
+    def log_num_neurons_per_object_type_name(self):
         """
-        self.log_num_neurons_per_object_name()
+        self.log_num_neurons_per_object_type_name()
 
         Log the number of neurons per object name in the layer.
         """
@@ -1031,7 +1105,7 @@ class FixedObjectVectorCells(riab_neurons.ObjectVectorCells):
         print(log_str)
 
 
-class WeightedObjectVectorCells(riab_neurons.ObjectVectorCells):
+class WeightedObjectVectorCells(riab_neurons.ObjectVectorCells, ObjectTypeMixin):
     """
     WeightedObjectVectorCells()
 
@@ -1050,9 +1124,10 @@ class WeightedObjectVectorCells(riab_neurons.ObjectVectorCells):
     default_params = {
         "n": 10,
         "name": "WeightedObjectVectorCells",
-        "novel_weight": 1,  # altogether
-        "reward_weight": 5,  # altogether
-        "teleport_weight": 0,  # per teleportation object
+        "weights_per": {
+            "landmark": 5,
+            "teleport": 0,
+        },  # weight for each object type regardless of number (each teleport port is counted separately)
         "reference_frame": "egocentric",
         "allow_omit_object_types": False,
     }
@@ -1065,15 +1140,16 @@ class WeightedObjectVectorCells(riab_neurons.ObjectVectorCells):
 
     List of methods (in addition to riab_neurons.ObjectVectorCells methods):
         • self.set_tuning_types()
-        • self.log_num_neurons_per_object_name()
+        • self.log_num_neurons_per_object_type_name()
     """
 
     default_params = {
         "n": 10,
         "name": "WeightedObjectVectorCells",
-        "novel_weight": 1,  # altogether
-        "reward_weight": 5,  # altogether
-        "teleport_weight": 0,  # per teleportation object
+        "weights_per": {
+            "landmark": 5,
+            "teleport": 0,
+        },  # weight for each object type regardless of number (each teleport port is counted separately)
         "reference_frame": "egocentric",
         "allow_omit_object_types": False,
     }
@@ -1098,9 +1174,7 @@ class WeightedObjectVectorCells(riab_neurons.ObjectVectorCells):
         self.params.update(params)
 
         self.n = self.params["n"]
-        self.novel_weight = self.params["novel_weight"]
-        self.reward_weight = self.params["reward_weight"]
-        self.teleport_weight = self.params["teleport_weight"]
+        self.weights_per = self.params["weights_per"]
 
         super().__init__(Agent, self.params)
 
@@ -1146,23 +1220,7 @@ class WeightedObjectVectorCells(riab_neurons.ObjectVectorCells):
         """
 
         if not hasattr(self, "_object_types"):
-            if len(self.input_object_types) == 0:
-                raise RuntimeError("No objects found in environment.")
-
-            weight_dict = dict()
-            for object_type in np.unique(self.input_object_types):
-                object_name = self.Environment.object_type_num_to_name_dict[object_type]
-
-                if not hasattr(self, f"{object_name}_weight"):
-                    continue
-
-                weight_dict[object_type] = getattr(self, f"{object_name}_weight")
-
-            object_types = ext_util.get_weighted_object_types(
-                weight_dict, self.n, self.allow_omit_object_types
-            )
-
-            self._object_types = object_types
+            self._object_types = self._get_object_types()
 
         return self._object_types
 
@@ -1182,14 +1240,16 @@ class WeightedObjectVectorCells(riab_neurons.ObjectVectorCells):
             object_types, counts = np.unique(self.object_types, return_counts=True)
             _neuron_type_dict = dict()
             for object_type, count in zip(object_types, counts):
-                object_name = self.Environment.object_type_num_to_name_dict[object_type]
-                if "teleport" in object_name:
-                    object_name = "teleport"
+                object_type_name = self.Environment.object_type_num_to_name_dict[
+                    object_type
+                ]
+                if "teleport" in object_type_name:
+                    object_type_name = "teleport"
 
-                if object_name in _neuron_type_dict.keys():
-                    _neuron_type_dict[object_name] += count
+                if object_type_name in _neuron_type_dict.keys():
+                    _neuron_type_dict[object_type_name] += count
                 else:
-                    _neuron_type_dict[object_name] = count
+                    _neuron_type_dict[object_type_name] = count
 
             self._neuron_type_dict = _neuron_type_dict
 
@@ -1220,23 +1280,15 @@ class WeightedObjectVectorCells(riab_neurons.ObjectVectorCells):
         - tuning_types (list): Preferred object type for each OVC.
         """
 
-        tuning_types = list()
-        for object_type in np.unique(self.object_types):
-            object_name = self.Environment.object_type_num_to_name_dict[object_type]
-            if object_name == "novel":
-                tuning_types.extend([object_type] * self.num_novel)  # type: ignore[attr-defined]
-            elif object_name == "reward":
-                tuning_types.extend([object_type] * self.num_reward)  # type: ignore[attr-defined]
-            elif "teleport" in object_name:
-                tuning_types.extend([object_type] * self.num_teleport)  # type: ignore[attr-defined]
+        tuning_types = self.object_types.copy()
 
         np.random.shuffle(tuning_types)
 
         self.tuning_types = tuning_types
 
-    def log_num_neurons_per_object_name(self):
+    def log_num_neurons_per_object_type_name(self):
         """
-        self.log_num_neurons_per_object_name()
+        self.log_num_neurons_per_object_type_name()
 
         Log the number of neurons per object name in the layer.
         """

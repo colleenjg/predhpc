@@ -12,7 +12,7 @@ from predhpc.util import params_util, hyper_util, gen_util
 NUM_SHIFTS = 8
 
 
-def get_save_name(speed_std="high", complex_track=False, target_shifts=0):
+def get_save_name(speed_std="high", complex_track=False, object_shifts=0):
     """
     get_save_name()
 
@@ -22,7 +22,7 @@ def get_save_name(speed_std="high", complex_track=False, target_shifts=0):
     - speed_std (str, optional): Speed standard deviation to use. Default is "high".
     - complex_track (bool, optional): Whether to run a complex track simulation instead
         of a simple linear track simulation. Default is False.
-    - target_shifts (int, optional): Number of times to shift the target position. If 0,
+    - object_shifts (int, optional): Number of times to shift the object position. If 0,
         the return linear track is run. Default is 0.
 
     Returns:
@@ -31,7 +31,7 @@ def get_save_name(speed_std="high", complex_track=False, target_shifts=0):
     """
 
     speed_std_str = "_low_std" if speed_std == "low" else ""
-    shift_str = "_shifted" if target_shifts else ""
+    shift_str = "_shifted" if object_shifts else ""
     lead = "complex" if complex_track else "simple"
 
     save_name = f"{lead}{shift_str}{speed_std_str}"
@@ -39,7 +39,7 @@ def get_save_name(speed_std="high", complex_track=False, target_shifts=0):
     return save_name
 
 
-def get_param_str(speed_std="high", complex_track=False, target_shifts=0, log=False):
+def get_param_str(speed_std="high", complex_track=False, object_shifts=0, log=False):
     """
     get_param_str()
 
@@ -49,8 +49,8 @@ def get_param_str(speed_std="high", complex_track=False, target_shifts=0, log=Fa
     - speed_std (str, optional): Speed standard deviation to use. Default is "high".
     - complex_track (bool, optional): Whether to run a complex track simulation instead
         of a simple linear track simulation. Default is False.
-    - target_shifts (int, optional): Number of times to shift the target position. If 0,
-        the return linear track is run. Default is 0.
+    - object_shifts (int, optional): Number of times to shift the object position.
+        If 0, the return linear track is run. Default is 0.
     - log (bool, optional): Whether to log the parameter string. Default is False.
 
     Returns:
@@ -58,8 +58,8 @@ def get_param_str(speed_std="high", complex_track=False, target_shifts=0, log=Fa
     """
 
     param_str = "complex track" if complex_track else "simple track"
-    if target_shifts:
-        param_str = f"{param_str} with {target_shifts} target shifts"
+    if object_shifts:
+        param_str = f"{param_str} with {object_shifts} object shifts"
 
     param_str = f"{param_str} ({speed_std} m/s speed std)"
 
@@ -69,23 +69,23 @@ def get_param_str(speed_std="high", complex_track=False, target_shifts=0, log=Fa
     return param_str
 
 
-def get_modes(complex_track=False, target_shifts=0):
+def get_modes(complex_track=False, object_shifts=0):
     """
     get_modes()
 
     Get the modes for the linear track simulation based on parameters values.
 
     if complex_track is False:
-        If target_shifts is 0, the modes are: single, reverse, and back and forth.
-        If target_shifts is greater than 0, the modes are shifted_0, shifted_1, ..., shifted_n
-        in which the target is shifted by the same distance each time.
+        If object_shifts is 0, the modes are: single, reverse, and back and forth.
+        If object_shifts is greater than 0, the modes are shifted_0, shifted_1, ..., shifted_n
+        in which the object is shifted by the same distance each time.
     if complex_track is True:
-        The modes are: single, reverse, and back and forth. target_shifts must be 0.
+        The modes are: single, reverse, and back and forth. object_shifts must be 0.
 
     Args:
     - complex_track (bool, optional): Whether to run a complex track simulation instead
         of a simple linear track simulation. Default is False.
-    - target_shifts (int, optional): Number of times to shift the target position. If 0,
+    - object_shifts (int, optional): Number of times to shift the object position. If 0,
         the return linear track is run. Default is 0.
 
     Returns:
@@ -93,15 +93,15 @@ def get_modes(complex_track=False, target_shifts=0):
     """
 
     if complex_track:
-        if target_shifts != 0:
+        if object_shifts != 0:
             raise ValueError(
-                "target_shifts must be 0 if 'complex_track' is True, but is "
-                f"{target_shifts}."
+                "object_shifts must be 0 if 'complex_track' is True, but is "
+                f"{object_shifts}."
             )
         modes = ["single", "reverse", "back_and_forth"]
     else:
-        if target_shifts:
-            modes = [f"shifted_{i}" for i in range(target_shifts)]
+        if object_shifts:
+            modes = [f"shifted_{i}" for i in range(object_shifts)]
         else:
             modes = ["single"]
 
@@ -126,8 +126,8 @@ def get_search_space(search_space="full"):
         if search_space == "full":
             # in to out, col to row
             search_kwargs = {
-                # "somatic_regularization_alpha": [2, 4, 5],
-                "somatic_BTSP_lr": [0.10, 0.30, 5],
+                # "proximal_regularization_alpha": [2, 4, 5],
+                "proximal_BTSP_lr": [0.10, 0.30, 5],
                 "inhibitory_input_filter_tau": [0.2, 0.4, 5],
                 "inhibitory_weight": [0.5, 2.0, 5],
             }
@@ -142,11 +142,11 @@ def get_search_space(search_space="full"):
 
 
 def run_linear_track(
-    num_steps_can_stop=8000,
+    num_traj_can_stop=10,
     skip_runs=1,
     speed_std="high",
     complex_track=False,
-    target_shifts=0,
+    object_shifts=0,
     disable_tqdm=False,
     plot=True,
     PF_kwargs=dict(),
@@ -159,14 +159,14 @@ def run_linear_track(
     (consecutively).
 
     Args:
-    - num_steps_can_stop (int, optional): Number of steps total to run, for each mode.
-        Default is 8000.
+    - num_traj_can_stop (int, optional): Number of trajectories to run, for each mode.
+        Default is 10.
     - skip_runs (int, optional): Number of track runs to skip before enabling BTSP.
         Default is 1.
     - speed_std (str, optional): Speed standard deviation to use. Default is "high".
     - complex_track (bool, optional): Whether to run a complex track simulation
         instead of a simple linear track simulation. Default is False.
-    - target_shifts (int, optional): Number of times to shift the target position. If 0,
+    - object_shifts (int, optional): Number of times to shift the object position. If 0,
         the return linear track is run. Default is 0.
     - disable_tqdm (bool, optional): Whether to disable tqdm. Default is False.
     - plot (bool, optional): Whether to generate plots. Default is True.
@@ -189,7 +189,7 @@ def run_linear_track(
         scale=params_util.SCALE_LINEAR, speed_std=speed_std, **kwargs
     )
 
-    modes = get_modes(complex_track=complex_track, target_shifts=target_shifts)
+    modes = get_modes(complex_track=complex_track, object_shifts=object_shifts)
 
     plot_dict = dict()
     BTSP_metrics = dict()
@@ -205,9 +205,7 @@ def run_linear_track(
             Pyrs_or_learner=Pyrs,
             use_Hebbian=False,
             BTSP_on=skip_runs + 1,
-            num_steps_can_stop=num_steps_can_stop,
-            time_in_min_can_stop=None,
-            num_target_reaches_can_stop=None,
+            num_traj_can_stop=num_traj_can_stop,
             record_weights_at_BTSP=False,
             no_logs=disable_tqdm,
             plot=plot,
@@ -241,7 +239,7 @@ def run_linear_track(
 def run_hyperparameter_search(
     speed_std="high",
     complex_track=False,
-    target_shifts=0,
+    object_shifts=0,
     direc=None,
     num_CPUs=4,
     num_repeats=4,
@@ -261,7 +259,7 @@ def run_hyperparameter_search(
     - speed_std (str, optional): Speed standard deviation to use. Default is "high".
     - complex_track (bool, optional): Whether to run a complex track simulation instead
         of a simple linear track simulation. Default is False.
-    - target_shifts (int, optional): Number of times to shift the target position. If 0,
+    - object_shifts (int, optional): Number of times to shift the object position. If 0,
         the return linear track is run. Default is 0.
     - direc (str, optional): Directory to save results in. If None, a default
         directory is used (see hyper_util.get_save_directory()). Default is None.
@@ -296,13 +294,13 @@ def run_hyperparameter_search(
         kwargs_use = kwargs.copy()
 
         kwargs_use.update(config)
-        if "somatic_regularization_alpha" in kwargs_use.keys():
-            kwargs_use["somatic_normalize_weights_divisively"] = True
+        if "proximal_regularization_alpha" in kwargs_use.keys():
+            kwargs_use["proximal_normalize_weights_divisively"] = True
 
         output_dict = run_linear_track(
             speed_std=speed_std,
             complex_track=complex_track,
-            target_shifts=target_shifts,
+            object_shifts=object_shifts,
             disable_tqdm=disable_tqdm,
             plot=plot,
             **kwargs_use,
@@ -311,7 +309,7 @@ def run_hyperparameter_search(
         return output_dict
 
     search_space = get_search_space(search_space=search_space)
-    save_name = get_save_name(speed_std, complex_track, target_shifts=target_shifts)
+    save_name = get_save_name(speed_std, complex_track, object_shifts=object_shifts)
 
     hyper_util.run_hyperparameter_search(
         objective,
@@ -326,7 +324,7 @@ def run_hyperparameter_search(
 
 
 def yield_cycle_kwargs(
-    low_speed_std=False, complex_track=False, target_shift=False, cycle_all=False
+    low_speed_std=False, complex_track=False, object_shift=False, cycle_all=False
 ):
     """
     yield_cycle_kwargs()
@@ -338,7 +336,7 @@ def yield_cycle_kwargs(
         Default is False.
     - complex_track (bool, optional): Whether to run a complex track simulation instead
         of a simple linear track simulation. Default is False.
-    - target_shift (bool, optional): Whether to shift the target position, if running
+    - object_shift (bool, optional): Whether to shift the object position, if running
         return track simulation. Default is False.
     - cycle_all (bool, optional): Whether to cycle through all possible combinations of
         keyword arguments. Default is False.
@@ -353,18 +351,18 @@ def yield_cycle_kwargs(
                 kwargs = {
                     "speed_std": speed_std,
                     "complex_track": track == "complex",
-                    "target_shifts": NUM_SHIFTS if track == "shift" else 0,
+                    "object_shifts": NUM_SHIFTS if track == "shift" else 0,
                 }
                 yield kwargs
 
     else:
-        if target_shift and complex_track:
-            raise ValueError("target_shift must be False for complex linear track.")
+        if object_shift and complex_track:
+            raise ValueError("object_shift must be False for complex linear track.")
 
         kwargs = {
             "speed_std": "low" if low_speed_std else "high",
             "complex_track": complex_track,
-            "target_shifts": target_shift,
+            "object_shifts": object_shift,
         }
         yield kwargs
 
@@ -381,10 +379,10 @@ def get_args():
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--num_steps_can_stop", type=int, default=8000)
+    parser.add_argument("--num_traj_can_stop", type=int, default=10)
     parser.add_argument("--low_speed_std", action="store_true")
     parser.add_argument("--complex_track", action="store_true")
-    parser.add_argument("--target_shift", type=int, default=0)
+    parser.add_argument("--object_shift", type=int, default=0)
     parser.add_argument("--direc", type=Path, default=None)
     parser.add_argument("--num_CPUs", type=int, default=2)
     parser.add_argument("--num_repeats", type=int, default=4)
@@ -416,7 +414,7 @@ def main():
         all_run_kwargs = yield_cycle_kwargs(
             low_speed_std=args.low_speed_std,
             complex_track=args.complex_track,
-            target_shift=args.target_shift,
+            object_shift=args.object_shift,
             cycle_all=args.cycle_all,
         )
 
@@ -430,13 +428,13 @@ def main():
                     direc=args.direc,
                     num_CPUs=args.num_CPUs,
                     num_repeats=args.num_repeats,
-                    num_steps_can_stop=args.num_steps_can_stop,
+                    num_traj_can_stop=args.num_traj_can_stop,
                     debug=args.debug,
                     **run_kwargs,
                 )
             else:
                 BTSP_metrics = run_linear_track(
-                    num_steps_can_stop=args.num_steps_can_stop, plot=False, **run_kwargs
+                    num_traj_can_stop=args.num_traj_can_stop, plot=False, **run_kwargs
                 )
                 print("\nBTSP metrics:")
                 pprint(BTSP_metrics)

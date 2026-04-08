@@ -681,7 +681,7 @@ def gaussian_smooth_kernel(kernel, sigma_in_steps, smooth_2D=False, circular=Fal
     - smooth_2D (bool, optional): If True, smooth the kernel in 2D. Default is False.
 
     Returns:
-    - smoothed_kernel (2D np.ndarray): Smoothed kernel.
+    - smoothed_kernel (1 or 2D np.ndarray): Smoothed kernel.
     """
 
     num_pts = len(kernel)

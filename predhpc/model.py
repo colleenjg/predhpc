@@ -13,6 +13,14 @@ class TorchNeuronModel(torch.nn.Module):
     TorchNeuronModel()
 
     Torch neuron model that updates weights of a ratinabox neuron layer.
+
+    List of methods (in addition to torch.nn.Module methods):
+        • self.set_device()
+        • self.forward()
+        • self.get_X()
+        • self.get_y()
+        • self.run_train()
+        • self.run_eval()
     """
 
     def __init__(

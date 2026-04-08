@@ -6,8 +6,10 @@ import warnings
 import numpy as np
 from matplotlib import pyplot as plt  # type: ignore[import]
 from matplotlib import markers as mpl_markers
+from matplotlib import colors as mpl_colors
 from matplotlib import colorbar as mpl_cbar
 from matplotlib import font_manager as fm
+from matplotlib import animation as mpl_animation
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import seaborn as sns  # type: ignore[import]
 
@@ -48,16 +50,26 @@ def save_figure(
     - **kwargs: Additional keyword arguments to pass to rutils.save or fig.savefig()
     """
 
+    if isinstance(fig_save_types, str):
+        fig_save_types = [fig_save_types]
+
     if no_timestamp:
-        save_kwargs = {"dpi": 300, "bbox_inches": "tight"}
-        save_kwargs.update(kwargs)
         if direc is None:
             from ratinabox import figure_directory as riab_figure_directory
 
             direc = riab_figure_directory
         fig_path = Path(direc, name)
+
+        save_kwargs = {"dpi": 300}
+        if isinstance(fig, mpl_animation.FuncAnimation):
+            fct = fig.save
+        else:
+            fct = fig.savefig
+            save_kwargs["bbox_inches"] = "tight"
+        save_kwargs.update(kwargs)
+
         for filetype in fig_save_types:
-            fig.savefig(f"{fig_path}.{filetype}", **save_kwargs)
+            fct(f"{fig_path}.{filetype}", **save_kwargs)
         save_types = "  & .".join(fig_save_types)
         print(f"Figure saved to {os.path.abspath(fig_path)}.{save_types}")
 
@@ -426,6 +438,37 @@ def get_s_scatter_squares(fig_side=4.0, num=20):
     return s
 
 
+def get_padded_subplot_lims(min_val, max_val, pad_prop=0.1, prop_high=0.5):
+    """
+    get_padded_subplot_lims(min_val, max_val)
+
+    Obtain padded axis limits based on current limits.
+
+    Args:
+    - min_val (float): Initial minimum value for the specified axis.
+    - max_val (float): Initial maximum value for the specified axis.
+    - pad_prop (float, optional): Proportion of the axis range to pad by.
+        Default is 0.1.
+    - prop_high (float, optional): Proportion of the pad to use for high end.
+        Default is 0.5.
+
+
+    Returns:
+    - min_val (float): Padded minimum value for the specified axis.
+    - max_val (float): Padded maximum value for the specified axis.
+    """
+
+    if prop_high < 0 or prop_high > 1:
+        raise ValueError(f"prop_high must be between 0 and 1, but got {prop_high}.")
+
+    pad = (max_val - min_val) * pad_prop
+
+    min_val -= pad * (1 - prop_high)
+    max_val += pad * prop_high
+
+    return min_val, max_val
+
+
 def pad_axis(sub_ax, axis="y", pad_prop=0.1, prop_high=0.5):
     """
     pad_axis(sub_ax)
@@ -449,9 +492,6 @@ def pad_axis(sub_ax, axis="y", pad_prop=0.1, prop_high=0.5):
     else:
         axes = [axis]
 
-    if prop_high < 0 or prop_high > 1:
-        raise ValueError(f"prop_high must be between 0 and 1, but got {prop_high}.")
-
     for axis in axes:
         if axis == "x":
             min_val, max_val = sub_ax.get_xlim()
@@ -460,15 +500,216 @@ def pad_axis(sub_ax, axis="y", pad_prop=0.1, prop_high=0.5):
             min_val, max_val = sub_ax.get_ylim()
             set_fct = sub_ax.set_ylim
 
-        pad = (max_val - min_val) * pad_prop
-
-        min_val -= pad * (1 - prop_high)
-        max_val += pad * prop_high
+        min_val, max_val = get_padded_subplot_lims(
+            min_val, max_val, pad_prop=pad_prop, prop_high=prop_high
+        )
 
         set_fct(min_val, max_val)
 
 
-def match_y_axis_scales(axlist, height_ratios=None):
+def get_color_list(color, n=5, edges=[0.2, 0.8]):
+    """
+    get_color_list(color)
+
+    Returns list of colors around the specified color.
+
+    Args:
+    - n (int): Number of colors to return.
+    - edges (list): Proportion of the full color range (from white to black) to use in
+        generating the list of colors.
+
+    Returns:
+    - colors ()
+    """
+
+    if len(edges) != 2 or min(edges) < 0 or max(edges) > 1:
+        raise ValueError("Must provide two edge colors within the [0, 1] range.")
+
+    base_color = np.array(mpl_colors.to_rgb(color))
+    white = np.asarray([1, 1, 1])
+    black = np.asarray([0, 0, 0])
+
+    pts = int(n * 20)
+    all_colors = np.vstack(
+        [
+            np.linspace(white, base_color, pts, endpoint=False),
+            np.linspace(base_color, black, pts + 1),
+        ]
+    )
+
+    cmap = mpl_colors.LinearSegmentedColormap.from_list("single_color", all_colors)
+    colors = cmap(np.linspace(edges[0], edges[1], n))
+
+    return colors
+
+
+def get_data_distance_from_data_point_for_marker(sub_ax, axis="x", s=20, prop_marker=1):
+    """
+    get_data_distance_from_data_point_for_marker(sub_ax)
+
+    Obtain the data distance from a data point to the edge of a marker.
+
+    Args:
+    - sub_ax (plt.Axes): Subplot for which to obtain the data distance.
+    - axis (str, optional): Axis to obtain the data distance for ("x" or "y").
+        Default is "x".
+    - s (float, optional): Size of the scatter point markers. Default is 20.
+    - prop_marker (float, optional): Proportion of the marker size to use for
+        padding. 0 pads to the edge of the marker. Default is 1.
+
+    Returns:
+    - data_distance (float): Data distance from a data point to the edge of a marker.
+    """
+
+    xmin = sub_ax.get_xlim()[0]
+    ymin = sub_ax.get_ylim()[0]
+
+    display_diameter = 2 * np.sqrt(s / np.pi) * sub_ax.figure.dpi / 72
+
+    if axis == "x":
+        to_transform = (xmin + display_diameter, ymin)
+        dim = 0
+    elif axis == "y":
+        to_transform = (xmin, ymin + display_diameter)
+        dim = 1
+    else:
+        raise ValueError(f"Axis {axis} is not recognized. Use 'x' or 'y'.")
+
+    inv_trans = sub_ax.transData.inverted()
+
+    data_diameter = (
+        inv_trans.transform(to_transform)[dim] - inv_trans.transform((xmin, ymin))[dim]
+    )
+
+    data_distance = data_diameter * (prop_marker + 0.5)
+
+    return data_distance
+
+
+def pad_axes_around_scatterpoints(
+    sub_ax, coords_x=None, coords_y=None, s=20, prop_marker=1
+):
+    """
+    pad_axes_around_scatterpoints(sub_ax)
+
+    Pad the axis limits of a subplot around scatter point markers. Only expands limits,
+    does not contract them.
+
+    Args:
+    - sub_ax (plt.Axes): Subplot for which to pad an axis.
+    - coords_x (list or np.ndarray, optional): x-coordinates of the scatter points.
+        Default is None.
+    - coords_y (list or np.ndarray, optional): y-coordinates of the scatter points.
+        Default is None.
+    - s (float, optional): Size of the scatter point markers. Default is 20.
+    - prop_marker (float, optional): Proportion of the marker size to use for padding.
+        0 pads to the edge of the marker. Default is 1.
+    """
+
+    if coords_x is None and coords_y is None:
+        raise ValueError("Must provide at least one of coords_x and coords_y.")
+
+    coords_dict = {
+        "x": coords_x,
+        "y": coords_y,
+    }
+
+    for axis, coords in coords_dict.items():
+        if coords is None or not np.isfinite(coords).all():
+            continue
+
+        if axis == "x":
+            lim_get_fct = sub_ax.get_xlim
+            lim_set_fct = sub_ax.set_xlim
+        else:
+            lim_get_fct = sub_ax.get_ylim
+            lim_set_fct = sub_ax.set_ylim
+
+        min_val, max_val = np.nanmin(coords), np.nanmax(coords)
+        for side in ["min", "max"]:
+            data_distance = get_data_distance_from_data_point_for_marker(
+                sub_ax, axis=axis, s=s, prop_marker=prop_marker
+            )
+
+            if side == "min":
+                lim_min = lim_get_fct()[0]
+                new_lim_min = min_val - data_distance
+                if new_lim_min < lim_min:
+                    lim_set_fct(min(new_lim_min, lim_min), None)
+
+            elif side == "max":
+                lim_max = lim_get_fct()[1]
+                new_lim_max = max_val + data_distance
+                if new_lim_max > lim_max:
+                    lim_set_fct(None, max(lim_max, new_lim_max))
+
+
+def get_marker_yvals(
+    sub_ax, data=None, s=20, prop_data="above", above=0.8, num_lines=None
+):
+    """
+    get_marker_yvals(sub_ax)
+
+    Obtain the y-values for placing markers above or at a proportion of the data.
+
+    Args:
+    - sub_ax (plt.Axes): Subplot based on which to identify y-values. If data is None,
+        data is retrieved from the subplot lines.
+    - data (2D np.ndarray, optional): Data groups for which to obtain the y-values
+        (groups x datapoints). If None, sub_ax must be provided. Default is None.
+    - s (float, optional): Size of the scatter point markers. Default is 20.
+    - prop_data (str or float, optional): Whether to place the markers above the data
+        ("above") or at a proportion of the data ("prop"). Default is "above".
+    - above (float, optional): Proportion of the marker size to use for padding when
+        placing the markers above the data. Default is 0.8.
+    - num_lines (int, optional): Number of lines from the subplot to obtain data from.
+        The last lines returned by sub_ax.get_lines() are kept. If None, all lines are
+        kept. Ignored if data is provided. Default is None
+
+    Returns:
+    - heights (np.ndarray): Array of y-values for placing markers for each line found
+        in the plot.
+    """
+
+    if data is None:
+        lines = sub_ax.get_lines()
+        if len(lines) == 0:
+            raise ValueError("No lines found in subplot to obtain data from.")
+        if num_lines is not None:
+            if len(lines) < num_lines:
+                raise ValueError(
+                    f"Expected at least {num_lines} lines in subplot, but found {len(lines)}."
+                )
+            lines = lines[-num_lines:]
+
+        data = [np.asarray(line.get_data()[1]) for line in lines]
+
+    if len(data) == 0:
+        raise ValueError("No data provided.")
+
+    if not hasattr(data[0], "__len__"):
+        data = [data]
+
+    heights = list()
+    for y_data in data:
+        max_val = np.nanmax(y_data)
+        if prop_data == "above":
+            distance = get_data_distance_from_data_point_for_marker(
+                sub_ax, "y", s=s, prop_marker=above
+            )
+            height = max_val + distance
+
+        else:
+            min_val = np.nanmin(y_data)
+            height = prop_data * (max_val - min_val) + min_val
+        heights.append(height)
+
+    heights = np.array(heights)
+
+    return heights
+
+
+def match_y_axis_scales(axlist, height_ratios=None, match_ymins=False):
     """
     match_y_axis_scales(axlist)
 
@@ -478,6 +719,8 @@ def match_y_axis_scales(axlist, height_ratios=None):
     - axlist (list): List of subplots to match y-axis scales for.
     - height_ratios (list, optional): List of height ratios for each subplot.
         Default is None.
+    - match_ymins (bool, optional): Whether to match the y-axis minima.
+        Default is False.
     """
 
     if height_ratios is None:
@@ -487,6 +730,9 @@ def match_y_axis_scales(axlist, height_ratios=None):
         raise ValueError("Number of axes does not match number of height ratios.")
 
     ymins = [sub_ax.get_ylim()[0] for sub_ax in axlist]
+    if match_ymins:
+        ymins = [min(ymins)] * len(axlist)
+
     ymaxs = [sub_ax.get_ylim()[1] for sub_ax in axlist]
     yranges = [ymax - ymin for ymin, ymax in zip(ymins, ymaxs)]
 
@@ -711,7 +957,7 @@ def plot_vspan_circular(sub_ax, edges, end_pts=None, **kwargs):
             f"but got {len(edges)} elements."
         )
 
-    if np.isclose(edges[0], edges[1]):
+    if np.isclose(edges[0], edges[1]) or not np.isfinite(edges).all():
         pass
     elif edges[1] > edges[0]:
         sub_ax.axvspan(*edges, **kwargs)
@@ -844,7 +1090,7 @@ def get_plotting_times(
 
     Returns:
     - startid (int): Index of the start time point.
-    - endid (int): Index of the end time point (exclusionary, add 1 for indexing).
+    - endid (int): Index of the end time point (inclusionary, add 1 for indexing).
     """
 
     times = np.asarray(times)
@@ -1019,6 +1265,8 @@ def add_colorbars(
     side="right",
     size="5%",
     pad=0.05,
+    labelpad=None,
+    midpoint_tick=False,
 ):
     """
     add_colorbars(axes, im)
@@ -1038,6 +1286,10 @@ def add_colorbars(
     - side (str, optional): Side of the axes to add the colorbar to. Default is "right".
     - size (str, optional): Size of the colorbar. Default is "5%".
     - pad (float, optional): Padding between the axes and the colorbar. Default is 0.05.
+    - labelpad (float, optional): Padding for the colorbar label. If None, different
+        defaults are depending on whether a midpoint tick is plotted. Default is None.
+    - midpoint_tick (bool, optional): Whether to add a tick at the midpoint.
+        Default is False.
 
     Returns:
     - cbars (list): Colorbars.
@@ -1048,6 +1300,9 @@ def add_colorbars(
 
     axes = np.asarray(axes)
     caxes = add_colorbar_axes(axes, end_only=end_only, side=side, size=size, pad=pad)
+
+    if labelpad is None:
+        labelpad = 0 if midpoint_tick else -10
 
     if vmin is None:
         vmin = im.get_array().min()
@@ -1063,11 +1318,15 @@ def add_colorbars(
         if not outline:
             cbar.ax.tick_params(length=0)
         if label is not None:
-            cbar.set_label(label, labelpad=-10)
+            cbar.set_label(label, labelpad=labelpad)
 
         vmin_tick = np.around(vmin, round)
         vmax_tick = np.around(vmax, round)
-        cbar.set_ticks([vmin_tick, vmax_tick])
+        ticks = [vmin_tick, vmax_tick]
+        if midpoint_tick:
+            midpoint = np.around((vmin + vmax) / 2, round)
+            ticks = [vmin_tick, midpoint, vmax_tick]
+        cbar.set_ticks(ticks)
         if outline is False:
             cbar.outline.set_visible(False)
         cbars.append(cbar)
@@ -1091,7 +1350,7 @@ def get_cmap_extent(axis_vals):
     if len(axis_vals) == 1:
         raise ValueError("At least 2 axis values must be provided.")
 
-    sep = np.diff(axis_vals).mean()
+    sep = np.mean(np.diff(axis_vals))
     extent = [axis_vals.min() - sep / 2, axis_vals.max() + sep / 2]
     return extent
 
@@ -1153,7 +1412,7 @@ def normalize_cmaps(
     - cbar (mpl.colorbar.Colorbar): Colorbar or None.
     """
 
-    images = []
+    images = list()
     vmin, vmax = np.inf, -np.inf
     for sub_ax in axes:
         ax_images = sub_ax.get_images()
@@ -1296,15 +1555,110 @@ def get_trajectory_dict(
     return trajectory_dict
 
 
-def get_plot_marker_kwargs(position_name: str = "reset", base_s: float = 15) -> dict:
+def get_teleport_direction_and_index(position_name: str) -> tuple[str, int]:
+    """
+    get_teleport_direction_and_index(position_name)
+
+    Obtain the teleportation direction and index from a position name.
+
+    Args:
+    - position_name (str): Position name containing 'teleport'.
+
+    Returns:
+    - direction (str): Teleportation direction ("in" or "out").
+    - index (int): Teleportation index.
+    """
+
+    if "teleport" not in position_name:
+        raise ValueError(
+            f"Position name '{position_name}' does not contain 'teleport'."
+        )
+
+    if "_in" in position_name:
+        direction = "in"
+    elif "_out" in position_name:
+        direction = "out"
+    else:
+        raise ValueError(
+            f"Position name '{position_name}' must contain '_in' or '_out' to indicate "
+            "teleportation direction."
+        )
+
+    teleport_idx_str = position_name.replace("teleport_", "").replace(
+        f"_{direction}", ""
+    )
+    if not teleport_idx_str.isdigit():
+        raise ValueError(
+            f"No valid index found in teleport position name '{position_name}'."
+        )
+    index = int(teleport_idx_str)
+
+    return direction, index
+
+
+def get_teleport_plotting_marker(
+    direction: str = "in",
+    orientation: str = "horizontal",
+    horizontal_in_from_left: bool = True,
+    vertical_in_from_top: bool = True,
+) -> str:
+    """
+    self.get_teleport_plotting_marker()
+
+    Obtain the marker for a teleportation port.
+
+    Args:
+    - direction (str, optional): Direction of the teleportation port.
+        Default is "in".
+    - orientation (str, optional): Orientation of the teleportation port.
+        Default is "horizontal".
+    - horizontal_in_from_left (bool, optional): Whether the horizontal teleportation
+        port is oriented from the left. Default is True.
+    - vertical_in_from_top (bool, optional): Whether the vertical teleportation port is
+        oriented from the top. Default is True.
+
+    Returns:
+    - marker (str): Marker for the teleportation port.
+    """
+
+    if orientation == "vertical":
+        if vertical_in_from_top:
+            marker = "v" if direction == "in" else "^"
+        else:
+            marker = "^" if direction == "in" else "v"
+    else:
+        if horizontal_in_from_left:
+            marker = ">" if direction == "in" else "<"
+        else:
+            marker = "<" if direction == "in" else ">"
+
+    return marker
+
+
+def get_plot_marker_kwargs(
+    position_name: str = "reset",
+    base_s: float = 15,
+    base_lw: float = 1.0,
+    num_teleport_pairs: int | None = None,
+    **teleport_kwargs,
+) -> dict:
     """
     get_plot_marker_kwargs()
 
     Obtain the marker style and color for a position.
 
     Args:
-    - position_name (str): Position name to plot. Must be 'start', 'reset', 'target'
-        or 'agent'.
+    - position_name (str): Position name to plot. Must be 'start', 'reset', 'target',
+        'landmark', 'reward', 'novel' or 'agent', or should contain 'teleport'.
+    - base_s (float, optional): Base marker size. Default is 15.
+    - num_teleport_pairs (int, optional): Total number of teleportation pairs in the
+        environment. If None, the number of pairs is inferred based on the position
+        name. Default is 0.
+
+    Keyword args:
+    - **teleport_kwargs: Keyword arguments passed to get_teleport_plotting_marker() for
+        teleportation positions (orientation, horizontal_in_from_left, and
+        vertical_in_from_top).
 
     Returns:
     - marker_kwargs (dict): Dictionary with keyword arguments for plt.scatter(),
@@ -1312,35 +1666,74 @@ def get_plot_marker_kwargs(position_name: str = "reset", base_s: float = 15) -> 
         - "color" (str): Marker color.
         - "marker" (str): Marker style.
         - "s" (float): Marker size.
+        - "lw" (float, optional): Marker edge width (only for 'target' position).
     """
 
+    lw = None
     if position_name == "start":
         color = "#FDE53B"  # gold
         marker = mpl_markers.MarkerStyle("^")
         s = base_s
+        lw = base_lw
 
     elif position_name == "reset":
         color = "#E5292D"  # red
         marker = mpl_markers.MarkerStyle("x")
         s = base_s * 1.2
+        lw = base_lw
 
     elif position_name == "target":
-        color = params_util.TARGET_COLOR
+        color = "red"
+        marker = mpl_markers.MarkerStyle("x")
+        s = base_s * 1.2
+        lw = base_lw * 1.5
+
+    elif position_name == "landmark":
+        color = params_util.LANDMARK_COLOR
         marker = mpl_markers.MarkerStyle("o")
         s = base_s * 1.3
+        lw = base_lw
+
+    elif position_name == "reward":
+        color = params_util.REWARD_COLOR
+        marker = mpl_markers.MarkerStyle("o")
+        s = base_s * 1.3
+        lw = base_lw
+
+    elif position_name == "novel":
+        color = params_util.NOVEL_COLOR
+        marker = mpl_markers.MarkerStyle("o")
+        s = base_s * 1.3
+        lw = base_lw
+
+    elif "teleport" in position_name:
+        direction, index = get_teleport_direction_and_index(position_name)
+        if num_teleport_pairs is None:
+            num_teleport_pairs = index + 1
+        elif num_teleport_pairs < index + 1:
+            raise ValueError(
+                f"num_teleport_pairs ({num_teleport_pairs}) must be at least "
+                f"{index + 1} to accommodate teleport index {index} for position "
+                f"name '{position_name}'."
+            )
+        color = params_util.get_teleportation_colors(num_teleport_pairs)[index]
+        marker = get_teleport_plotting_marker(direction, **teleport_kwargs)
+        s = base_s * 1.3
+        lw = base_lw
 
     elif position_name == "agent":
         color = "#2B2B2B"  # dark grey
         marker = mpl_markers.MarkerStyle("d")
         s = base_s * 1.3
+        lw = base_lw
 
     else:
         raise NotImplementedError(
-            "Position name must be 'start', 'reset' or 'target', "
-            f"but got {position_name}."
+            "Position name must be 'start', 'reset', 'target', 'landmark', 'reward', "
+            f"'novel', 'agent' or should contain 'teleport', but got {position_name}."
         )
 
-    marker_kwargs = {"color": color, "marker": marker, "s": s}
+    marker_kwargs = {"color": color, "marker": marker, "s": s, "lw": lw}
 
     return marker_kwargs
 
@@ -1627,11 +2020,14 @@ def plot_binned_rates(
     for sub_ax in ax1D:
         sub_ax.set_xlabel("Bins")
         sub_ax.spines[["left", "bottom", "top", "right"]].set_visible(False)
-        sub_ax.set_xticks([])
-        sub_ax.set_yticks([])
+        sub_ax.set_xticks(list())
+        sub_ax.set_yticks(list())
         if mark_runs:
+            lw = 0.4
+            if len(binned_rate_means) > 5:
+                lw = lw * 0.96 ** (len(binned_rate_means) - 5)
             for i in range(1, binned_rate_means.shape[0]):
-                sub_ax.axhline(i - 0.5, color="white", lw=0.4, ls=(0, (6, 3)))
+                sub_ax.axhline(i - 0.5, color="white", lw=lw, ls=(0, (6, 3)))
 
     return ax
 
@@ -1958,7 +2354,7 @@ def plot_pre_post_exponential(dt=0.03, color=None, sub_ax=None, xlims=None, **kw
     )
     sub_ax.set_xlabel("Time (s)")
 
-    sub_ax.set_yticks([])
+    sub_ax.set_yticks(list())
     sub_ax.axhline(1 / np.e, zorder=-2, ls="dashed", color="k")
     if xlims is not None:
         sub_ax.set_xlim(xlims)
@@ -2113,7 +2509,7 @@ def plot_summed_exp_kernel(
         ls_h = (0, (4.5, 1.5))
         ls_v = (0, (2, 1.5))
         sub_ax.spines[["left"]].set_visible(False)
-        sub_ax.set_yticks([])
+        sub_ax.set_yticks(list())
     else:
         ls_h, ls_v = "dashed", "dashed"
         sub_ax.set_ylabel("Kernel value")

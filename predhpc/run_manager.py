@@ -18,26 +18,24 @@ from predhpc.neurons import (
 from predhpc.util import ext_util, gen_util, plot_util, params_util
 
 
-class AdjustNumTrajCanStop:
+class BlockReverse:
     """
-    AdjustNumTrajCanStop
+    BlockReverse
 
-    Adjust the number of trajectories that can trigger early stopping in a Learner to
-    avoid overshooting the target by one.
+    Prevents linear reversing in a Learner.
     """
 
-    def __init__(self, learner, complete_trajectory=True):
+    def __init__(self, learner):
         self.learner = learner
-        self.complete_trajectory = complete_trajectory
-        self.original_num_traj_can_stop = learner.num_traj_can_stop
+        self.reverse_linear = learner.reverse_linear
 
     def __enter__(self):
-        if self.original_num_traj_can_stop is not None:
-            self.learner.num_traj_can_stop = self.original_num_traj_can_stop - 1
+        if self.learner.reverse_linear:
+            self.learner.reverse_linear = False
 
     def __exit__(self, exc_type, exc_value, traceback):
-        if self.original_num_traj_can_stop is not None:
-            self.learner.num_traj_can_stop = self.original_num_traj_can_stop
+        if self.reverse_linear:
+            self.learner.reverse_linear = True
 
 
 class VNUpdater:
@@ -46,12 +44,16 @@ class VNUpdater:
 
     Class for updating agent position based on a value neuron with a field centered on
     a target object or position.
+
+    List of methods:
+        • self.set_target()
+        • self.get_update_kwargs()
     """
 
     def __init__(
         self,
         Agent,
-        target="reward",
+        target="landmark",
         thresh_gradV=0.2,
         drift_vel_factor=3,
         drift_to_random_strength_ratio=0.2,
@@ -65,7 +67,7 @@ class VNUpdater:
         - Agent (agent.Agent): Agent object.
         - target (str or 1D array, optional): Name of target object in the environment
             or position of the target. If a string is provided, there must be exactly
-            one object with that name in the environment. Default is "reward".
+            one object with that name in the environment. Default is "landmark".
         - thresh_gradV (float, optional): Threshold for the local gradient of the
             ValueNeuron below which the drift velocity will be set to zero. Default is
             0.2.
@@ -106,7 +108,7 @@ class VNUpdater:
                 )
             target_position = target_positions[0]
         else:
-            target_position = self.Agent.format_position(target)
+            target_position = self.Agent.Environment.format_position(target)
 
         VN_params = params_util.get_VN_params(peak=target_position)
         VN = value_neurons.SimpleValueNeuron(self.Agent, params=VN_params)
@@ -151,33 +153,42 @@ class VNUpdater:
         return update_kwargs
 
 
-class TeleportRewardUpdater(VNUpdater):
+class TeleportObjectUpdater(VNUpdater):
+    """
+    TeleportObjectUpdater()
+
+    Custom VNUpdater that switches the agent's target between a teleportation in
+    port and a landmark location after a specified number of teleports.
+
+    Can also disable teleportation for a set number of update steps after a
+    BTSP event.
+
+    List of methods (in addition to VNUpdater methods):
+        • self.get_update_kwargs()
+    """
+
     def __init__(
         self,
         Agent,
         Pyrs=None,
         reenable_after=1,
-        targets=["teleport_0_in", "reward"],
+        targets=["teleport_0_in", "landmark"],
         disable_teleportation=0,
     ):
         """
-        TeleportRewardUpdater()
+        TeleportObjectUpdater()
 
-        Custom VNUpdater that switches the agent's target between a teleportation in
-        port and a reward location after a specified number of teleports.
-
-        Can also disable teleportation for a set number of update steps after a
-        BTSP event.
+        Initialize a TeleportObjectUpdater object.
 
         Args:
         - Agent (Agent): The agent whose target will be updated.
         - Pyrs (learning_neurons.BTSPLayer): The layer containing pyramidal neurons,
             used to track BTSP events.
         - reenable_after (int): Number of teleportation events after which to re-enable
-            reward target or no target. Default is 1.
+            landmark target or no target. Default is 1.
         - targets (list): List of two target names. The first should be a teleportation
-            in port, and the second should be the reward location. Default is
-            ["teleport_0_in", "reward"].
+            in port, and the second should be the object. Default is
+            ["teleport_0_in", "landmark"].
         - disable_teleportation (int): Number of update steps during which to disable
             teleportation after a BTSP event. Default is 0.
         """
@@ -199,11 +210,12 @@ class TeleportRewardUpdater(VNUpdater):
 
         self.targets = targets
 
-        self.initial_reward_factor = Agent.reward_factor
-        Agent.set_reward_factor(0)
+        target_probability_factor_dict = self.Agent.get_target_probability_factor_dict()
 
-        self.initial_no_target_factor = Agent.no_target_factor
-        Agent.set_no_target_factor(0)
+        self.init_object_factor = 1
+        if targets[1] in target_probability_factor_dict.keys():
+            self.init_object_factor = target_probability_factor_dict[targets[1]]
+        Agent.update_target_probability_factor_dict(targets[1], 0)
 
         self.initial_num_teleports = len(Agent.teleportation_df)
         self.reenable_after = reenable_after
@@ -234,7 +246,7 @@ class TeleportRewardUpdater(VNUpdater):
 
         if "ignore_agent_target" in kwargs.keys() and kwargs["ignore_agent_target"]:
             raise NotImplementedError(
-                "'ignore_agent_target' cannot be True for TeleportRewardUpdater."
+                "'ignore_agent_target' cannot be True for TeleportObjectUpdater."
             )
 
         if not self._reenabled:
@@ -242,20 +254,21 @@ class TeleportRewardUpdater(VNUpdater):
                 len(self.Agent.teleportation_df)
                 >= self.initial_num_teleports + self.reenable_after
             ):
-                self.Agent.set_reward_factor(self.initial_reward_factor)
-                self.Agent.set_no_target_factor(self.initial_no_target_factor)
+                self.Agent.update_target_probability_factor_dict(
+                    self.targets[1], self.init_object_factor
+                )
                 self._reenabled = True
 
         if self.disable_teleportation > 0:
             if self._teleportation_disabled_steps > 0:
                 self._teleportation_disabled_steps -= 1
                 if self._teleportation_disabled_steps == 0:
-                    self.Agent.allow_teleportation(True)
+                    self.Agent.enable_teleportation(True)
             else:
                 num_BTSP_events = len(self.Pyrs.history["BTSP_events"])
                 if num_BTSP_events > self.num_BTSP_events:
-                    if self.Agent.teleportation_allowed:
-                        self.Agent.allow_teleportation(False)
+                    if self.Agent.teleportation_enabled:
+                        self.Agent.enable_teleportation(False)
                     BTSP_applied = self.Pyrs.get_BTSP_steps(apply_step=True)[-1]
                     if np.isfinite(BTSP_applied):
                         self._teleportation_disabled_steps = self.disable_teleportation
@@ -282,6 +295,32 @@ class Learner:
     Learner
 
     Class for running a learning experiment with BTSP learning.
+
+    List of methods:
+        • self.get_agent_step()
+        • self.set_init_attributes()
+        • self.check_start_BTSP()
+        • self.check_stop_BTSP()
+        • self.get_BTSP_targets()
+        • self.update_for_BTSP()
+        • self.record_weights()
+        • self.remap_PC_weights()
+        • self.check_reverse()
+        • self.check_for_early_stop()
+        • self.check_BTSP_enabled()
+        • self.log()
+        • self.update()
+        • self.wrap_up()
+        • self.get_num_steps_since_last_BTSP_applied()
+        • self.get_check_num_steps_since_last_BTSP_applied()
+        • self.get_num_teleports_missing()
+        • self.get_num_steps_to_check_criteria_in()
+        • self.continue_to_meet_criteria()
+        • self.complete_trajectory()
+        • self.check_run_criteria()
+        • self.run()
+        • self.get_most_BTSP_neurons()
+        • self.get_recorded_weights()
     """
 
     def __init__(
@@ -375,6 +414,7 @@ class Learner:
         self.num_prev_target_reaches = len(self.Agent.get_reached_target_df())
         self.traj_restarted = False
         self.early_stop_in_n = -1
+        self.prevent_reverse = False
         if hasattr(self.Agent, "teleportation_df"):
             self.initial_num_teleports = len(self.Agent.teleportation_df)
 
@@ -386,12 +426,12 @@ class Learner:
 
         # BTSP settings
         if self.two_compartment:
-            self.Pyrs_for_weights = self.Pyrs.SomaticCompartment
+            self.Pyrs_for_weights = self.Pyrs.ProximalCompartment
             self.BTSP_on = BTSP_on or 1
             self.BTSP_stopped = False
-            self.Pyrs.set_BTSP_learn(somatic=False, apical=False)
+            self.Pyrs.set_BTSP_learn(proximal=False, distal=False)
             self.Pyrs.set_learn(
-                somatic=self.use_Hebbian, apical=False, inhibitory=False
+                proximal=self.use_Hebbian, distal=False, inhibitory=False
             )
         else:
             self.Pyrs_for_weights = self.Pyrs
@@ -438,7 +478,7 @@ class Learner:
             return
 
         if self.two_compartment:
-            self.Pyrs.set_BTSP_learn(somatic=True, apical=False)
+            self.Pyrs.set_BTSP_learn(proximal=True, distal=False)
         else:
             self.Pyrs.set_BTSP_learn()
 
@@ -459,7 +499,7 @@ class Learner:
             return
 
         if self.two_compartment:
-            self.Pyrs.set_BTSP_learn(somatic=False, apical=False)
+            self.Pyrs.set_BTSP_learn(proximal=False, distal=False)
         else:
             self.Pyrs.set_BTSP_learn()
 
@@ -554,7 +594,7 @@ class Learner:
         """
         self.remap_PC_weights()
 
-        Shuffle place cell weights into somatic compartment of pyramidal neurons.
+        Shuffle place cell weights into proximal compartment of pyramidal neurons.
         """
 
         self.PCs.shuffle_place_cell_locations(randst=randst)
@@ -566,31 +606,26 @@ class Learner:
 
         self.remap_steps.append(self.step)
 
-    def check_reverse(self, final=False):
+    def check_reverse(self, restore=False):
         """
         self.check_reverse()
 
         Check whether the Agent should reverse direction.
 
         Args:
-        - final (bool, optional): Whether the check is for the final step. Default is
-            False.
+        - restore (bool, optional): Whether this is the final check and the original
+            direction should be restored. Default is False.
         """
 
-        if not self.reverse_linear:
+        if not self.reverse_linear or self.prevent_reverse:
             return
 
         if self.Environment.D != 1:
             raise ValueError("Reversing only applies to 1D environment.")
 
-        if final and self.check_pt == 0:
-            reverse = True
-        else:
-            reverse = self.Agent.check_if_position_reached(
-                self.positions[self.check_pt]
-            )
+        reverse = self.Agent.check_if_position_reached(self.positions[self.check_pt])
 
-        if reverse:
+        if reverse or (restore and self.check_pt == 0):
             self.Agent.reverse(reset=True)
             self.check_pt = 1 - self.check_pt
 
@@ -614,11 +649,14 @@ class Learner:
                     self.early_stop_in_n = 20
             elif self.num_traj_can_stop is not None:
                 total_traj_compl = self.Agent.get_num_completed_trajectories()
-                if (
-                    total_traj_compl - self.num_prev_traj_compl
-                    >= self.num_traj_can_stop
-                ):
-                    self.early_stop_in_n = 20
+                traj_left = (
+                    self.num_prev_traj_compl + self.num_traj_can_stop - total_traj_compl
+                )
+                if traj_left <= 0:
+                    self.early_stop_in_n = 0
+                    return True
+                elif self.reverse_linear and traj_left == 1:
+                    self.prevent_reverse = True
         else:
             if self.early_stop_in_n == 0:
                 return True
@@ -746,8 +784,11 @@ class Learner:
         stop = self.check_for_early_stop()
 
         self.traj_restarted = self.Agent.reached_end
+
         if not stop:
             self.check_reverse()
+        elif self.prevent_reverse:
+            self.prevent_reverse = False
 
         return stop
 
@@ -771,6 +812,8 @@ class Learner:
 
         if self.early_stop_in_n != -1:
             self.early_stop_in_n = -1  # reset early stop counter
+
+        self.check_reverse(restore=True)
 
         return
 
@@ -834,7 +877,7 @@ class Learner:
 
         Args:
         - min_num_teleports (int, optional): Minimum number of teleportation events to
-            occur. Default is 0.
+            occur in total. Default is 0.
 
         Returns:
         - num_teleports_missing (int): Number of teleportation events missing to reach
@@ -870,7 +913,7 @@ class Learner:
         - min_steps_after_BTSP (int, optional): Minimum number of steps to continue
             learning after the last BTSP event was applied. Default is 2000.
         - min_num_teleports (int, optional): Minimum number of teleportation events to
-            occur. Default is 0.
+            occur in total. Default is 0.
         - check_teleport_every (int, optional): Number of steps between checks for
             whether the minimum number of teleportation events has occurred. Default is
             1000.
@@ -891,6 +934,11 @@ class Learner:
         num_teleports_missing = self.get_num_teleports_missing(min_num_teleports)
         if num_teleports_missing > 0:
             check_in.append(check_teleport_every)
+        elif min_num_teleports > 0:
+            most_recent = self.Agent.teleportation_df["step_num"].to_numpy()[-1]
+            steps_since = self.Agent.num_steps_total - most_recent
+            if steps_since < check_teleport_every:
+                check_in.append(check_teleport_every - steps_since)
 
         if len(check_in):
             check_in = min(check_in)
@@ -918,7 +966,7 @@ class Learner:
         - min_steps_after_BTSP (int, optional): Minimum number of steps to continue
             learning after the last BTSP event was applied. Default is 2000.
         - min_num_teleports (int, optional): Minimum number of teleportation events to
-            occur. Default is 0.
+            occur in total. Default is 0.
         - check_teleport_every (int, optional): Number of steps between checks for
             whether the minimum number of teleportation events has occurred. Default is
             1000.
@@ -947,7 +995,7 @@ class Learner:
                     )
                 if min_num_teleports > 0:
                     criteria_strs.append(
-                        f"at least {min_num_teleports} teleportation events occurred"
+                        f"at least {min_num_teleports} teleportation events have occurred"
                     )
                 print(
                     f"Continuing learning for up to {max_num_steps} steps until "
@@ -990,8 +1038,8 @@ class Learner:
                 teleport_missing = self.get_num_teleports_missing(min_num_teleports)
                 if teleport_missing > 0:
                     check_in_strs.append(
-                        f"only {teleport_missing}/{min_num_teleports} teleportation "
-                        "events occurred"
+                        f"only {min_num_teleports - teleport_missing}/{min_num_teleports} "
+                        "teleportation events have occurred"
                     )
 
                 raise RuntimeError(
@@ -1021,13 +1069,68 @@ class Learner:
             while True:
                 yield
 
-        break_next = False
-        for _ in tqdm(generator(), disable=no_logs):
-            self.update(updater=updater, no_logs=no_logs)
-            if break_next:
-                break
-            if self.Agent.reached_end:
-                break_next = True
+        with BlockReverse(self):
+            break_next = False
+            for _ in tqdm(generator(), disable=no_logs):
+                self.update(updater=updater, no_logs=no_logs)
+                if break_next:
+                    break
+                if self.Agent.reached_end:
+                    break_next = True
+
+    def check_run_criteria(
+        self,
+        num_steps_can_stop=10000,
+        complete_trajectory=False,
+        min_num_teleports=0,
+    ):
+        """
+        self.check_run_criteria()
+
+        Check criteria for running the learning process.
+
+        Args:
+        - num_steps_can_stop (int or None, optional): Number of steps after which
+            early stopping can occur. Default is 10000.
+        - min_num_teleports (int, optional): Minimum number of teleportation events to
+            occur in total. Default is 0.
+        - complete_trajectory (bool, optional): Whether to complete the last trajectory.
+            Default is False.
+        """
+
+        check_trajectories = list()
+        if num_steps_can_stop is None:
+            if self.num_target_reaches_can_stop is None:
+                if self.num_traj_can_stop is None:
+                    raise ValueError(
+                        "If 'num_steps_can_stop' is None, at least one of "
+                        "'num_target_reaches_can_stop' or 'num_traj_can_stop' to "
+                        "prevent an infinite run."
+                    )
+                else:
+                    check_trajectories.append(
+                        "only 'num_traj_can_stop' is provided as a stopping criterion"
+                    )
+
+        if complete_trajectory:
+            check_trajectories.append("'complete_trajectory' is True")
+
+        if len(check_trajectories) and self.Agent.Environment.D == 2:
+            if not self.Agent.has_trajectory_endpoints:
+                error_parts = " and ".join(check_trajectories)
+                raise ValueError(
+                    f"Agent does not have trajectory endpoints, but {error_parts}."
+                    "This will lead to an infinite run."
+                )
+
+        if min_num_teleports and (
+            not hasattr(self.Agent.Environment, "num_teleport_pairs")
+            or self.Agent.Environment.num_teleport_pairs == 0
+        ):
+            raise ValueError(
+                f"Environment has no teleportation ports, but 'min_num_teleports' is "
+                f"set to {min_num_teleports}. This will lead to an infinite run."
+            )
 
     def run(
         self,
@@ -1056,7 +1159,7 @@ class Learner:
         - min_steps_after_BTSP (int, optional): Minimum number of steps to continue
             learning after the last BTSP event was applied. Default is 0.
         - min_num_teleports (int, optional): Minimum number of teleportation events to
-            occur. Default is 0.
+            occur in total. Default is 0.
         - check_teleport_every (int, optional): Number of steps between checks for
             whether the minimum number of teleportation events has occurred. Default is
             1000.
@@ -1065,27 +1168,32 @@ class Learner:
         - no_logs (bool, optional): Whether to disable logging. Default is False.
         """
 
-        with AdjustNumTrajCanStop(self, complete_trajectory=complete_trajectory):
-            if num_steps_can_stop is None:
+        self.check_run_criteria(
+            num_steps_can_stop=num_steps_can_stop,
+            complete_trajectory=complete_trajectory,
+            min_num_teleports=min_num_teleports,
+        )
 
-                def infinite_generator():
-                    while True:
-                        yield
+        if num_steps_can_stop is None:
 
-                generator = infinite_generator()
-            else:
-                generator = range(num_steps_can_stop)
+            def infinite_generator():
+                while True:
+                    yield
 
-            for _ in tqdm(generator, disable=no_logs):
-                stop = self.update(updater=updater, no_logs=no_logs)
+            generator = infinite_generator()
+        else:
+            generator = range(num_steps_can_stop)
 
-                if stop:
-                    break
+        for _ in tqdm(generator, disable=no_logs):
+            stop = self.update(updater=updater, no_logs=no_logs)
+            if stop:
+                break
 
         continue_running = True
         while continue_running:
             continue_running = False
-            if min_steps_after_BTSP > 0:
+            if min_steps_after_BTSP > 0 or min_num_teleports > 0:
+                self.check_reverse()
                 self.continue_to_meet_criteria(
                     min_steps_after_BTSP=min_steps_after_BTSP,
                     min_num_teleports=min_num_teleports,
@@ -1152,7 +1260,7 @@ class Learner:
             recorded_weights = ext_util.create_weights_dict(
                 self.weights,
                 self.weight_steps,
-                t=self.Agent.history["t"],
+                t=self.Pyrs_for_weights.get_t_history(),
                 steps_triggered=self.steps_triggered,
             )
 
@@ -1202,8 +1310,8 @@ def init_env_objects(
     agent_params = agent_params or params_util.get_agent_params(environment=environment)
 
     if environment == "linear":
-        Env = env.Environment(params=env_params)
-        Ag = agent.ResetableAgent(Env, params=agent_params)
+        Env = env.LinearResetEnv(params=env_params)
+        Ag = agent.LinearResetAgent(Env, params=agent_params)
     elif environment == "tmaze":
         Env = env.TEnv(params=env_params)
         Ag = agent.TAgent(Env, params=agent_params)
@@ -1218,7 +1326,7 @@ def init_env_objects(
 
     # infer whether two-compartment model will be used or not
     if Pyr_params is None or any(
-        key.startswith("somatic_") for key in Pyr_params.keys()
+        key.startswith("proximal_") for key in Pyr_params.keys()
     ):
         two_compartment = True
     else:
@@ -1252,7 +1360,7 @@ def init_env_objects(
         )
 
     if two_compartment:
-        Pyr_params["somatic_input_layers"] = [PCs]  # type: ignore[assignment]
+        Pyr_params["proximal_input_layers"] = [PCs]  # type: ignore[assignment]
         if Pyr_params["n"] is None:
             Pyr_params["n"] = Objs.n
         elif Pyr_params["n"] != Objs.n:
@@ -1271,11 +1379,11 @@ def init_env_objects(
         Obj_to_Pyr_w = gen_util.get_weights(
             Objs.n,
             Pyrs.n,
-            loc=Pyr_params["apical_w_init_loc"],
-            scale=Pyr_params["apical_w_init_scale"],
+            loc=Pyr_params["distal_w_init_loc"],
+            scale=Pyr_params["distal_w_init_scale"],
         )
-        Pyrs.ApicalCompartment.add_input(Objs, w=Obj_to_Pyr_w)
-        Pyrs.set_BTSP_learn(somatic=True, apical=False)
+        Pyrs.DistalCompartment.add_input(Objs, w=Obj_to_Pyr_w)
+        Pyrs.set_BTSP_learn(proximal=True, distal=False)
     else:
         if "NMDA_activation_threshold" in Pyr_params.keys():
             Pyrs = learning_neurons.NMDALayer(Ag, params=Pyr_params)
@@ -1464,7 +1572,7 @@ def learn_openfield_BTSP(
         Pyrs.head_direction = np.asarray([-1, 0])
 
     if teleportation_enabled is not None:
-        Pyrs.Agent.allow_teleportation(teleportation_enabled)
+        Pyrs.Agent.enable_teleportation(teleportation_enabled)
 
     learner = learn(Pyrs_or_learner, BTSP_on=None, updater=updater, **kwargs)
 
@@ -1523,13 +1631,6 @@ def plot_T_maze(
         PCs, sub_ax=ax1D[1], method="max", colorbar=False
     )
     PCs.plot_place_cell_locations(sub_ax=ax1D[1])
-    ax1D[1].scatter(
-        *Ag.target_position,
-        marker=".",
-        color="blue",
-        s=18,
-        zorder=5,
-    )
     ax1D[1].set_title("Place cell rate maps")
 
     # Plot Pyr. rate map on T-maze
@@ -1546,13 +1647,6 @@ def plot_T_maze(
         )
         title = "Obj. rate map"
 
-    ax1D[2].scatter(
-        *Ag.target_position,
-        marker=".",
-        color="blue",
-        s=18,
-        zorder=5,
-    )
     ax1D[2].set_title(title)
 
     plot_util.save_figure(fig, "T_maze", save=autosave)
@@ -1565,6 +1659,8 @@ def learn_T_maze_BTSP(
         learning_neurons.BTSPLayer | two_comp_neurons.TwoCompLayer | Learner | None
     ) = None,
     updater: dict[str, Any] | None = None,
+    num_steps_can_stop: int | None = None,
+    num_traj_can_stop: int | None = 10,
     complete_trajectory: bool = True,
     plot: bool = True,
     init_kwargs: dict[str, Any] = dict(),
@@ -1581,6 +1677,14 @@ def learn_T_maze_BTSP(
         Pyr. neuron layer or learner.
     - updater (object or dict, optional): Object or dictionary for updating
         agent position. Default is None.
+    - num_steps_can_stop (int or None, optional): Number of steps after which early
+        stopping can occur. May prevent the learner object's other stopping conditions
+        (number of target reaches or trajectories) from being reached. Pass None to
+        avoid constraining these by number of steps, and early stopping will only be
+        triggered when one (either) of those conditions is reached, if provided. Default
+        is None.
+    - num_traj_can_stop (int or None, optional): Number of trajectories after which
+        early stopping may be triggered. Default is 10.
     - complete_trajectory (bool, optional): Whether to complete the last trajectory.
         Default is True.
     - plot (bool, optional): Whether to plot the environment and neurons. Default is
@@ -1630,6 +1734,8 @@ def learn_T_maze_BTSP(
     learner = learn(
         Pyrs_or_learner,
         updater=updater,
+        num_steps_can_stop=num_steps_can_stop,
+        num_traj_can_stop=num_traj_can_stop,
         complete_trajectory=complete_trajectory,
         **kwargs,
     )
@@ -1663,8 +1769,8 @@ def learn_1D_BTSP(
     ) = None,
     reverse: bool = False,
     updater: dict[str, Any] = dict(),
-    num_target_reaches_can_stop: int | None = 10,
-    num_steps_can_stop: int | None = 5000,
+    num_steps_can_stop: int | None = None,
+    num_traj_can_stop: int | None = 10,
     complete_trajectory: bool = True,
     plot: bool = True,
     autosave: bool | None = None,
@@ -1683,14 +1789,14 @@ def learn_1D_BTSP(
         Default is False.
     - updater (object or dict, optional): Object or dictionary for updating
         agent position. Default is dict().
-    - num_target_reaches_can_stop (int or None, optional): Number of targets after
-        which early stopping may be triggered. Default is 10.
     - num_steps_can_stop (int or None, optional): Number of steps after which early
-        stopping can occur. May prevent the learner object's other stopping
-        conditions (number of target reaches or trajectories) from being reached.
-        Pass None to avoid constraining these by number of steps, and early stopping
-        will only be triggered when one (either) of those conditions is reached, if
-        provided. Default is 5000.
+        stopping can occur. May prevent the learner object's other stopping conditions
+        (number of target reaches or trajectories) from being reached. Pass None to
+        avoid constraining these by number of steps, and early stopping will only be
+        triggered when one (either) of those conditions is reached, if provided.
+        Default is None.
+    - num_traj_can_stop (int or None, optional): Number of trajectories after
+        which early stopping may be triggered. Default is 10.
     - complete_trajectory (bool, optional): Whether to complete the last trajectory.
         Default is True.
     - plot (bool, optional): Whether to plot the environment and neurons. Default is
@@ -1733,8 +1839,8 @@ def learn_1D_BTSP(
         Pyrs_or_learner,
         reverse_linear=reverse,
         updater=updater,
-        num_target_reaches_can_stop=num_target_reaches_can_stop,
         num_steps_can_stop=num_steps_can_stop,
+        num_traj_can_stop=num_traj_can_stop,
         complete_trajectory=complete_trajectory,
         **kwargs,
     )

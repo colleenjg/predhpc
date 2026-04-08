@@ -541,6 +541,8 @@ def infer_spatial_learning_kernel(
         sigma_in_steps,
         smooth_2D=not (env_1D),
     )
+    if len(smoothed_kernel.shape) == 1:
+        smoothed_kernel = smoothed_kernel[:, np.newaxis]
 
     smoothed_kernel = smoothed_kernel / smoothed_kernel.max() * PC_max_fr
 

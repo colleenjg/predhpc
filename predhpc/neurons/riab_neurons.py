@@ -16,7 +16,7 @@ from ratinabox.contribs import ValueNeuron as riabValueNeuron
 from ratinabox import utils as rutils  # type: ignore[import]
 
 from predhpc import plot_fcts
-from predhpc.util import signal_util, plot_util, ext_util
+from predhpc.util import signal_util, plot_util, ext_util, gen_util
 
 
 warnings.filterwarnings(
@@ -30,10 +30,19 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
     """
     NeuronsMixin()
 
+    Adds the following attributes to a ratinabox.Neurons.Neurons object:
+    • self.Environment
+    • self.num_steps_total
+
     Adds the following methods to a ratinabox.Neurons.Neurons object:
     • self.get_chosen_neurons()
+    • self.get_t_history()
     • self.get_plotting_times()
     • self.get_min_max_firingrates()
+    • self.get_mean_median_firingrates()
+    • self.get_percentile_firingrates()
+    • self.get_history_ratemap()
+    • self.get_firingrate_CC_matrix()
     • self.get_oscillation_df()
     • self.log_oscillation_stats()
     • self.get_binned_rates()
@@ -42,8 +51,6 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
     • self.plot_rate_map()
     • self.plot_rate_timeseries()
     • self.plot_rate_correlations()
-
-    See NeuronsMixin for additional properties and methods.
     """
 
     Agent: Agent
@@ -69,6 +76,20 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
 
         return self.Agent.Environment
 
+    @property
+    def num_steps_total(self):
+        """
+        self.num_steps_total
+
+        Obtain the total number of update steps for the neuron layer.
+
+        Returns:
+        - num_steps_total (int): Total number of steps taken.
+        """
+
+        num_steps_total = len(self.history["t"])
+        return num_steps_total
+
     def get_chosen_neurons(self, chosen_neurons="all"):
         """
          self.get_chosen_neurons()
@@ -83,9 +104,34 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
          - chosen_neurons (1D np.ndarray): Indices of the chosen neurons.
         """
 
-        chosen_neurons = np.asarray(self.return_list_of_neurons(chosen_neurons))
+        if isinstance(chosen_neurons, str) and chosen_neurons == "all":
+            chosen_neurons = np.arange(self.n)
+
+        else:
+            chosen_neurons = np.asarray(self.return_list_of_neurons(chosen_neurons))
 
         return chosen_neurons
+
+    def get_t_history(self, startid=None, endid=None):
+        """
+        self.get_t_history()
+
+        Obtain the history of times for the neuron layer. Rounds the times based on
+        the time step to handle floating point precision effects.
+
+        Returns:
+        - t (1D np.ndarray): History of times for the neuron layer.
+        """
+
+        startid = startid or 0
+        endid = endid or self.num_steps_total - 1
+
+        t = np.asarray(self.history["t"])[startid : endid + 1]
+
+        # round to handle floating point precision effects
+        t = gen_util.round_values(t, resolution=self.Agent.dt)
+
+        return t
 
     def get_plotting_times(
         self,
@@ -107,10 +153,11 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         Returns:
         - t (1D np.ndarray): Times to plot.
         - startid (int): Index of the start time point.
-        - endid (int): Index of the end time point.
+        - endid (int): Index of the end time point (inclusionary, add 1 for indexing).
         """
 
-        t = np.asarray(self.history["t"])
+        t = self.get_t_history()
+
         startid, endid = plot_util.get_plotting_times(
             t, t_start=t_start, t_end=t_end, raise_error=raise_error
         )
@@ -384,7 +431,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
             firingrates, window=window, amp_thr=amp_thr
         )
 
-        neuron_sub_idx = oscillation_df["neuron_sub_idx"].to_numpy()
+        neuron_sub_idx = oscillation_df["neuron_idx"].to_numpy()
         neuron_idx = chosen_neurons[neuron_sub_idx.astype(int)]
         oscillation_df["neuron_idx"] = neuron_idx
 
@@ -402,7 +449,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
 
             if t_end is not None:
                 oscillation_df = oscillation_df.loc[
-                    oscillation_df["start_frame"] < endid
+                    oscillation_df["start_frame"] <= endid
                 ]
 
                 oscillation_df.loc[oscillation_df["end_frame"] > endid, "end_frame"] = (
@@ -487,7 +534,7 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         - occupancy (1D np.ndarray): Occupancy of the bins.
         """
 
-        if self.Environment.dimensionality != "1D":
+        if self.Environment.D != 1:
             raise ValueError(
                 "Rate colormap plotting is only supported for 1D environments."
             )
@@ -767,8 +814,10 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         t_start: float | None = None,
         t_end: float | None = None,
         chosen_neurons: str | int | list | np.ndarray = "all",
+        spikes=False,
         sub_ax: plt.Axes | None = None,
         adjust_xlim: bool = True,
+        adjust_ylim: bool = True,
         in_min: bool = True,
         imshow: bool = False,
         norm_by: str = "max",
@@ -788,12 +837,19 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
             Default is None.
         - chosen_neurons (str, int, list or 1D np.ndarray, optional): Neurons to plot.
             Default is "all".
+        - spikes (bool, optional): Whether to plot spikes alongside firing rates.
+            Default is False.
         - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
             created. Default is None.
         - adjust_xlim (bool, optional): Whether to adjust the x limits to the start
             and end times. Default is True.
+        - adjust_ylim (bool, optional): Whether to adjust the y limits around the min
+            and max of the plotted data. Only expands limits, does not contract them.
+            Ignored if imshow is True. Default is True.
         - in_min (bool, optional): Whether to plot time in minutes instead of seconds.
             Default is True.
+        - imshow (bool, optional): Whether to plot the firing rates using imshow.
+            If False, firing rates are plotted as line plots. Default is False.
         - norm_by (str, optional): Normalization method for the firing rates. If "none",
             parameters are chosen so no normalization is applied. Default is "max".
         - lw (float, optional): Line width for the firing rate timeseries. Default is 1.0.
@@ -824,12 +880,12 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         t_start = t[0]
         t_end = t[-1]
 
-        adjust_ylim = False
         if not imshow and norm_by == "none":
-            adjust_ylim = True
             kwargs["norm_by"] = 1
-            kwargs["overlap"] = 1
-            kwargs["global_shift"] = -1
+            if "overlap" not in kwargs.keys():
+                kwargs["overlap"] = 1
+            if "global_shift" not in kwargs.keys():
+                kwargs["global_shift"] = 0.4 if spikes else -1
         elif norm_by:
             kwargs["norm_by"] = norm_by
 
@@ -839,24 +895,29 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         if len(t) > factor and "shade_skiprate" not in kwargs.keys():
             kwargs["shade_skiprate"] = int(np.ceil(len(t) / factor))
 
+        num_lines_pre = 0 if sub_ax is None else len(sub_ax.get_lines())
+
+        pre_ymin, pre_ymax = np.inf, -np.inf
+        if sub_ax is not None:
+            ylims = sub_ax.get_ylim()
+            if sub_ax.has_data() or ylims != (0, 1):
+                pre_ymin, pre_ymax = sub_ax.get_ylim()
+
         _, sub_ax = super().plot_rate_timeseries(
             t_start=t_start,
             t_end=t_end,
             chosen_neurons=chosen_neurons,
+            spikes=spikes,
             linewidth=lw,
             imshow=imshow,
             autosave=False,
             **kwargs,
         )
 
-        if adjust_ylim:
-            min_fr, max_fr = self.get_min_max_firingrates(
-                t_start=t_start, t_end=t_end, chosen_neurons=chosen_neurons
-            )
-            ymin = min(0, min_fr / kwargs["norm_by"])
-            ymax = max_fr / kwargs["norm_by"] + len(chosen_neurons) - 1
-            sub_ax.set_ylim(ymin, ymax)
-            plot_util.pad_axis(sub_ax, pad_prop=0.2, axis="y")
+        if np.isfinite(pre_ymin) and np.isfinite(pre_ymax):
+            pre_ymin = min(sub_ax.get_ylim()[0], pre_ymin)
+            pre_ymax = max(sub_ax.get_ylim()[1], pre_ymax)
+            sub_ax.set_ylim(pre_ymin, pre_ymax)
 
         xlabel = "Time (min)" if in_min else "Time (s)"
         sub_ax.set_xlabel(xlabel)
@@ -869,6 +930,28 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
             xticks = np.around(xlim, decimals=decimals)
             sub_ax.set_xticks(xticks)
             sub_ax.set_xticklabels(xticks)
+
+        if adjust_ylim and not imshow:
+            ymin, ymax = np.inf, -np.inf
+            num_lines = len(sub_ax.get_lines()) - num_lines_pre
+            if spikes:
+                ymin = 0.9
+                ymax = num_lines - 0.1
+            for i in range(num_lines):
+                ydata = sub_ax.get_lines()[-i].get_ydata()
+                ymin = min(ymin, np.nanmin(ydata))
+                ymax = max(ymax, np.nanmax(ydata))
+            if np.isfinite(ymin) and np.isfinite(ymax):
+                pad_prop = max(
+                    0.02, 0.105 * 0.95 ** len(chosen_neurons)
+                )  # slow decrease
+                ymin, ymax = plot_util.get_padded_subplot_lims(
+                    ymin, ymax, pad_prop=pad_prop, prop_high=0.7
+                )
+                ymin = min(pre_ymin, ymin)
+                ymax = max(pre_ymax, ymax)
+                if ymin != ymax:
+                    sub_ax.set_ylim(ymin, ymax)
 
         fig = sub_ax.figure
         plot_util.save_figure(fig, f"{self.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
@@ -919,11 +1002,8 @@ class Neurons(NeuronsMixin, riabNeurons):
     """
     Neurons()
 
-    Class extending ratinabox.Neurons.Neurons to add some functionalities to the
-    plotting functions.
-
-    See ratinabox.Neurons.Neurons for default parameters, and
-    NeuronsMixin for additional properties and methods.
+    Class extending ratinabox.Neurons.Neurons to add functionalities from
+    the NeuronsMixin.
     """
 
     default_params = riabNeurons.get_all_default_params()  # type: dict[str, Any]
@@ -960,15 +1040,19 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
     """
     PlaceCells()
 
-    Class extending ratinabox.Neurons.PlaceCells to add some functionalities to the
-    plotting functions.
+    Class extending ratinabox.Neurons.PlaceCells to add functionalities from
+    the NeuronsMixin and some additional functionalities specific to place cells.
 
-    See ratinabox.Neurons.PlaceCells for default parameters, and
-    NeuronsMixin for additional properties and methods.
+    List of attributes (in addition ratinabox.Neurons.PlaceCells attributes):
+        • self.place_cell_center_type
+        • self.place_cell_centers
 
     List of methods (in addition ratinabox.Neurons.PlaceCells methods):
+        • self.get_place_field_FWHM()
+        • self.get_place_field_sigma_in_steps()
+        • self.shuffle_place_cell_locations()
+        • self.get_place_cell_centers()
         • self.plot_place_cell_locations()
-        • self.shuffle_place_cell_locations
     """
 
     default_params = riabPlaceCells.get_all_default_params()  # type: dict[str, Any]
@@ -1082,7 +1166,7 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
         """
 
         mean_speed = self.Agent.speed_mean
-        if self.Environment.dimensionality == "2D" and self.Agent.speed_std != 0:
+        if self.Environment.D == 2 and self.Agent.speed_std != 0:
             mean_speed = rutils.get_rayleigh_mean(mean_speed)
 
         sigma_in_steps = ext_util.get_sigma_in_steps(
@@ -1212,7 +1296,7 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
 
         if plot_env or sub_ax is None:
             sub_ax = self.Environment.plot_environment(
-                sub_ax=sub_ax, alpha=0.6, autosave=False, **kwargs
+                sub_ax=sub_ax, alpha=0.8, zorder=3, autosave=False, **kwargs
             )
 
         place_cell_centers = self.place_cell_centers
@@ -1221,9 +1305,9 @@ class PlaceCells(NeuronsMixin, riabPlaceCells):
             place_cell_centers = place_cell_centers[chosen_neurons]
 
         x = place_cell_centers[:, 0]
-        if self.Environment.dimensionality == "1D":
+        if self.Environment.D == 1:
             y = np.zeros_like(x)
-        elif self.Environment.dimensionality == "2D":
+        elif self.Environment.D == 2:
             y = place_cell_centers[:, 1]
 
         sub_ax.scatter(x, y, c=self.color, alpha=alpha, marker=marker, s=s, zorder=2)
@@ -1237,11 +1321,8 @@ class GridCells(NeuronsMixin, riabGridCells):
     """
     GridCells()
 
-    Class extending ratinabox.Neurons.GridCells to add some functionalities to the
-    plotting functions.
-
-    See ratinabox.Neurons.GridCells for default parameters, and
-    NeuronsMixin for additional properties and methods.
+    Class extending ratinabox.Neurons.GridCells to add functionalities from
+    the NeuronsMixin.
     """
 
     default_params = riabGridCells.get_all_default_params()  # type: dict[str, Any]
@@ -1278,11 +1359,8 @@ class ObjectVectorCells(NeuronsMixin, riabObjectVectorCells):
     """
     ObjectVectorCells()
 
-    Class extending ratinabox.Neurons.ObjectVectorCells to add some functionalities to
-    the plotting functions.
-
-    See ratinabox.Neurons.ObjectVectorCells for default parameters, and
-    NeuronsMixin for additional properties and methods.
+    Class extending ratinabox.Neurons.ObjectVectorCells to add functionalities from
+    the NeuronsMixin.
     """
 
     default_params = (
@@ -1321,11 +1399,8 @@ class FeedForwardLayer(NeuronsMixin, riabFeedForwardLayer):
     """
     FeedForwardLayer()
 
-    Class extending ratinabox.Neurons.FeedForwardLayer to add some functionalities to
-    the plotting functions.
-
-    See ratinabox.Neurons.FeedForwardLayer for default parameters, and
-    NeuronsMixin for additional properties and methods.
+    Class extending ratinabox.Neurons.FeedForwardLayer to add functionalities from
+    the NeuronsMixin.
     """
 
     default_params = (
@@ -1364,11 +1439,8 @@ class ValueNeuron(NeuronsMixin, riabValueNeuron):
     """
     ValueNeuron()
 
-    Class extending ratinabox.contribs.ValueNeuron to add some functionalities to
-    the plotting functions.
-
-    See ratinabox.contribs.ValueNeuron for default parameters, and
-    NeuronsMixin for additional properties and methods.
+    Class extending ratinabox.contribs.ValueNeuron to add functionalities from
+    the NeuronsMixin.
     """
 
     default_params = riabValueNeuron.get_all_default_params()  # type: dict[str, Any]

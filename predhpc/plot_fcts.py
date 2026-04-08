@@ -22,6 +22,9 @@ if TYPE_CHECKING:
 
 DIV_MULTI_NEURON = 30  # divisor for multi-neuron timeseries
 
+BTSP_ASTERISK = (6, 2, 0)
+BTSP_S = 25
+
 
 def get_PF_label(PF_type="weights", title=False):
     """
@@ -38,11 +41,11 @@ def get_PF_label(PF_type="weights", title=False):
     """
 
     if PF_type == "weights":
-        label = "Input weights"
+        label = "Input weight"
     elif PF_type == "smoothed_weights":
-        label = "Smoothed input weights"
+        label = "Smoothed input weight"
     elif PF_type == "applied_weights":
-        label = "Applied input weights"
+        label = "Applied input weight"
     elif PF_type == "history":
         label = "Firing rate"
     else:
@@ -110,13 +113,17 @@ def add_time_axis(
         f"{max_trajectory_length_in_time:.1f} {short_str}"
     )
     twin_sub_ax.plot(
-        [], [], label=trajectory_length_label, lw=0, marker=mpl_markers.MarkerStyle(".")
+        list(),
+        list(),
+        label=trajectory_length_label,
+        lw=0,
+        marker=mpl_markers.MarkerStyle("."),
     )
 
     midpoint_in_time = trajectory_dict["midpoint"] * dt
     midpoint_label = f"Midpoint: ({midpoint_in_time:.1f} {short_str})"
     half_pt_kwargs = {"lw": 2, "ls": "dotted", "color": "k", "alpha": 0.5, "zorder": -1}
-    twin_sub_ax.plot([], [], label=midpoint_label, **half_pt_kwargs)
+    twin_sub_ax.plot(list(), list(), label=midpoint_label, **half_pt_kwargs)
     twin_sub_ax.spines[["top", "left"]].set_visible(False)
 
     trajectory_length_str = f" ({len(trajectory_lengths)} traj.)"
@@ -303,7 +310,7 @@ def mark_target_and_reset_points(
             position_name=position_name, min_steps_btw=min_steps_btw
         )
 
-        last_step_idxs = np.where(steps == len(Pyrs.Agent.history["t"]))[0]
+        last_step_idxs = np.where(steps == Pyrs.Agent.num_steps_total)[0]
         if len(last_step_idxs):
             steps[last_step_idxs] -= 1
             steps = np.unique(steps)
@@ -562,7 +569,7 @@ def plot_oscillation_events(
 
         if order_by[0] == "neuron_idx" and neuron_idx != prev_neuron_idx:
             num = len(oscillation_df.loc[oscillation_df["neuron_idx"] == neuron_idx])
-            sub_ax.plot([], [], label=f"#{neuron_idx} ({num})")
+            sub_ax.plot(list(), list(), label=f"#{neuron_idx} ({num})")
             sub_ax.legend(**legend_kwargs)
             prev_neuron_idx = neuron_idx
 
@@ -656,7 +663,7 @@ def plot_with_marked_oscillations(
     sub_ax.set_title("Firing rates with oscillations marked")
     sub_ax.set_ylabel("Normalized firing rates")
     sub_ax.set_xlabel(xlabel)
-    sub_ax.set_yticks([])
+    sub_ax.set_yticks(list())
 
     if len(oscillation_df):
         sub_ax.set_ylim(0, num_neurons)
@@ -798,8 +805,8 @@ def plot_oscillations(
     sub_ax.set_title("Oscillation segments")
     sub_ax.set_ylabel("Normalized firing rates")
     sub_ax.set_xlabel(xlabel)
-    sub_ax.set_xticks([])
-    sub_ax.set_yticks([])
+    sub_ax.set_xticks(list())
+    sub_ax.set_yticks(list())
 
     if num_frames_to_plot:
         sub_ax.set_ylim(0, num_neurons)
@@ -829,8 +836,8 @@ def plot_property_at_BTSP_and_closest_to_target_steps(
     - steps_dict (dict): Dictionary of steps with keys:
         - "steps_before" (list): Steps before the first BTSP.
         - "steps_near_BTSP" (list): Steps near a BTSP event.
-        - "steps_of_nearest_BTSP" (list): Steps of the nearest BTSP.
-        - "steps_other" (list): Other steps.
+        - "steps_of_nearest_BTSP" (list): Steps of the nearest BTSP events.
+        - "steps_other" (list): Other steps after the first BTSP.
         - "other_BTSP_steps" (list): Other BTSP steps.
     - y_data (1D np.ndarray): Data to plot.
     - x_data (1D np.ndarray, optional): x data to plot. Default is None.
@@ -874,7 +881,7 @@ def plot_property_at_BTSP_and_closest_to_target_steps(
         if not no_legend and len(steps):
             label = key.replace("_", " ").replace("steps ", "")
             plot_kwargs["s"] = base_s
-            sub_ax.scatter([], [], label=label, **plot_kwargs)
+            sub_ax.scatter(list(), list(), label=label, **plot_kwargs)
 
     line_kwargs = plot_util.get_closest_step_marker_kwargs(
         "steps_of_nearest_BTSP", plot_line=True
@@ -940,32 +947,129 @@ def plot_time_series_with_BTSP_events(
 
     Pyrs.plot_rate_timeseries(chosen_neurons="all", spikes=True, sub_ax=ax1D[i])
     ax1D[i].set_xlabel("")
+    plot_util.pad_axis(ax1D[i], axis="y", pad_prop=0.2, prop_high=1.0)
     lo, hi = ax1D[i].get_ylim()
 
-    target_reached_step = Pyrs.Agent.target_df["reached_step"].to_numpy()  # type: ignore[attr-defined]
-    if np.isnan(target_reached_step[-1]):
-        target_reached_step = target_reached_step[:-1]
-    target_reached_step = target_reached_step.astype(int)
+    # plot target object
+    env_object_name = Pyrs.Agent.Environment.object_type_name
+    env_object_reached_steps = Pyrs.Agent.get_reached_position_steps(
+        position_name=env_object_name, min_steps_btw=0
+    )
+    plot_marker_kwargs = plot_util.get_plot_marker_kwargs(env_object_name, base_s=5)
 
-    for t in target_reached_step:
-        y_hei = lo + (hi - lo) * 0.82
-        ax1D[i].scatter(
-            Pyrs.Agent.history["t"][t] / 60,
-            y_hei,
-            marker=mpl_markers.MarkerStyle("o"),
-            s=6,
-            color="k",
-            alpha=0.7,
-        )
+    all_t = Pyrs.Agent.get_t_history()
+    for t in env_object_reached_steps:
+        y_hei = lo + (hi - lo) * 0.9
+        ax1D[i].scatter(all_t[t] / 60, y_hei, alpha=0.7, **plot_marker_kwargs)
 
     # add distance from target below
     Pyrs.Agent.plot_distance_to_target(
         norm=True, flipped=True, sub_ax=ax1D[-1], autosave=False
     )
     ax1D[-1].set_title("")
-    ax1D[-1].set_yticks([])
+    ax1D[-1].set_yticks(list())
 
     return ax1D
+
+
+def add_timeseries_markers(
+    Ag,
+    sub_ax,
+    t_start=None,
+    t_end=None,
+    ymax=None,
+    lw=1.0,
+    plot_teleportation=True,
+    plot_positions=["landmark"],
+    reached_only=False,
+    plot_reset_lines=False,
+):
+    """
+    add_timeseries_markers(NeuronLayer, sub_ax)
+
+    Adds markers for teleportation events, landmark positions, and reset positions to a
+    neuron rate timeseries plot.
+
+    Args:
+    - Agent (Agent): The Agent based on which to add markers.
+    - sub_ax (plt.Axes): The subplot to add markers to.
+    - t_start (float, optional): Start time for the plot. Default is None.
+    - t_end (float, optional): End time for the plot. Default is None.
+    - ymax (float, optional): Y axis maximum to set for the plot. Default is None.
+    - lw (float, optional): Line width for the markers. Default is 1.0.
+    - plot_teleportation (bool, optional): Whether to plot teleportation markers.
+        Default is True.
+    - plot_positions (list or dict, optional): List of positions or position names to
+        plot markers for or dictionary with both. Default is ["landmark"].
+    - reached_only (bool, optional): Whether to plot only positions visited when they
+        were targets. Default is False.
+    - plot_reset_lines (bool, optional): Whether to plot reset position lines.
+        Default is False.
+    """
+
+    if ymax is None:
+        ymax = sub_ax.get_ylim()[1]
+    else:
+        sub_ax.set_ylim(None, max(sub_ax.get_ylim()[1], ymax))
+
+    # organize position names and positions
+    if isinstance(plot_positions, dict):
+        position_names = list(plot_positions.keys())
+        positions = list(plot_positions.values())
+    else:
+        if not isinstance(plot_positions, list):
+            plot_positions = [plot_positions]
+
+        position_names, positions = list(), list()
+        for position_item in plot_positions:
+            position_name, position = None, None
+            if isinstance(position_item, str):
+                position_name = position_item
+            else:
+                position = position_item
+            position_names.append(position_name)
+            positions.append(position)
+
+    for position_name, position in zip(position_names, positions):
+        Ag.add_position_across_time_to_plot(
+            sub_ax=sub_ax,
+            position_name=position_name,
+            position=position,
+            reached_only=reached_only,
+            alpha=0.8,
+            y=0.95 * ymax,
+            t_start=t_start,
+            t_end=t_end,
+            raise_none=False,
+        )
+
+    if plot_teleportation and hasattr(Ag, "teleportation_df"):
+        if len(Ag.teleportation_df) > 0:
+            if len(plot_positions):
+                plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.1, prop_high=1.0)
+            else:
+                sub_ax.set_ylim(None, max(sub_ax.get_ylim()[1], ymax))
+            Ag.add_teleportation_markers_to_plots(
+                ax=sub_ax,
+                timeseries=True,
+                plot_lines=True,
+                t_start=t_start,
+                t_end=t_end,
+                y_prop=0.96,
+                lw=lw,
+                no_legend=True,
+            )
+
+    if plot_reset_lines:
+        reset_times = Ag.get_reset_times(t_start, t_end)
+        for reset_time in reset_times:
+            sub_ax.axvline(
+                reset_time / 60,
+                color="black",
+                lw=lw,
+                ls="dashed",
+                alpha=0.8,
+            )
 
 
 def plot_timeseries(
@@ -1016,7 +1120,7 @@ def plot_timeseries(
     - sub_ax (plt.Axes): Subplot with timeseries of the layer plotted.
     """
 
-    t = np.asarray(NeuronLayer.history["t"])
+    t = NeuronLayer.get_t_history()
     startid, endid = plot_util.get_plotting_times(t, t_start=t_start, t_end=t_end)
     if in_min:
         t = t / 60
@@ -1028,7 +1132,7 @@ def plot_timeseries(
 
     # neurons to plot
     if not isinstance(chosen_neurons, np.ndarray):
-        chosen_neurons = np.asarray(NeuronLayer.return_list_of_neurons(chosen_neurons))  # type: ignore[arg-type]
+        chosen_neurons = NeuronLayer.get_chosen_neurons(chosen_neurons)  # type: ignore[arg-type]
     rate_timeseries = rate_timeseries[:, chosen_neurons]
 
     was_ax = (
@@ -1107,94 +1211,11 @@ def plot_timeseries(
         sub_ax.set_xlabel(time_str)
         sub_ax.set_xticks([t_start, t_end])
         sub_ax.set_xticklabels([round(t_start, 2), round(t_end, 2)])  # type: ignore[operator]
-        sub_ax.set_yticks([])
+        sub_ax.set_yticks(list())
         sub_ax.set_ylabel("Neurons")
 
     fig = sub_ax.figure
     plot_util.save_figure(fig, f"{NeuronLayer.name}_timeseries", save=autosave)  # type: ignore[attr-defined]
-
-    return sub_ax
-
-
-def plot_1D_reset_environment(
-    Ag: "ResetableAgent",
-    title: str = "Environment",
-    minimalist: bool = False,
-    base_s: float = 15,
-    obj_lw: float = 1,
-    sub_ax: plt.Axes | None = None,
-    autosave: bool | None = None,
-) -> plt.Axes:
-    """
-    plot_1D_reset_environment(Ag)
-
-    Plot the 1D environment of the agent.
-
-    Args:
-    - Ag (Agent): Agent for which to plot the environment, with reset and
-        start points marked.
-    - title (str, optional): Title of the plot. Default is "Environment".
-    - minimalist (bool, optional): Whether to create minimalist reset environment plot.
-        Default is False.
-    - base_s (float, optional): Base size for markers. Default is 15.
-    - obj_lw (float, optional): Line width for objects. Default is 1.
-    - sub_ax (plt.Axes, optional): Subplot to plot on. If None, a new subplot is
-        created. Default is None.
-    - autosave (bool, optional): Whether to save the figure. Default is None.
-
-    Returns:
-    - sub_ax (plt.Axes): Subplot with 1D reset environment plotted.
-    """
-
-    plotting_dict = {
-        "start": {"data": Ag.start_position},
-        "reset": {"data": Ag.reset_position},
-        "target": {"data": Ag.target_position},
-    }
-
-    for label in plotting_dict.keys():
-        plotting_dict[label]["kwargs"] = plot_util.get_plot_marker_kwargs(
-            label, base_s=base_s
-        )
-
-    if minimalist and sub_ax is None:
-        _, sub_ax = plt.subplots(figsize=(4, 0.7))
-
-    sub_ax = Ag.Environment.plot_environment(
-        sub_ax=sub_ax, plot_objects=False, autosave=False
-    )
-
-    if sub_ax is None:
-        raise RuntimeError("sub_ax is None.")
-
-    edges = list()
-    for label, sub_dict in plotting_dict.items():
-        if sub_dict["data"] is None:
-            continue
-        if minimalist and label in ["start", "reset"]:
-            edges.append(sub_dict["data"][0])
-        sub_ax.scatter(
-            sub_dict["data"],
-            0,
-            zorder=5,
-            label=label,
-            lw=obj_lw,
-            **sub_dict["kwargs"],
-        )
-    sub_ax.legend(ncol=len(plotting_dict), frameon=False)
-    sub_ax.set_title(title)
-
-    if len(edges) == 2:
-        sub_ax.spines["bottom"].set_bounds(sorted(edges))
-        plot_util.pad_axis(sub_ax, axis="x", pad_prop=0.05)
-
-    if minimalist:
-        sub_ax.set_xticks([])
-        sub_ax.set_xlabel("")
-        sub_ax.spines["bottom"].set_linewidth(1.5)
-
-    fig = sub_ax.figure
-    plot_util.save_figure(fig, "1D_reset_environment", save=autosave)
 
     return sub_ax
 
@@ -1305,7 +1326,7 @@ def add_1D_PF_widths(
     Ag: "ResetableAgent" = None,
     prop_peak: float = signal_util.DFT_PROP_PEAK,
     time_axis: bool = False,
-    time_shift: float = 0.0,
+    shift: float = 0.0,
     **kwargs,
 ):
     """
@@ -1325,8 +1346,7 @@ def add_1D_PF_widths(
     - prop_peak (float): Proportion of the peak to use for width computation.
         Default is signal_util.DFT_PROP_PEAK.
     - time_axis (bool, optional): Whether to plot the x-axis in time. Default is False.
-    - time_shift (float, optional): Time shift to apply to the x-axis if time_axis is
-        True. Default is 0.0.
+    - shift (float, optional): Shift to apply to the x-axis. Default is 0.0.
 
     Keyword args:
     - **kwargs: Additional keyword arguments passed to plt.axvspan().
@@ -1354,27 +1374,37 @@ def add_1D_PF_widths(
         )
 
     if Ag is None:
-        max_pos = PF_centers.max()
+        max_x = PF_centers.max()
     else:
-        max_pos = Ag.Environment.scale
+        max_x = Ag.Environment.scale
 
     unit = "m"
     if time_axis:
         if Ag is None:
             raise ValueError("Ag must be provided if time_axis is True.")
         speed_mean = Ag.speed_mean  # m/s
-        PF_centers = PF_centers / speed_mean - time_shift
-        max_pos = max_pos / speed_mean
+        PF_centers = PF_centers / speed_mean
+        max_x = max_x / speed_mean
         unit = "s"
 
     width, edges = signal_util.compute_signal_width(
-        PF, PF_centers, max_x=max_pos, prop_peak=prop_peak, return_edges=True
+        PF,
+        PF_centers,
+        max_x=max_x,
+        prop_peak=prop_peak,
+        return_edges=True,
     )
-    label = f"Width={width:.2f} {unit}"
 
-    end_pts = [0, max_pos]
+    label = f"width={width:.2f} {unit}"
+
+    end_pts = [0, max_x]
+    if shift != 0:
+        edges = [edge - shift for edge in edges]
+        end_pts = [end_pt - shift for end_pt in end_pts]
+
     if np.isclose(edges[0], edges[1]):
         edges = end_pts
+
     plot_util.plot_vspan_circular(
         sub_ax=sub_ax, edges=edges, end_pts=end_pts, label=label, lw=0, **kwargs
     )
@@ -1473,24 +1503,28 @@ def plot_1D_PFs(
     target_pos = None
     if Ag is not None:
         target_pos = Ag.target_position
-    time_shift = 0
+
+    if target_pos is not None:
+        target_pos = float(target_pos)
+
+    shift = 0
+    PF_centers_plot = PF_centers
     if time_axis:
         if Ag is None:
             raise ValueError("Ag must be provided if time_axis is True.")
         xlabel = "Average time (s)"
         speed_mean = Ag.speed_mean  # m/s
-        PF_centers = PF_centers / speed_mean
         if target_pos is not None:
-            time_shift = target_pos / speed_mean
-            PF_centers = PF_centers - time_shift
+            shift = target_pos / speed_mean
             target_pos = 0
+        PF_centers_plot = PF_centers / speed_mean - shift
 
     legend = plot_last_width
     if not single_sample:
         if len(colors) > 1:
             legend = True
-            sub_ax.plot([], color=colors[0], label="first", alpha=0.8)
-            sub_ax.plot([], color=colors[-1], label="last", alpha=0.8)
+            sub_ax.plot(list(), color=colors[0], label="first", alpha=0.8)
+            sub_ax.plot(list(), color=colors[-1], label="last", alpha=0.8)
 
         title = f"{title} across learning"
 
@@ -1500,7 +1534,7 @@ def plot_1D_PFs(
         for i, color in enumerate(colors):
             offset = spacing * n
             sub_ax.plot(
-                PF_centers,
+                PF_centers_plot,
                 PFs[i, n] + offset,
                 color=color,
                 alpha=alpha,
@@ -1515,7 +1549,7 @@ def plot_1D_PFs(
                     PF_centers=PF_centers,
                     PCs=PCs,
                     time_axis=time_axis,
-                    time_shift=time_shift,
+                    shift=shift,
                     color=color,
                     alpha=0.2,
                     zorder=-3,
@@ -1567,15 +1601,17 @@ def plot_recorded_1D_PFs(
     t_start=None,
     t_end=None,
     plot_last_width=False,
+    width_alpha=0.2,
     k=1,
     plot_smoothed=False,
     no_legend=False,
     sub_ax=None,
+    **kwargs,
 ):
     """
     plot_recorded_1D_PFs(PFs, PF_centers)
 
-    Plots the place fields of a Pyr. somatic compartment, across time, for a linear
+    Plots the place fields of a Pyr. proximal compartment, across time, for a linear
     track environment.
 
     Args:
@@ -1594,11 +1630,15 @@ def plot_recorded_1D_PFs(
     - t_end (float, optional): End timepoint for which to plot PFs. Default is None.
     - plot_last_width (bool, optional): Whether to plot the last width of the PFs.
         Default is False.
+    - width_alpha (float): Alpha for plotting the width. Default is 0.2.
     - k (int, optional): Smoothing factor for calculating width of PFs. Default is 1.
     - plot_smoothed (bool, optional): Whether to plot a smoothed version of the PFs.
         Default is False.
     - no_legend (bool, optional): Whether to not plot the legend. Default is False.
     - sub_ax (plt.Axes, optional): Subplot. Default is None.
+
+    Keyword args:
+    - **kwargs (dict): Keyword arguments passed to plot_util.plot_vspan_circular()
 
     Returns:
     - sub_ax (plt.Axes): Subplot on which PFs are plotted.
@@ -1642,7 +1682,11 @@ def plot_recorded_1D_PFs(
     if t_end is None or PFs_t is None:
         end_idx = len(PFs)
     else:
-        end_idx = np.where(np.asarray(PFs_t) < t_end)[0][-1] + 1
+        end_idxs = np.where(np.asarray(PFs_t) < t_end)[0]
+        if not len(end_idxs):
+            raise RuntimeError("No PFs found before t_end.")
+        end_idx = end_idxs[-1] + 1
+
     alphas = np.linspace(0.3, 0.9, len(PFs[start_idx:end_idx]))
 
     place_PF_kwargs = {
@@ -1655,6 +1699,7 @@ def plot_recorded_1D_PFs(
 
     num_plotted = 0
     prev_PF = None
+    min_val, max_val = np.inf, -np.inf
     for a, alpha in enumerate(alphas):
         plot_PF = PFs[a + start_idx]
         if prev_PF is not None and (prev_PF == plot_PF).all():
@@ -1673,6 +1718,8 @@ def plot_recorded_1D_PFs(
 
         num_plotted += 1
         last_PF = plot_PF
+        min_val = min(min_val, np.nanmin(plot_PF))
+        max_val = max(max_val, np.nanmax(plot_PF))
 
     if num_plotted == 0:
         sub_ax.plot(list(), list())
@@ -1701,15 +1748,19 @@ def plot_recorded_1D_PFs(
             label=label,
             lw=0,
             color=color,
-            alpha=0.2,
+            alpha=width_alpha,
             zorder=-3,
+            **kwargs,
         )
-        if not no_legend:
+        if not no_legend and np.isfinite(edges).all():
             sub_ax.legend(frameon=False, loc="upper right")
 
     sub_ax.set_xlabel(xlabel)
     sub_ax.set_ylabel(ylabel)
-    sub_ax.set_ylim(0, sub_ax.get_ylim()[1] * 1.1)
+    if np.isclose(min_val, max_val):
+        sub_ax.set_ylim(0, max_val * 2)
+    else:
+        sub_ax.set_ylim(0, sub_ax.get_ylim()[1] * 1.1)
     sub_ax.spines[["top", "right"]].set_visible(False)
 
     return sub_ax
@@ -1724,7 +1775,7 @@ def plot_1D_BTSP_stats(
     in_min=True,
     PF_type="weights",
     plot_last_width=False,
-    color="None",
+    color=None,
 ):
     """
     plot_1D_BTSP_stats(Pyrs, recorded_PFs)
@@ -1749,20 +1800,23 @@ def plot_1D_BTSP_stats(
     - PCs_sub_ax (plt.Axes): Subplot with place fields plotted.
     """
 
+    if not Pyrs.Agent.Environment.D == 1:
+        raise ValueError("Function is implemented for 1D environments only.")
+
     _, BTSP_ramp_ax1D = plt.subplots(3, 1, figsize=(7, 6))
     _, PCs_sub_ax = plt.subplots(figsize=(7, 2))
 
     if gen_util.attribute_type_checker(Pyrs, "TwoCompLayer"):
-        Pyrs.SomaticCompartment.plot_BTSP_ramp_factors(
+        Pyrs.ProximalCompartment.plot_BTSP_ramp_factors(
             axes=BTSP_ramp_ax1D, in_min=in_min
         )
-        BTSP_ramp_ax1D[1].get_lines()[-1].set_label("somatic")
-        for i, comp in enumerate([Pyrs.ApicalCompartment, Pyrs.ApicalInhibition]):
-            t = np.asarray(comp.history["t"])
+        BTSP_ramp_ax1D[1].get_lines()[-1].set_label("proximal")
+        for i, comp in enumerate([Pyrs.DistalCompartment, Pyrs.DistalInhibition]):
+            t = np.asarray(comp.get_t_history())
             if in_min:
                 t = t / 60
             alpha = 0.7 if i == 0 else 0.5
-            label = "apical" if i == 0 else "inhibitory"
+            label = "distal" if i == 0 else "inhibitory"
             BTSP_ramp_ax1D[1].plot(
                 t,
                 comp.history["firingrate"],
@@ -1777,9 +1831,9 @@ def plot_1D_BTSP_stats(
 
     if PF_centers is None:
         _, _, PCs, _ = ext_util.extract_objects_from_Pyrs(Pyrs)
-        PF_centers = PCs.place_cell_centers
+        PF_centers = PCs.place_cell_centers.ravel()
         color = color or PCs.color
-    elif color is None:
+    if color is None:
         color = "k"
 
     plot_recorded_1D_PFs(
@@ -1846,7 +1900,7 @@ def plot_pre_post_responses(Pyrs, Objs, ref_time=0, pre=60, post=None, axes=None
     return axes
 
 
-def plot_pre_post_apical_peaks(
+def plot_pre_post_distal_peaks(
     Pyrs,
     ref_time=0,
     pre=60,
@@ -1858,9 +1912,9 @@ def plot_pre_post_apical_peaks(
     ax=None,
 ):
     """
-    plot_pre_post_apical_peaks(Pyrs)
+    plot_pre_post_distal_peaks(Pyrs)
 
-    Plot the Pyramidal apical compartment response peaks before and after a reference
+    Plot the Pyramidal distal compartment response peaks before and after a reference
     time.
 
     Args:
@@ -1878,7 +1932,7 @@ def plot_pre_post_apical_peaks(
         Default is None.
 
     Returns:
-    - ax (plt.Axes or 1D np.ndarray): Subplot or array of subplots with Pyr. apical
+    - ax (plt.Axes or 1D np.ndarray): Subplot or array of subplots with Pyr. distal
         compartment response peaks plotted.
     """
 
@@ -1895,8 +1949,8 @@ def plot_pre_post_apical_peaks(
         fig = np.asarray(ax).ravel()[0].figure
 
     dt = Pyrs.Agent.dt
-    t = np.asarray(Pyrs.ApicalCompartment.history["t"])
-    firingrates = np.asarray(Pyrs.ApicalCompartment.history["firingrate"])
+    t = np.asarray(Pyrs.DistalCompartment.get_t_history())
+    firingrates = np.asarray(Pyrs.DistalCompartment.history["firingrate"])
 
     # pre
     pre_ids = plot_util.get_plotting_times(
@@ -1986,7 +2040,7 @@ def plot_pre_post_apical_peaks(
 
     sub_ax.legend()
     fig.suptitle(
-        f"Comparing Pyr. apical compartment response peaks before and after {label}",
+        f"Comparing Pyr. distal compartment response peaks before and after {label}",
         y=1.0,
     )
 
@@ -2029,7 +2083,7 @@ def plot_1D_initial_conditions(Pyrs, axes=None):
         raise ValueError(f"Expected 3 + {int(Objs is not None)} axes, got {len(ax1D)}.")
 
     # Plot environment
-    plot_1D_reset_environment(Ag, sub_ax=ax1D[0], autosave=False)
+    Ag.Environment.plot_environment(sub_ax=ax1D[0], title="Environment", autosave=False)
 
     # Plot object cell rate map, if applicable
     i = 1
@@ -2131,7 +2185,9 @@ def plot_1D_spatial_info(
     )
 
     # Plot environment
-    plot_1D_reset_environment(Ag, sub_ax=ax1D[i + 3], autosave=False)
+    Ag.Environment.plot_environment(
+        sub_ax=ax1D[i + 3], title="Environment", autosave=False
+    )
 
     for a, sub_ax in enumerate(ax1D[:-1]):
         sub_ax.set_xlabel("")
@@ -2150,8 +2206,8 @@ def plot_1D_time_info(
     Pyr_kwargs: dict[str, Any] = dict(),
     height_ratios: list[float] | None = None,
     lw: float = 1,
-    s: float = 0.02,
-    base_obj_s: float = 10,
+    s: int | float = 0.02,
+    obj_base_s: int | float = 10,
     figsize: tuple[float, float] | None = None,
     autosave: bool | None = None,
     **gridspec_kw,
@@ -2175,8 +2231,8 @@ def plot_1D_time_info(
     - lw (float, optional): Line width for the plots. Default is 1.
     - s (float, optional): Size of agent trajectory scatterplot markers. If None,
         defaults are used. Default is None.
-    - base_obj_s (float, optional): Base size of scatterplot markers for objects in
-        environment. If None, defaults are used. Default is None.
+    - obj_base_s (float, optional): Base size of scatterplot markers for objects in
+        environment. Default is 10.
     - figsize (tuple[float, float], optional): Figure size. If None, default size is
         used. Default is None.
     - autosave (bool, optional): Whether to autosave the figure. If None, the global
@@ -2194,7 +2250,7 @@ def plot_1D_time_info(
 
     # 3 or 4 plots
     if height_ratios is None:
-        height_ratios = [1.5, 1, 1.1**Pyrs.n]
+        height_ratios = [0.5, 1.5, 1.1**Pyrs.n]
         if Objs is not None:
             height_ratios.insert(1, 0.6)
 
@@ -2230,8 +2286,8 @@ def plot_1D_time_info(
     Ag.plot_trajectories_across_time(
         framerate=1 / Ag.dt,
         s=s,
-        base_obj_s=base_obj_s,
-        obj_lw=lw,
+        obj_base_s=obj_base_s,
+        obj_base_lw=lw,
         sub_ax=ax1D[0],
         autosave=False,
     )
@@ -2268,15 +2324,18 @@ def plot_1D_time_info(
     ax1D[i].set_title("Place cell rate timeseries")
 
     # Plot Pyr. rate timeseries
-    Pyr_kwargs[ax_key] = ax1D[i + 1 :]
+    if num_Pyr_ax == 1:
+        Pyr_kwargs[ax_key] = ax1D[i + 1]
+    else:
+        Pyr_kwargs[ax_key] = ax1D[i + 1 :]
 
+    norm_by = "none" if Pyrs.n == 1 else "max"
     Pyrs.plot_rate_timeseries(
         chosen_neurons="all",
         spikes=Pyrs_spikes,
-        shift=-10,
         overlap=1,
         lw=lw,
-        norm_by="none",
+        norm_by=norm_by,
         autosave=False,
         **Pyr_kwargs,
     )
@@ -2308,6 +2367,22 @@ def plot_1D_time_info(
 
 
 def get_2D_PF_as_imshow(PFs, PF_centers):
+    """
+    get_2D_PF_as_imshow(PFs, PF_centers)
+
+    Get place fields as an image for imshow plotting.
+
+    Args:
+    - PFs (2D np.ndarray): Place fields with shape
+        (number of neurons, number of place field positions).
+    - PF_centers (2D np.ndarray): Place field centers with shape
+        (number of place field positions, 2).
+
+    Returns:
+    - imshow_PFs (3D np.ndarray or None): Place fields reshaped for imshow plotting
+        with shape (neurons, unique x positions, unique y positions) or None
+        if PF_centers are not on a grid.
+    """
 
     if not len(PF_centers.shape) == 2 and PF_centers.shape[1] == 2:
         raise ValueError("PF_centers must be a 2D array with shape (n, 2).")
@@ -2322,13 +2397,13 @@ def get_2D_PF_as_imshow(PFs, PF_centers):
         np.isclose(unique_x, linspace_x).all()
         and np.isclose(unique_y, linspace_y).all()
     ):
-        reindex = list()
+        new_order = list()
         for x, y in PF_centers:
             x_idx = np.where(unique_x == x)[0][0]
             y_idx = np.where(unique_y == y)[0][0]
-            reindex.append(x_idx + y_idx * len(unique_x))
+            new_order.append(x_idx + y_idx * len(unique_x))
 
-        reindex = np.asarray(reindex)
+        reindex = np.asarray(np.argsort(new_order))
         imshow_PFs = PFs[:, reindex].reshape(len(PFs), len(unique_x), len(unique_y))
     else:
         imshow_PFs = None
@@ -2355,9 +2430,9 @@ def plot_2D_PFs(
     alpha: float = 0.7,
     lw: float = 0,
     s: float = 75,
-    obj_s: float = 20,
-    BTSP_s: float = 10,
-    BTSP_marker: str | tuple = "x",
+    obj_base_s: float = 15,
+    BTSP_marker: str | tuple = BTSP_ASTERISK,
+    BTSP_s: float = BTSP_S,
     zorder: int = 1,
     title: str | None = None,
     y: float = 1,
@@ -2411,10 +2486,9 @@ def plot_2D_PFs(
     - alpha (float, optional): Alpha of the marker. Default is 0.7.
     - lw (float, optional): Linewidth of the marker. Default is 0.
     - s (float, optional): Size of scatterplot markers. Default is 75.
-    - obj_s (float, optional): Size of object markers. If None, defaults are used.
-        Default is None.
-    - BTSP_s (float, optional): Size of BTSP markers. Default is 10.
-    - BTSP_marker (str, optional): Marker for BTSP events. Default is "x".
+    - obj_base_s (float, optional): Base size of object markers. Default is 15.
+    - BTSP_marker (str, optional): Marker for BTSP events. Default is BTSP_ASTERISK.
+    - BTSP_s (float, optional): Size of BTSP markers. Default is BTSP_S.
     - zorder (int, optional): Zorder of the marker. Default is 1.
     - title (str, optional). Figure title. Default is None.
     - y (float, optional): Y position of the title. Default is 1.
@@ -2461,9 +2535,7 @@ def plot_2D_PFs(
             "PF_centers must be a 2D array with shape (num_PF_centers, 2)."
         )
 
-    chosen_neurons = np.asarray(
-        target_neurons.return_list_of_neurons(chosen_neurons=chosen_neurons)
-    )  # type: ignore[arg-type]
+    chosen_neurons = target_neurons.get_chosen_neurons(chosen_neurons=chosen_neurons)
 
     clabel = get_PF_label(PF_type, title=False)
 
@@ -2513,12 +2585,6 @@ def plot_2D_PFs(
             f"place fields ({len(PFs)})."
         )
 
-    is_tmaze = gen_util.attribute_type_checker(target_neurons.Environment, "TEnv")
-    obj_s_kwarg = dict()
-    if obj_s is not None:
-        key = "base_s" if is_tmaze else "s"
-        obj_s_kwarg[key] = obj_s
-
     imshow_PFs = get_2D_PF_as_imshow(PFs, PF_centers)
 
     if imshow_PFs is not None:
@@ -2526,7 +2592,7 @@ def plot_2D_PFs(
 
     for i in range(len(PFs)):
         target_neurons.Environment.plot_environment(
-            sub_ax=ax1D[i], alpha=0.8, autosave=False, **kwargs, **obj_s_kwarg
+            sub_ax=ax1D[i], alpha=0.8, base_s=obj_base_s, autosave=False, **kwargs
         )
 
         if imshow_PFs is None:
@@ -2740,7 +2806,7 @@ def plot_place_cell_inputs_over_time(
     target_num_samples: int = 100,
     max_pos_sec: float = 20,
     num_cols: int = 10,
-    obj_s: float | None = None,
+    obj_base_s: float = 15,
     **kwargs,
 ):
     """
@@ -2760,7 +2826,7 @@ def plot_place_cell_inputs_over_time(
     - max_pos_sec (float, optional): Maximum number of positions to plot, in seconds.
         Default is 2.
     - num_cols (int, optional): Number of columns in the plot. Default is 10.
-    - obj_s (float, optional): Size of the object markers. Default is None.
+    - obj_base_s (float, optional): Base size of the object markers. Default is 15.
 
     Keyword args:
     - **kwargs: Keyword arguments passed to plot_util.init_rate_map_axes() and
@@ -2803,7 +2869,7 @@ def plot_place_cell_inputs_over_time(
         target_neurons,
         PFs=data,
         ax=axes,
-        obj_s=obj_s,
+        obj_base_s=obj_base_s,
         **kwargs,
     )
 
@@ -2886,28 +2952,24 @@ def plot_overlayed_rate_maps(
         coloralpha = list(mpl_colors.to_rgba(color))
         coloralpha[-1] = 0.5
 
-    chosen_neurons = NeuronLayer.return_list_of_neurons(chosen_neurons=chosen_neurons)  # type: ignore[arg-type]
-    chosen_neurons = np.asarray(chosen_neurons)
+    chosen_neurons = NeuronLayer.get_chosen_neurons(chosen_neurons=chosen_neurons)  # type: ignore[arg-type]
     N_neurons = len(chosen_neurons)
 
     if sub_ax is None:
-        if NeuronLayer.Environment.dimensionality == "1D":
+        plot_env = True
+        if NeuronLayer.Environment.D == 1:
             _, sub_ax = plt.subplots(
                 figsize=(
                     MOUNTAIN_PLOT_WIDTH_MM / 25,
                     N_neurons * MOUNTAIN_PLOT_SHIFT_MM / 25,
                 )
             )
-        sub_ax = NeuronLayer.Environment.plot_environment(alpha=0.6, autosave=False)
-    elif plot_env:
+    if plot_env:
         sub_ax = NeuronLayer.Environment.plot_environment(
-            sub_ax=sub_ax, alpha=0.6, autosave=False
+            sub_ax=sub_ax, alpha=0.8, autosave=False
         )
 
-    if sub_ax is None:
-        raise RuntimeError("sub_ax is None.")
-
-    if NeuronLayer.Environment.dimensionality == "2D":
+    if NeuronLayer.Environment.D == 2:
         reshape = NeuronLayer.Environment.discrete_coords.shape[:2]
     else:
         reshape = [-1]
@@ -2928,7 +2990,7 @@ def plot_overlayed_rate_maps(
         raise ValueError(f"method {method} not recognized.")
 
     # PLOT 2D
-    if NeuronLayer.Environment.dimensionality == "2D":
+    if NeuronLayer.Environment.D == 2:
         ex = NeuronLayer.Environment.extent
         im = sub_ax.imshow(rate_map, extent=ex, zorder=0, cmap="inferno", aspect=1)
 
@@ -2936,7 +2998,7 @@ def plot_overlayed_rate_maps(
             plot_util.add_colorbars(axes=sub_ax, im=im, label="")
 
     # PLOT 1D
-    elif NeuronLayer.Environment.dimensionality == "1D":
+    elif NeuronLayer.Environment.D == 1:
         x = NeuronLayer.Environment.flattened_discrete_coords[:, 0]
         _, sub_ax = rutils.mountain_plot(
             X=x,
@@ -3030,13 +3092,13 @@ def plot_2D_initial_conditions(Pyrs, num_samples=10, autosave: bool | None = Non
 
 
 def plot_interleaved_openfield_rate_maps(
-    Pyrs, Objs, num_cols=10, size_per=1.4, obj_s=None, **kwargs
+    Pyrs, Objs, num_cols=10, size_per=1.4, obj_base_s=15, **kwargs
 ):
     """
     plot_interleaved_openfield_rate_maps(Pyrs, Objs)
 
-    Plot interleaved open field rate maps for Pyr. neuron somatic compartments and the
-    object neurons that target their apical compartments.
+    Plot interleaved open field rate maps for Pyr. neuron proximal compartments and the
+    object neurons that target their distal compartments.
 
     Rate maps are computed theoretically based on place cell inputs.
 
@@ -3045,14 +3107,18 @@ def plot_interleaved_openfield_rate_maps(
     - Objs (object_neurons.ObjectCells): Object neurons.
     - num_cols (int, optional): Number of columns in the plot. Default is 10.
     - size_per (float, optional): Size per subplot. Default is 1.4.
+    - obj_base_s (float, optional): Base size of the object markers.
+        Default is 15.
 
     Keyword args:
-    - **kwargs: Keyword arguments passed to
-        plot_2D_PFs().
+    - **kwargs: Keyword arguments passed to plot_2D_PFs().
 
     Returns:
     - axes (np.ndarray): Array of subplots with interleaved rate maps plotted.
     """
+
+    if not gen_util.attribute_type_checker(Pyrs, "TwoCompLayer"):
+        raise ValueError("Pyrs should be a TwoCompLayer.")
 
     if Pyrs.n != Objs.n:
         raise ValueError("Pyrs and Objs should have the same number of neurons.")
@@ -3068,22 +3134,18 @@ def plot_interleaved_openfield_rate_maps(
     )
 
     is_tmaze = gen_util.attribute_type_checker(Objs.Environment, "TEnv")
-    obj_s_kwarg = dict()
     no_legend = False if is_tmaze else True
-    if obj_s is not None:
-        key = "base_s" if is_tmaze else "s"
-        obj_s_kwarg[key] = obj_s
 
     Objs.plot_rate_map(
-        ax=axes[::2].ravel()[: Objs.n], no_legend=no_legend, **obj_s_kwarg
+        ax=axes[::2].ravel()[: Objs.n], no_legend=no_legend, obj_base_s=obj_base_s
     )
     plot_2D_PFs(
-        Pyrs.SomaticCompartment,
+        Pyrs.ProximalCompartment,
         ax=axes[1::2].ravel()[: Objs.n],
         alpha=0.5,
         plot_BTSP_events=True,
         no_legend=no_legend,
-        obj_s=obj_s,
+        obj_base_s=obj_base_s,
         **kwargs,
     )
 
@@ -3128,11 +3190,14 @@ def compare_theoretical_and_true_weights(
         1D, the theoretical weights are also plotted.
     """
 
+    if not gen_util.attribute_type_checker(Pyrs, "LearnLayer"):
+        raise ValueError("Pyrs should be a LearnLayer object.")
+
     if PCs_name not in Pyrs.inputs.keys():
         raise RuntimeError(f"{PCs_name} not found in inputs to Pyrs.")
     PCs = Pyrs.inputs[PCs_name]["layer"]
 
-    y = 1.7 if Pyrs.Environment.dimensionality == "1D" else 1.3
+    y = 1.7 if Pyrs.Environment.D == 1 else 1.3
 
     theor_axes = list()
     for normalize_weights_divisively in [True, False]:
@@ -3150,7 +3215,7 @@ def compare_theoretical_and_true_weights(
 
     norm_theor_axes, no_norm_theor_axes = theor_axes
 
-    if Pyrs.Environment.dimensionality == "1D":
+    if Pyrs.Environment.D == 1:
         true_ws = Pyrs.inputs[PCs_name]["w"]
         act_sub_ax = plot_1D_PFs(true_ws, PCs)
 
@@ -3181,8 +3246,112 @@ def compare_theoretical_and_true_weights(
             Pyrs,
             ax=act_sub_ax,
             chosen_neurons=[chosen_neuron],
-            obj_s=10,
+            obj_base_s=8,
             no_legend=is_not_tmaze,
         )
 
     return norm_theor_axes, no_norm_theor_axes, act_sub_ax
+
+
+def get_num_period_approx(partial_step, total_steps, num_periods=40):
+    """
+    get_num_period_approx(partial_step, total_steps)
+
+    Get a number of periods near the value provided that places a transition near the
+    provided partial step.
+
+    Args:
+    - partial_step (int): Step at which to place the transition.
+    - total_steps (int): Total number of steps in the experiment.
+    - num_periods (int or list of int, optional): Number of periods or list of number
+        of periods to use for correlation matrix calculation. Default is 40.
+
+    Returns:
+    - num_periods (list of int): List of number of periods, with values near the ones
+        provided that place a transition near the provided partial step.
+    """
+
+    if isinstance(num_periods, int):
+        num_periods = [num_periods]
+
+    num_periods_approx = list()
+    for num in num_periods:
+        _, denom = gen_util.get_integer_fraction(
+            partial_step / total_steps,
+            denom_min=int(np.min(num * 0.7)),
+            denom_max=int(np.max(num * 1.3)),
+        )
+        if denom is not None:
+            num = denom
+        num_periods_approx.append(num)
+    num_periods = num_periods_approx
+
+    return num_periods
+
+
+def plot_remapping_correlation_matrices(
+    Pyrs, num_periods=40, remap_step=None, approximate=True, ax1D=None
+):
+    """
+    plot_remapping_correlation_matrices(Pyrs)
+
+    Plots correlation matrices showing neural correlations across time in a remapping
+    experiment.
+
+    Args:
+    - Pyrs (Pyrs): Pyrs object containing the experiment data.
+    - num_periods (int or list of int, optional): Number of periods or list of number
+        of periods to use for correlation matrix calculation. Default is 40.
+    - remap_step (int, optional): Step at which the remapping occurs. Default is None.
+    - approximate (bool, optional): Whether to calculate a number of periods near the
+        values provided to place remapping transition between periods, instead of
+        using the exact values. Only applies if remap_step is provided. Default is True.
+    - ax1D (np.ndarray of plt.Axes, optional): Array of subplots to plot on. If None,
+        new subplots are created. Default is None.
+
+    Returns:
+    - ax1D (np.ndarray of plt.Axes): Array of subplots with the plotted correlation
+        matrices.
+    """
+
+    if gen_util.attribute_type_checker(Pyrs, "TwoCompLayer"):
+        Pyrs = Pyrs.ProximalCompartment
+
+    num_steps = Pyrs.Agent.num_steps_total
+
+    if isinstance(num_periods, int):
+        num_periods = [num_periods]
+
+    if approximate and remap_step is not None:
+        num_periods = get_num_period_approx(
+            remap_step, num_steps, num_periods=num_periods
+        )
+
+    if ax1D is None:
+        _, axes = plt.subplots(
+            1, len(num_periods), figsize=(len(num_periods) * 3.6, 2.5), squeeze=False
+        )
+        ax1D = axes.ravel()
+    else:
+        ax1D = np.asarray(ax1D).ravel()
+        if len(ax1D) != len(num_periods):
+            raise ValueError(
+                f"Length of ax1D ({len(ax1D)}) must match the number of num_periods "
+                f"provided ({len(num_periods)})."
+            )
+
+    for i, num in enumerate(num_periods):
+        clabel = "Correlation" if i == len(num_periods) - 1 else ""
+        Pyrs.get_firingrate_CC_matrix(
+            num_periods=num, plot=True, sub_ax=ax1D[i], vmin=None, clabel=clabel
+        )
+        label = f"Time bins ({num})"
+        ax1D[i].set_xlabel(label)
+        ax1D[i].set_ylabel(label)
+        ax1D[i].set_title("")
+
+        # plot remap step
+        for axline in [ax1D[i].axhline, ax1D[i].axvline]:
+            axline(remap_step / num_steps * num - 0.5, color="k", lw=0.7)
+
+    return ax1D

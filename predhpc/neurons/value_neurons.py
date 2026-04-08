@@ -24,9 +24,7 @@ class SimpleValueNeuron(riab_neurons.PlaceCells):
         "max_fr": 10,
     }
 
-    See riab_neurons.PlaceCells for properties.
-
-    List of methods (in addition to riab_neurons.FeedForwardLayer methods):
+    List of methods (in addition to riab_neurons.PlaceCells methods):
         • self.get_local_gradient()
         • self.plot_local_gradient()
     """

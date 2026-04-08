@@ -38,10 +38,10 @@ class RegressionLayer(learning_neurons.LearnLayer):
         "max_iter": 1000,
     }
 
-    List of properties (in addition to learning_neurons.LearnLayer properties):
+    List of attributes (in addition learning_neurons.LearnLayer attributes):
         • self.trainable_biases
 
-    List of methods (in addition to learning_neurons.LearnLayer methods):
+    List of methods (in addition learning_neurons.LearnLayer methods):
         • self.init_model()
         • self.check_Xs_y()
         • self.get_Xs_y()
@@ -340,7 +340,7 @@ class RegressionLayer(learning_neurons.LearnLayer):
             elif self.last_fit_step == self.num_steps_total:
                 raise ValueError("Layer has not been updated since last fit step.")
 
-            kwargs["t_start"] = self.history["t"][self.last_fit_step - 1]
+            kwargs["t_start"] = t = self.get_t_history()[self.last_fit_step - 1]
             fit_str = " (fitted)"
 
         sub_ax = super().plot_histogram(autosave=False, **kwargs)
@@ -371,10 +371,11 @@ class TorchLayer(learning_neurons.LearnLayer):
         "use_targets": False,
     }
 
-    List of properties (in addition to learning_neurons.LearnLayer properties):
+    List of attributes (in addition learning_neurons.LearnLayer attributes):
         • self.layer
 
-    List of methods (in addition to learning_neurons.LearnLayer methods):
+    List of methods (in addition learning_neurons.LearnLayer methods):
+        • self.add_fixed_params()
         • self.update_weights()
         • self.add_input()
         • self.plot_loss()
@@ -590,7 +591,7 @@ class TorchLayer(learning_neurons.LearnLayer):
             elif self.train_steps[-1] == self.num_steps_total:
                 raise ValueError("Layer has not been updated since last training step.")
 
-            kwargs["t_start"] = self.history["t"][self.train_steps[-1]]
+            kwargs["t_start"] = t = self.get_t_history()[self.train_steps[-1]]
             train_str = " (trained)"
 
         sub_ax = super().plot_histogram(autosave=False, **kwargs)
