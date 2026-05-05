@@ -1303,8 +1303,10 @@ class TwoCompLayer(object):
         vmax: float | None = None,
         mark_runs: bool = False,
         plot_colorbars: bool = True,
+        cmap: str = "inferno",
         cbar_aspect: int = 12,
         cbar_label: str = "Firing rate",
+        cbar_label_position: str = "left",
         autosave: bool | None = None,
     ) -> np.ndarray[Sequence[plt.Axes], np.dtype[np.object_]]:
         """
@@ -1335,8 +1337,11 @@ class TwoCompLayer(object):
         - mark_runs (bool, optional): Whether to mark the runs on the plot.
             Default is False.
         - plot_colorbars (bool, optional): Whether to plot colorbars. Default is True.
+        - cmap (str, optional): Colormap to use for the firing rates. Default is "inferno".
         - cbar_aspect (int, optional): Aspect ratio of the colorbars. Default is 12.
         - cbar_label (str, optional): Label for the colorbars. Default is "Firing rate".
+        - cbar_label_position (str, optional): Position of the colorbar label
+            ("left" or "right"). Default is "left".
         - autosave (bool, optional): Whether to autosave the figure. If None, the
             global autosave setting for ratinabox is used. Default is None.
 
@@ -1383,8 +1388,10 @@ class TwoCompLayer(object):
                 vmax=vmax,
                 mark_runs=mark_runs,
                 plot_colorbars=plot_colorbars,
+                cmap=cmap,
                 cbar_aspect=cbar_aspect,
                 cbar_label=cbar_label,
+                cbar_label_position=cbar_label_position,
                 autosave=False,
             )
             if adjust_range:

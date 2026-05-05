@@ -2721,7 +2721,7 @@ def get_fig_dict():
                 "fct": plot_openfield_corridor,
                 "plot_type": "last_PF",
                 "PF_type": "weights",
-                "fig_side": 2.7,
+                "fig_side": 2.6,
             },
             "C": {"fct": plot_openfield_corridors, "plot_type": "timelines"},
             "D": {"fct": plot_openfield_corridors, "plot_type": "PFs"},

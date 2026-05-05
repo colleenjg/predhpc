@@ -505,7 +505,7 @@ def plot_linear_track_weights(
     sub_ax.set_yticks(list())
     sub_ax.set_xlabel("")
     sub_ax.set_ylabel("")
-    sub_ax.set_title(f"Weights{target_Pyr_idx_str}", y=1.04)
+    sub_ax.set_title(f"Input weights{target_Pyr_idx_str}", y=1.04)
     plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.2)
 
     return sub_ax
@@ -903,7 +903,7 @@ def plot_openfield_weights(
     sub_ax.set_ylabel("")
 
     if len(target_Pyr_idx_str) > 0:
-        sub_ax.set_title(f"Weights{target_Pyr_idx_str}", y=1.02)
+        sub_ax.set_title(f"Input weights{target_Pyr_idx_str}", y=1.02)
 
     return sub_ax
 

@@ -26,6 +26,7 @@ LW = 1.6
 
 BTSP_S = 35  # size of BTSP markers
 
+NEURAL_ACTIVITY_CMAP = "inferno"
 TRAJECTORY_CMAP = "crest"
 
 
@@ -693,7 +694,7 @@ def plot_single_neuron_rate_timeseries(
     return sub_ax
 
 
-def plot_linear_track_environment(Env):
+def plot_linear_track_environment(Env, plot_agent=True):
     """
     plot_linear_track_environment(Env)
 
@@ -701,20 +702,43 @@ def plot_linear_track_environment(Env):
 
     Args:
     - Env (Environment): Environment object to plot.
+    - plot_agent (bool, optional): Whether to plot the agent. If True, the agent is
+        plotted halfway to the landmark object. Default is True.
 
     Returns:
     - sub_ax (plt.Axes): The subplot with the plotted environment.
     """
 
-    _, sub_ax = plt.subplots(figsize=(6.2, 1.0))
+    _, sub_ax = plt.subplots(figsize=(6.2, 1))
     Env.plot_environment(sub_ax=sub_ax, minimalist=True, base_s=50, base_lw=LW)
+
+    ncol = 3
+    if plot_agent:
+        agent_kwargs = plot_util.get_plot_marker_kwargs("agent", base_s=50)
+        agent_kwargs["color"] = "k"
+        sub_ax.scatter(
+            Env.env_object / 2,
+            0,
+            zorder=10,
+            alpha=0.6,
+            label="agent",
+            **agent_kwargs,
+        )
+        ncol += 1
+
+    sub_ax.legend(ncol=ncol, frameon=False, loc="lower center")
+
     sub_ax.spines["bottom"].set_linewidth(2.5)
     leg = sub_ax.get_legend()
     for text in leg.get_texts():
         text_str = text.get_text()
-        add_str = "object" if text_str == "landmark" else "position"
-        text.set_text(f"{text_str} {add_str}")
-        text.set_fontsize(12)
+        add_str = ""
+        if text_str == "landmark":
+            add_str = " object"
+        elif text_str != "agent":
+            add_str = " position"
+        text.set_text(f"{text_str}{add_str}")
+        text.set_fontsize(10)
 
     return sub_ax
 
@@ -755,8 +779,15 @@ def plot_BTSP_kernel(Pyrs, xlims=None):
 
     xticks = np.arange(xlims[0], xlims[1] + 2, 2)
     plot_util.set_alternating_ticks(sub_ax, xticks, round_dec=0)
-    plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.15, prop_high=0.9)
     sub_ax.set_xlabel("Time relative to BTSP event (s)")
+
+    sub_ax.spines[["left"]].set_visible(True)
+    sub_ax.set_ylabel("Kernel strength (a. u.)")
+    plot_util.pad_axis(sub_ax, axis="y", pad_prop=0.15, prop_high=0.9)
+    ymin, ymax = sub_ax.get_ylim()
+    yticks = np.arange(np.floor(ymin) * 2, np.ceil(ymax) * 2 + 1) / 4
+    yticks = [y for y in yticks if y >= ymin and y <= ymax]
+    plot_util.set_alternating_ticks(sub_ax, yticks, round_dec=1, axis="y")
 
     return sub_ax
 
@@ -900,7 +931,7 @@ def plot_BTSP_responses(Pyrs, sub_ax=None, **kwargs):
 
 
 def plot_BTSP_counts_vs_target_visits(
-    Pyrs, t_start=0, hline=None, xmin=None, plot_regression=False, height=1.8
+    Pyrs, t_start=0, hline=None, xmin=None, plot_regression=False, height=2.2
 ):
     """
     plot_BTSP_counts_vs_target_visits(Pyrs)
@@ -915,7 +946,7 @@ def plot_BTSP_counts_vs_target_visits(
     - xmin (float, optional): Minimum x-value for the plot. Default is None.
     - plot_regression (bool, optional): Whether to plot a regression line.
         Default is False.
-    - height (float, optional): Height of the figure. Default is 1.8.
+    - height (float, optional): Height of the figure. Default is 2.2.
 
     Returns:
     - sub_ax (plt.Axes): Subplot with the plotted BTSP counts versus target visits.
@@ -1201,11 +1232,13 @@ def plot_linear_track_binned_rates(learner, num_bins=120):
         "num_bins": num_bins,
         "vmin": 0,
         "vmax": 10,
-        "cbar_aspect": 10,
         "plot_occ": False,
         "mark_runs": True,
         "shared_range": True,
+        "cmap": NEURAL_ACTIVITY_CMAP,
+        "cbar_aspect": 10,
         "cbar_label": "Neural activity",
+        "cbar_label_position": "right",
     }
 
     learner.Pyrs.plot_binned_rates(axes=ax1D.reshape(-1, 1), **kwargs)
@@ -1616,7 +1649,8 @@ def plot_PF_cmap(
     """
     plot_PF_cmap(PF_cmap_data)
 
-    Plots a 2D place field weight map, with each row representing a place field.
+    Plots a 2D place field weight map, with each row representing a different 1D
+    place field.
 
     Args:
     - PF_cmap_data (2D np.ndarray): Place fields to plot (number of place fields
@@ -1664,7 +1698,7 @@ def plot_PF_cmap(
         PF_cmap_data[::-1],
         interpolation="none",
         aspect="auto",
-        cmap="viridis",
+        cmap=NEURAL_ACTIVITY_CMAP,
         extent=[*extent_x, *extent_y],
         vmin=0,
         vmax=vmax,
@@ -2324,6 +2358,42 @@ def plot_linear_track_hyperparameter_comparison(data_df, mark=None):
     return axes
 
 
+def adjust_cax_ticks(cax, num_ticks=2, side="right"):
+    """
+    adjust_cax_ticks(cax)
+
+    """
+
+    if side == "right":
+        axis = "y"
+    elif side == "bottom":
+        axis = "x"
+    else:
+        raise ValueError("side must be 'right' or 'bottom'.")
+
+    if axis == "x":
+        vmin, vmax = cax.get_xlim()
+    else:
+        vmin, vmax = cax.get_ylim()
+
+    v_ticks = [np.around(vmin, 2), np.around(vmax, 2)]
+    if num_ticks > 2:
+        v_ticks = np.linspace(v_ticks[0], v_ticks[1], num_ticks)
+    if all([tick == int(tick) for tick in v_ticks]):
+        tick_labels = [f"{int(tick)}" for tick in v_ticks]
+    elif np.diff(v_ticks).min() < 0.1:
+        tick_labels = [f"{tick:.2f}" for tick in v_ticks]
+    else:
+        tick_labels = [f"{tick:.1f}" for tick in v_ticks]
+
+    if axis == "x":
+        cax.set_xticks(v_ticks)
+        cax.set_xticklabels(tick_labels)
+    else:
+        cax.set_yticks(v_ticks)
+        cax.set_yticklabels(tick_labels)
+
+
 def plot_openfield_components(Pyrs, titles=False, traj_idx=7, PC_to_plot=206):
     """
     plot_openfield_components(Pyrs)
@@ -2407,15 +2477,16 @@ def plot_openfield_components(Pyrs, titles=False, traj_idx=7, PC_to_plot=206):
 
     vmin, vmax = plot_util.match_clims([Obj_sub_ax, PC_sub_ax])
 
-    cbar_axis = axes.ravel()[-1]
-    plot_util.add_colorbars(
-        cbar_axis,
-        cbar_axis.get_images()[-1],
+    axis_with_cbar = axes.ravel()[-1]
+    cbar = plot_util.add_colorbars(
+        axis_with_cbar,
+        axis_with_cbar.get_images()[-1],
         vmin=vmin,
         vmax=vmax,
-        label="Neural activity",
         outline=True,
-    )
+    )[0]
+    adjust_cax_ticks(cbar.ax, num_ticks=3, side="right")
+    cbar.set_label("Neural activity", labelpad=0)
 
     for sub_ax in axes.ravel()[:-1]:
         plot_util.add_dummy_colorbar_axis(sub_ax)
@@ -2564,7 +2635,8 @@ def plot_last_openfield_PF(
     if plot_colorbar:
         cax = fig.axes[-1]
         clabel = get_PF_label(PF_type, title=False)
-        cax.set_ylabel(clabel)
+        cax.set_ylabel(clabel, labelpad=0)
+        adjust_cax_ticks(cax, num_ticks=3, side="right")
 
     return sub_ax
 
@@ -2582,6 +2654,7 @@ def plot_openfield_corridor_PFs(
     lw=LW,
     alpha=1.0,
     cbar_side="right",
+    cbar_num_ticks=6,
     no_teleport=True,
     axes=None,
     **kwargs,
@@ -2607,6 +2680,7 @@ def plot_openfield_corridor_PFs(
     - lw (float, optional): Line width. Default is LW.
     - alpha (float, optional): Transparency level. Default is 1.0.
     - cbar_side (str, optional): Side on which to plot the colorbar. Default is "right".
+    - cbar_num_ticks (int, optional): Number of ticks on the colorbar. Default is 5.
     - no_teleport (bool, optional): Whether to skip plotting teleportation ports in the
         plot. Default is True.
     - axes (np.ndarray of plt.Axes, optional): Array of subplots to plot on. If None,
@@ -2618,7 +2692,7 @@ def plot_openfield_corridor_PFs(
     - **kwargs: Additional keyword arguments passed to plot_fcts.plot_2D_PFs().
 
     Returns:
-    - sub_ax (plt.Axes): The subplot with the plotted PFs.
+    - axes (np.ndarray of plt.Axes): Array of subplots with the plotted PFs.
     """
 
     num_PFs = len(PFs)
@@ -2648,21 +2722,23 @@ def plot_openfield_corridor_PFs(
         caxes = axes[:, -1]
 
     else:
-        axes = np.asarray(axes)
-        if axes.size < num_PFs:
+        axes_arr = np.asarray(axes)
+        if axes_arr.size < num_PFs:
             raise ValueError(
-                f"Provided array of {axes.size} subplots, but {num_PFs} PFs."
+                f"Provided array of {axes_arr.size} subplots, but {num_PFs} PFs."
             )
-        elif axes.size == num_PFs:
-            PF_axes = axes.ravel()
-            caxes = plot_util.add_colorbar_axes(axes, end_only=True, size="5%")
-        elif axes.reshape(1, -1)[:, :-1].size <= num_PFs:
-            PF_axes = axes.reshape(1, -1)[:, :-1].ravel()[:num_PFs]
-            caxes = axes.reshape(1, -1)[:, -1:]
+        elif axes_arr.size == num_PFs:
+            PF_axes = axes_arr.ravel()
+            caxes = plot_util.add_colorbar_axes(
+                axes_arr, end_only=True, size="5%", side=cbar_side
+            )
+        elif axes_arr.reshape(1, -1)[:, :-1].size <= num_PFs:
+            PF_axes = axes_arr.reshape(1, -1)[:, :-1].ravel()[:num_PFs]
+            caxes = axes_arr.reshape(1, -1)[:, -1:]
         else:
             raise NotImplementedError(
                 "Unclear how to include colorbar subplots given array of subplots with "
-                f"shape {axes.shape} and {num_PFs} PFs to plot."
+                f"shape {axes_arr.shape} and {num_PFs} PFs to plot."
             )
 
     cmap = "inferno"
@@ -2703,8 +2779,6 @@ def plot_openfield_corridor_PFs(
             ax=use_PF_axes[i],
             marker="s",
             plot_colorbar=False,
-            cbar_side=cbar_side,
-            cbar_outline=True,
             **kwargs,
         )
 
@@ -2727,10 +2801,14 @@ def plot_openfield_corridor_PFs(
     for i, cax in enumerate(caxes):
         norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
         im = mpl_cm.ScalarMappable(norm=norm, cmap=cmap)
-        plt.colorbar(im, cax=cax)
+        plt.colorbar(im, cax=cax, location=cbar_side)
+        adjust_cax_ticks(cax, num_ticks=cbar_num_ticks, side=cbar_side)
         if i == len(caxes) - 1:
             clabel = get_PF_label(PF_type, title=False)
-            cax.set_ylabel(clabel)
+            if cbar_side == "right":
+                cax.set_ylabel(clabel)
+            else:
+                cax.set_xlabel(clabel)
 
     return axes
 
@@ -3051,15 +3129,17 @@ def add_trajectory_colorbar(
     cbar = plot_util.add_colorbars(
         [sub_ax],
         im,
-        vmin=0,
-        vmax=1,
+        vmin=vmin,
+        vmax=vmax,
         label=label,
         end_only=True,
         outline=True,
         labelpad=labelpad,
         **kwargs,
     )[-1]
-    ticks = np.linspace(vmin, vmax, num_ticks)
+    tick_low = int(np.ceil(vmin))
+    tick_high = int(np.floor(vmax))
+    ticks = np.linspace(tick_low, tick_high, num_ticks)
     cbar.set_ticks(ticks)
 
     return cbar
@@ -3152,7 +3232,9 @@ def plot_openfield_teleportation_summary(
         axes=PF_axes,
         no_teleport=False,
         obj_base_s=8,
+        cbar_num_ticks=3,
     )
+    adjust_cax_ticks(PF_axes[-1], num_ticks=3)
 
     for i in range(num_teleportations):
         if i >= num_cols:
@@ -3193,7 +3275,7 @@ def plot_openfield_teleportation_summary(
         )
 
     add_trajectory_colorbar(
-        axes[1, num_cols - 1], vmin=0, vmax=num_sec * 2, label="Rel. time (s)"
+        axes[1, num_cols - 1], vmin=0, vmax=num_sec * 2, label="Time (s)"
     )
 
     # third row: BTSP trajectories
@@ -3323,6 +3405,7 @@ def plot_openfield_overlayed_last_PFs(learner, PF_type="history", sub_ax=None):
         axes=[sub_ax],
         plot_objects=False,
         cbar_side="bottom",
+        cbar_num_ticks=3,
     )
     sub_ax.set_title("")
 
@@ -3344,8 +3427,8 @@ def plot_openfield_multitarget_summary(learner, PF_type="history", after_remap=F
     - ax1D (np.ndarray of plt.Axes): Array of subplots with the plotted summary.
     """
 
-    # gridspec_kw = {"width_ratios": [1.0, 1.0, 1.0]}
-    _, ax1D = plt.subplots(1, 3, figsize=(5, 2.3))  # , gridspec_kw=gridspec_kw)
+    gridspec_kw = {"width_ratios": [1.0, 1.0, 1.0]}
+    _, ax1D = plt.subplots(1, 3, figsize=(5.3, 2.4), gridspec_kw=gridspec_kw)
 
     if after_remap:
         step = get_learner_remap_step(learner, idx=0, num_total=1)
@@ -3353,11 +3436,11 @@ def plot_openfield_multitarget_summary(learner, PF_type="history", after_remap=F
         step = learner.agent_start_step
     t_start = step * learner.Agent.dt
 
-    t_end = t_start + 120
+    duration = 120
     learner.Agent.plot_trajectories(
         ax=ax1D[0],
         t_start=t_start,
-        t_end=t_start + 120,
+        t_end=t_start + duration,
         framerate=1 / learner.Agent.dt,
         alpha=0.4,
         s_2D=3,
@@ -3368,7 +3451,7 @@ def plot_openfield_multitarget_summary(learner, PF_type="history", after_remap=F
         plot_traj_ends=True,
         no_legend=True,
     )
-    add_trajectory_colorbar(ax1D[0], vmin=t_start, vmax=t_end, side="bottom")
+    add_trajectory_colorbar(ax1D[0], vmin=0, vmax=duration, side="bottom")
 
     env_kwargs = {"plot_objects": False, "no_legend": True, "base_s": 8}
     learner.Pyrs.ProximalCompartment.plot_BTSP_locations(
@@ -3524,7 +3607,8 @@ def plot_openfield_remapping_pre_post_weights(learner):
             PF_type="weights",
             PFs=PF_weights_overlayed,
             PF_centers=PF_centers,
-            round_dec=2,
+            vmin=0,
+            round_dec=1,
             wall_lw=2,
             obj_base_s=8,
             plot_BTSP_events=False,
@@ -3539,8 +3623,10 @@ def plot_openfield_remapping_pre_post_weights(learner):
         )
 
     cax = fig.axes[-1]
+
+    adjust_cax_ticks(cax, num_ticks=3, side="bottom")
     clabel = get_PF_label("weights", title=False)
-    cax.set_label(clabel)
+    cax.set_xlabel(clabel, labelpad=0)
 
     return ax1D
 

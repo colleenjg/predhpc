@@ -1925,8 +1925,10 @@ def plot_binned_rates(
     vmax=None,
     mark_runs=False,
     plot_colorbars=True,
+    cmap="inferno",
     cbar_aspect=12,
     cbar_label="Firing rate",
+    cbar_label_position="left",
 ):
     """
     plot_binned_rates(binned_rate_means)
@@ -1943,8 +1945,11 @@ def plot_binned_rates(
     - vmax (float, optional): Maximum value. Default is None.
     - mark_runs (bool, optional): Whether to mark runs in the plot. Default is False.
     - plot_colorbars (bool, optional): Whether to plot colorbars. Default is True.
+    - cmap (str, optional): Colormap to use. Default is "inferno".
     - cbar_aspect (int, optional): Aspect ratio of the colorbar. Default is 12.
     - cbar_label (str, optional): Label for the colorbar. Default is "Firing rate".
+    - cbar_label_position (str, optional): Position of the colorbar label ("left",
+        or "right"). Default is "left".
 
     Returns:
     - ax (plt.Axes or np.ndarray): Subplot or array of subplots with the binned firing
@@ -1988,7 +1993,7 @@ def plot_binned_rates(
         im = ax1D[i].imshow(
             binned_rate_means[:, :, i],
             aspect="auto",
-            cmap="viridis",
+            cmap=cmap,
             interpolation="none",
             vmin=vmin,
             vmax=vmax,
@@ -1998,7 +2003,7 @@ def plot_binned_rates(
                 continue
             cbar = plt.colorbar(im, ax=ax1D[i], pad=0.15, aspect=cbar_aspect)
             cbar.set_label(cbar_label)
-            cbar.ax.yaxis.set_label_position("left")
+            cbar.ax.yaxis.set_label_position(cbar_label_position)
 
         ax1D[i].set_title(f"Neuron #{i}")
 
@@ -2008,7 +2013,7 @@ def plot_binned_rates(
         im = ax1D[-1].imshow(
             occupancy,
             aspect="auto",
-            cmap="viridis",
+            cmap=cmap,
             interpolation="none",
             vmin=0,
         )

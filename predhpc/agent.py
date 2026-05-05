@@ -5646,7 +5646,7 @@ class OpenFieldAgent(ResetableAgent):
         self.check_if_teleport_angles_in_range(teleport_vector)
 
         Check whether the agent is within range for the teleportation to activate.
-        Checks whether the agent is heading towards the teleport port, within 45
+        Checks whether the agent is heading towards the teleport port, within 90
         degrees of the teleport vector, based on position or velocity.
 
         Args:

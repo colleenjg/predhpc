@@ -18,7 +18,6 @@ from ratinabox import utils as rutils  # type: ignore[import]
 from predhpc import plot_fcts
 from predhpc.util import signal_util, plot_util, ext_util, gen_util
 
-
 warnings.filterwarnings(
     "ignore",
     category=UserWarning,
@@ -698,8 +697,10 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         vmax: float | None = None,
         mark_runs: bool = False,
         plot_colorbars: bool = True,
+        cmap: str = "inferno",
         cbar_aspect: int = 12,
         cbar_label: str = "Firing rate",
+        cbar_label_position: str = "left",
         autosave: bool | None = None,
     ) -> plt.Axes | np.ndarray:
         """
@@ -731,8 +732,12 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
         - vmax (float, optional): Maximum value for the colormap. Default is None.
         - mark_runs (bool, optional): Whether to mark runs in the plot. Default is False.
         - plot_colorbars (bool, optional): Whether to plot colorbars. Default is True.
+        - cmap (str, optional): Colormap to use for plotting firing rates.
+            Default is "inferno".
         - cbar_aspect (int, optional): Aspect ratio of the colorbar. Default is 12.
         - cbar_label (str, optional): Label for the colorbar. Default is "Firing rate".
+        - cbar_label_position (str, optional): Position of the colorbar label
+            ("left" or "right"). Default is "left".
         - autosave (bool, optional): Whether to autosave the figure. If None, the
             global autosave setting for ratinabox is used. Default is None.
 
@@ -766,8 +771,10 @@ class NeuronsMixin(ext_util.ParamsManagerMixin):
             vmax=vmax,
             mark_runs=mark_runs,
             plot_colorbars=plot_colorbars,
+            cmap=cmap,
             cbar_aspect=cbar_aspect,
             cbar_label=cbar_label,
+            cbar_label_position=cbar_label_position,
         )
 
         for i in chosen_neurons:
