@@ -2,9 +2,9 @@
 
 ## 1. Description
 
-This repository contains code to simulate few-shot learning of predictive features with BTSP in a hippocampal circuit.  
+This repository contains code to simulate few-shot learning of predictive features with dendrites and behavioural timescale synaptic plasticity (BTSP) in a hippocampal circuit. See our preprint on _bioRxiv_. 
 
-Neural activity is simulated in a circuit composed of place cells, object cells, two-compartment pyramidal neurons and inhibitory interneurons while an agent visits target objects in a continuous linear track or open field environment.  
+Neural activity is simulated in a circuit composed of place cells, object cells, two-compartment pyramidal neurons and inhibitory interneurons while an agent visits target landmark objects in a continuous linear track or open field environment.  
 
 ![Schematic of model](https://drive.google.com/uc?export=view&id=1NS5e5PGoWfhhvniYncwuWGv7gvfxmnST)
 
@@ -30,7 +30,7 @@ This code has been tested with `Python 3.11`. For package dependencies, see `req
 
 ## 4. Paper
 
-The code for running the analyses reported in the paper, and for reproducing the figures can be found under `predhpc/paper`.   
+The code for running the analyses reported in the paper, and for reproducing the figures can be found under `predhpc/paper` and `predhpc/paper_plot_fcts`.   
 Paper figures are also reproduced in `predhpc/scripts/paper.ipynb`.
 
 ## 5. Author

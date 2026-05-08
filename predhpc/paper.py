@@ -2766,43 +2766,6 @@ def get_fig_dict():
         "7V": {
             "A": {"fct": animate_openfield_multitarget},
         },
-        8: {
-            "A": {
-                "fct": plot_openfield_multitarget_remapping,
-                "plot_type": "pre_post_weights",
-            },
-            "B-D": {
-                "fct": plot_openfield_multitarget_remapping,
-                "plot_type": "summary",
-            },
-            "E": {
-                "fct": plot_openfield_multitarget_remapping,
-                "plot_type": "PFs",
-                "n": 9,
-            },
-            "F": {
-                "fct": plot_openfield_multitarget_remapping,
-                "plot_type": "counts",
-                "height": 2.3,
-            },
-            "G": {
-                "fct": plot_openfield_multitarget_remapping,
-                "plot_type": "correlations",
-            },
-        },
-        "8S": {
-            "A": {
-                "fct": plot_openfield_multitarget_remapping,
-                "plot_type": "PFs",
-                "n": "all",
-                "width_per": 0.76,
-            },
-            "B": {
-                "fct": plot_openfield_multitarget_remapping,
-                "plot_type": "normalization",
-                "fig_width": 10,
-            },
-        },
     }
 
     return fig_dict
