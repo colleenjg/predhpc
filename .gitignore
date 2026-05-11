@@ -4,6 +4,8 @@
 *.ipynb_checkpoints
 *.svg
 *.gif
+.images/*.txt
+!.images/*.gif
 to_do.md
 data
 !scripts/data

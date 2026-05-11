@@ -4,11 +4,15 @@
 
 This repository contains code to simulate few-shot learning of predictive features with dendrites and behavioural timescale synaptic plasticity (BTSP) in a hippocampal circuit.  
 
-![Schematic of model](https://drive.google.com/uc?export=view&id=1NS5e5PGoWfhhvniYncwuWGv7gvfxmnST)
+<img src=".images/Fig1.jpg" width=850 alt="Schematic of model">
 
 Neural activity is simulated in a circuit composed of place cells, object cells, pyramidal neurons and inhibitory interneurons (A) while an agent visits target landmark objects in a continuous linear track or open field environment (B). Pyramidal neurons are simulated with two nonlinearly connected compartments (proximal and distal) (C). The proximal compartment receives inputs from the place cells. Each distal compartment receives input from a target object cell, and delayed inhibition from its paired proximal compartment. 
 
 Co-activation of both compartments can trigger plateau potentials in the pyramidal neuron. These in turn induce BTSP learning at the place cell inputs, resulting in the emergence and reshaping of place fields (D). After initial learning, if a pyramidal neuron's place field is sufficiently predictive of the target object that activates its distal compartment, it can anticipate and inhibit this activation, preventing future plateau potentials and additional BTSP learning. The dynamics of this circuit thus drive the pyramidal neurons to form self-stabilising place fields that are predictive of the objects or features of an environment. 
+
+<img src=".images/SV1-linear_shift.gif" width=850 alt="GIF of a linear track simulation">
+
+![](https://drive.google.com/uc?export=view&id=15Wk27vPM7VX1oUre5mvjReKx4Z_hxRHV)
 
 The simulations were developed using the [`RatInABox`](https://github.com/RatInABox-Lab/RatInABox) package.
 
