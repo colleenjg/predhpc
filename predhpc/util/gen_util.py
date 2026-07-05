@@ -1,7 +1,7 @@
-from collections import deque
 import copy
 from datetime import datetime
 from fractions import Fraction
+import os
 from pathlib import Path
 import random
 import time
@@ -63,6 +63,40 @@ def attribute_type_checker(var, var_type):
     result = hasattr(var, var_dict[var_type])
 
     return result
+
+
+def get_num_jobs(num_jobs, num_tasks=None):
+    """
+    get_num_jobs(num_jobs)
+
+    Determine the number of jobs to use for parallel processing. Will return at least 1
+    and at most one less than the number of CPUs if it is greater than 1.
+
+    Args:
+    - num_jobs (int): Number of jobs to use. If -1, use all available cores.
+    - num_tasks (int, optional): Number of tasks to process. If provided, num_jobs will
+        be limited to num_tasks.
+
+    Returns:
+    - num_jobs (int): Number of jobs to use.
+    """
+
+    num_CPUs = os.cpu_count()
+    if num_CPUs is None:
+        num_jobs = 1
+    elif num_jobs is None:
+        num_jobs = 1
+    else:
+        if num_jobs == -1:
+            num_jobs = num_CPUs - 1
+        elif num_jobs < 1:
+            raise ValueError("num_jobs must be -1 or a positive integer.")
+        num_jobs = min(num_jobs, num_CPUs - 1)
+        if num_tasks is not None and num_jobs > num_tasks:
+            num_jobs = num_tasks
+        num_jobs = max(1, num_jobs)
+
+    return num_jobs
 
 
 def seed_all(seed=None):

@@ -120,7 +120,12 @@ def set_plot_font(font="Arial", font_dir=None):
         for font_file in font_files:
             fm.fontManager.addfont(font_file)
 
-    plt.rcParams["font.family"] = font
+    if font in {f.name for f in fm.fontManager.ttflist}:
+        plt.rcParams["font.family"] = "Arial"
+    else:
+        with warnings.catch_warnings():
+            warnings.simplefilter("once")
+            warnings.warn(f"Font {font} not found. Using Matplotlib default font.")
 
 
 def get_nrows_ncols(n, num_cols=3):

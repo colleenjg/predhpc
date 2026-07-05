@@ -1,8 +1,10 @@
+ipywidgets
+jupyter
 matplotlib
 numpy
 pandas
-ratinabox
-ray
+ratinabox==1.15.*
+ray[tune]==2.54.*
 scikit-learn
 scipy
 seaborn

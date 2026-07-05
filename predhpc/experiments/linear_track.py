@@ -325,7 +325,7 @@ def run_linear_experiment_grid(
     num_target_reaches_can_stop=None,
     num_steps_can_stop=None,
     direc=None,
-    num_CPUs=4,
+    num_jobs=4,
     num_repeats=4,
     save_name="linear",
     disable_tqdm=True,
@@ -353,7 +353,7 @@ def run_linear_experiment_grid(
         Default is None.
     - direc (str, optional): Directory to save results in. If None, a default
         directory is used (see hyper_util.get_save_directory()). Default is None.
-    - num_CPUs (int, optional): Number of CPUs to run search across. Default is 4.
+    - num_jobs (int, optional): Number of jobs to run search across. Default is 4.
     - num_repeats (int, optional): Number of repeats for each hyperparameter set.
         Default is 4.
     - save_name (str, optional): Name to save the results under. Default is
@@ -399,7 +399,7 @@ def run_linear_experiment_grid(
         search_space,
         direc=direc,
         save_name=save_name,
-        num_CPUs=num_CPUs,
+        num_jobs=num_jobs,
         num_repeats=num_repeats,
         debug=debug,
     )
@@ -454,7 +454,7 @@ def get_args():
     parser.add_argument("--speed_std", default=0, type=float)
     parser.add_argument("--cycle_all", action="store_true")
     parser.add_argument("--direc", type=Path, default=None)
-    parser.add_argument("--num_CPUs", type=int, default=2)
+    parser.add_argument("--num_jobs", type=int, default=2)
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--replotting_path", type=Path, default=None)
 
@@ -496,7 +496,7 @@ def main():
             run_linear_experiment_grid(
                 search_space=search_space,
                 direc=direc,
-                num_CPUs=args.num_CPUs,
+                num_jobs=args.num_jobs,
                 debug=args.debug,
                 plot=False,
                 **kwargs,

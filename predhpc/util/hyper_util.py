@@ -667,7 +667,7 @@ def run_hyperparameter_search(
     search_space,
     direc=None,
     save_name="hyperparameter_search",
-    num_CPUs=4,
+    num_jobs=4,
     num_repeats=4,
     debug=False,
     use_date_time=True,
@@ -686,7 +686,7 @@ def run_hyperparameter_search(
         Default is None.
     - save_name (str, optional): Name of the file in which to save hyperparameter
         search results. Default is "hyperparameter_search".
-    - num_CPUs (int, optional): Number of CPUs to use for the search. Default is 4.
+    - num_jobs (int, optional): Number of jobs to use for the search. Default is 4.
     - num_repeats (int, optional): Number of repeats to use in grid search.
         Default is 4.
     - debug (bool, optional): Whether to log to Ray Tune driver. Default is False.
@@ -715,17 +715,20 @@ def run_hyperparameter_search(
         logging.getLogger("ray.tune.logger.tensorboardx").setLevel(logging_level)
         kwargs["logging_level"] = logging_level
 
-    ray.init(num_cpus=num_CPUs, log_to_driver=debug, ignore_reinit_error=True, **kwargs)
-
     # calculate number of runs (for grid search)
     num_combs = 1
     for hyperparam in search_space.values():
         num_combs *= len(hyperparam["grid_search"])
+    total = num_combs * num_repeats
+
+    num_jobs = gen_util.get_num_jobs(num_jobs, total)
+    ray.init(num_cpus=num_jobs, log_to_driver=debug, ignore_reinit_error=True, **kwargs)
+
     repeat_str = "repeat" if num_repeats == 1 else "repeats"
-    CPU_str = "CPU" if num_CPUs == 1 else "CPUs"
+    CPU_str = "CPU" if num_jobs == 1 else "CPUs"
     print(
         f"\nRunning {num_combs} hyperparameter combinations ({num_repeats} "
-        f"{repeat_str} => {num_repeats * num_combs} total runs) using {num_CPUs} "
+        f"{repeat_str} => {total} total runs) using {num_jobs} "
         f"{CPU_str}.\n"
     )
 
@@ -1188,8 +1191,8 @@ def run_kernel_gridsearch(
         for params in tqdm(param_grid):
             losses.append(single_evaluation_run(params, param_keys, **kwargs))
     else:
-        num_cpus = min(multiprocessing.cpu_count(), len(param_grid))
-        losses = Parallel(n_jobs=num_cpus)(
+        num_jobs = gen_util.get_num_jobs(-1, num_tasks=len(param_grid))
+        losses = Parallel(n_jobs=num_jobs)(
             delayed(single_evaluation_run)(params, param_keys, **kwargs)
             for params in tqdm(param_grid)
         )

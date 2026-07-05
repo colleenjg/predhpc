@@ -714,8 +714,8 @@ class LinearResetEnv(Environment):
             )
 
         if minimalist:
-            edges = [self.start_position, self.reset_position]
-            sub_ax.spines["bottom"].set_bounds(sorted(edges))
+            edges = np.asarray([self.start_position, self.reset_position]).ravel()
+            sub_ax.spines["bottom"].set_bounds(*sorted(list(edges)))
             plot_util.pad_axis(sub_ax, axis="x", pad_prop=0.05)
             sub_ax.set_xticks(list())
             sub_ax.set_xlabel("")

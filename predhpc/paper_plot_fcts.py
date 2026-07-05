@@ -76,7 +76,10 @@ def initialize_paper_parameters(gen_dir=".", notebook=False):
     """
 
     ratinabox.autosave_plots = False
-    ratinabox.figure_directory = str(Path(gen_dir, "results", "paper"))
+    fig_direc = Path(gen_dir, "results", "paper")
+    ratinabox.figure_directory = str(fig_direc)
+    if not fig_direc.exists():
+        fig_direc.mkdir(parents=True, exist_ok=True)
     stylize_plots_for_paper(notebook=notebook)
 
 

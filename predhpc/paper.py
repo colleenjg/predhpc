@@ -858,7 +858,7 @@ def run_linear_track_speeds(
 
     # product of means and seeds
     total = num_repeats * len(speed_means)
-    n_jobs = min(num_jobs, total)
+    num_jobs = gen_util.get_num_jobs(num_jobs, num_tasks=total)
 
     if seed:
         seed = PAPER_SEED if isinstance(seed, bool) else seed
@@ -879,7 +879,7 @@ def run_linear_track_speeds(
     }
 
     if num_jobs > 1:
-        outputs = Parallel(n_jobs=n_jobs)(
+        outputs = Parallel(n_jobs=num_jobs)(
             delayed(run_linear_track_speed)(speed_mean=speed_mean, seed=seed, **kwargs)
             for speed_mean, seed in tqdm(iterations, total=total)
         )
@@ -1157,7 +1157,7 @@ def run_linear_track_shifts(
 
     # product of means and seeds
     total = num_repeats * len(landmark_shifts)
-    n_jobs = min(num_jobs, total)
+    num_jobs = gen_util.get_num_jobs(num_jobs, num_tasks=total)
     iterations = itertools.product(landmark_shifts, range(num_repeats))
 
     kwargs = {
@@ -1175,7 +1175,7 @@ def run_linear_track_shifts(
         raise RuntimeError("Initial run did not produce exactly one BTSP event.")
 
     if num_jobs > 1:
-        outputs = Parallel(n_jobs=n_jobs)(
+        outputs = Parallel(n_jobs=num_jobs)(
             delayed(run_linear_track_shift)(
                 landmark_shift=landmark_shift, i=i, learner=learner, **kwargs
             )
@@ -1482,7 +1482,7 @@ def run_linear_track_hyperparameter_comparison(
             comparison_space,
             direc=get_fig_directory(),
             save_name=data_name,
-            num_CPUs=num_jobs,
+            num_jobs=num_jobs,
             num_repeats=1,
             use_date_time=False,
             plot=False,

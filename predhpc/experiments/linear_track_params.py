@@ -241,7 +241,7 @@ def run_hyperparameter_search(
     complex_track=False,
     object_shifts=0,
     direc=None,
-    num_CPUs=4,
+    num_jobs=4,
     num_repeats=4,
     search_space="full",
     disable_tqdm=True,
@@ -263,7 +263,7 @@ def run_hyperparameter_search(
         the return linear track is run. Default is 0.
     - direc (str, optional): Directory to save results in. If None, a default
         directory is used (see hyper_util.get_save_directory()). Default is None.
-    - num_CPUs (int, optional): Number of CPUs to run search across. Default is 4.
+    - num_jobs (int, optional): Number of jobs to run search across. Default is 4.
     - num_repeats (int, optional): Number of repeats for each hyperparameter set.
         Default is 4.
     - search_space (str, optional): Search space to use. Default is "full".
@@ -316,7 +316,7 @@ def run_hyperparameter_search(
         search_space,
         direc=direc,
         save_name=save_name,
-        num_CPUs=num_CPUs,
+        num_jobs=num_jobs,
         num_repeats=num_repeats,
         debug=debug,
         plot=plot_metrics,
@@ -384,7 +384,7 @@ def get_args():
     parser.add_argument("--complex_track", action="store_true")
     parser.add_argument("--object_shift", type=int, default=0)
     parser.add_argument("--direc", type=Path, default=None)
-    parser.add_argument("--num_CPUs", type=int, default=2)
+    parser.add_argument("--num_jobs", type=int, default=2)
     parser.add_argument("--num_repeats", type=int, default=4)
     parser.add_argument("--hyperparameter_search", action="store_true")
     parser.add_argument("--cycle_all", action="store_true")
@@ -426,7 +426,7 @@ def main():
             if args.hyperparameter_search:
                 run_hyperparameter_search(
                     direc=args.direc,
-                    num_CPUs=args.num_CPUs,
+                    num_jobs=args.num_jobs,
                     num_repeats=args.num_repeats,
                     num_traj_can_stop=args.num_traj_can_stop,
                     debug=args.debug,
