@@ -3222,7 +3222,7 @@ def plot_openfield_teleportation_summary(
     # first row: PFs
     PF_info = metrics.gather_PF_info(learner, position_name="landmark")
     PF_axes = [axes[0, 0]]
-    for i in range(num_cols):
+    for i in range(num_cols - 1):
         if i in BTSP_teleportation_idxs:
             PF_axes.append(axes[0, i + 1])
         elif i + 1 < num_cols:
