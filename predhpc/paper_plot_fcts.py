@@ -64,7 +64,7 @@ def stylize_plots_for_paper(fs=12, lw=1.7, tick_length=6, notebook=False):
     plot_util.set_plot_font()
 
 
-def initialize_paper_parameters(gen_dir=".", notebook=False):
+def initialize_paper_parameters(gen_dir=".", notebook=False, log=False):
     """
     initialize_paper_parameters()
 
@@ -73,10 +73,13 @@ def initialize_paper_parameters(gen_dir=".", notebook=False):
     Args:
     - gen_dir (str): Directory for generated plots. Default is ".".
     - notebook (bool): Whether to stylize for a Jupyter notebook. Default is False.
+    - log (bool): Whether to log where results will be saved. Default is False.
     """
 
     ratinabox.autosave_plots = False
     fig_direc = Path(gen_dir, "results", "paper")
+    if log:
+        print(f"Results will be saved to: {fig_direc}.")
     ratinabox.figure_directory = str(fig_direc)
     if not fig_direc.exists():
         fig_direc.mkdir(parents=True, exist_ok=True)

@@ -1272,6 +1272,7 @@ def animate_linear_track_shift(
     wait_after_trajectory=params_util.WAIT_LINEAR,
     fps=8,
     speed_up=5,
+    seed=True,
     **kwargs,
 ):
     """
@@ -1284,10 +1285,12 @@ def animate_linear_track_shift(
         Default is SHIFT_EXAMPLES[2].
     - speed_std (float): Standard deviation of speed for the experiment.
         Default is params_util.SPEED_STD_LINEAR.
-    - fps (int): Frames per second for the animation. Default is 8.
-    - speed_up (int): Factor by which to speed up the animation. Default is 3.
     - wait_after_trajectory (int): Number of steps to wait after completing a
     trajectory. Default is params_util.WAIT_LINEAR.
+    - fps (int): Frames per second for the animation. Default is 8.
+    - speed_up (int): Factor by which to speed up the animation. Default is 3.
+    - seed (bool or int): Whether to seed the random number generator with the paper
+        seed or seed to use. If False, experiment is not seeded. Default is True.
 
     Keyword args:
     - **kwargs: Additional keyword arguments passed to the animation function.
@@ -1306,6 +1309,7 @@ def animate_linear_track_shift(
         min_traj_after_BTSP=0,
         k=1,
         no_logs=True,
+        seed=seed,
     )
 
     landmark_shift = data_dict["landmark_shift"]
@@ -2095,6 +2099,7 @@ def animate_openfield_teleportation(
     learner=None,
     fps=8,
     speed_up=10,
+    seed=True,
     **kwargs,
 ):
     """
@@ -2107,6 +2112,8 @@ def animate_openfield_teleportation(
         run first. Default is None.
     - fps (int): Frames per second for the animation. Default is 8.
     - speed_up (int): Factor by which to speed up the animation. Default is 10.
+    - seed (bool or int): Whether to seed the random number generator with the paper
+        seed or seed to use. If False, experiment is not seeded. Default is True.
 
     Keyword args:
     - **kwargs: Additional keyword arguments passed to the animation function.
@@ -2118,7 +2125,7 @@ def animate_openfield_teleportation(
 
     if learner is None:
         learner = run_openfield_corridor_teleport(
-            seed=True,
+            seed=seed,
             time_in_min_can_stop=OPENFIELD_TIME_IN_MIN,
             min_num_teleports=4,
             disable_teleportation_between=True,
@@ -2404,6 +2411,7 @@ def animate_openfield_multitarget(
     learner=None,
     fps=8,
     speed_up=[10, 30, 100, 300],
+    seed=True,
     **kwargs,
 ):
     """
@@ -2417,6 +2425,8 @@ def animate_openfield_multitarget(
     - fps (int): Frames per second for the animation. Default is 8.
     - speed_up (int or list): Factor or list of factors by which to speed up the
         animation. Default is [10, 30, 100, 300].
+    - seed (bool or int): Whether to seed the random number generator with the paper
+        seed or seed to use. If False, experiment is not seeded. Default is True.
 
     Keyword args:
     - **kwargs: Additional keyword arguments passed to the animation function.
@@ -2429,6 +2439,7 @@ def animate_openfield_multitarget(
     if learner is None:
         learner = run_openfield_multitarget(
             time_in_min_can_stop=OPENFIELD_TIME_IN_MIN,
+            seed=seed,
         )
 
     addendum = f"{learner.Pyrs.n} target objects"
