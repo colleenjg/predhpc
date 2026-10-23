@@ -1,14 +1,13 @@
 ipywidgets
 jupyter
 matplotlib
-numpy
+numpy==2.3.5
 pandas
-ratinabox==1.15.*
+ratinabox @ git+https://github.com/RatInABox-Lab/RatInABox.git
 ray[tune]==2.54.*
 scikit-learn
 scipy
 seaborn
 tqdm
-
 torch
 torchinfo

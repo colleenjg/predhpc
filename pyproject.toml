@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "predhpc"
+version = "0.0.1"
+description = "A package for investigating how predictive activity emerges in the HPC"
+readme = "README.md"
+authors = [
+    { name = "Colleen J. Gillon", email = "c.gillon@imperial.ac.uk" },
+]
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[tool.setuptools]
+license-files = ["LICENSE"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[project.urls]
+Homepage = "https://github.com/colleenjg/predhpc"
+
+[tool.setuptools.packages.find]
+where = ["."]
